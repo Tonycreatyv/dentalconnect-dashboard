@@ -4,7 +4,7 @@ import { MessageCircle, Calendar, BarChart3, Settings, LogOut, Menu, X, Send, Pl
 export default function App() {
   const [auth, setAuth] = useState(false);
   const [loginMode, setLoginMode] = useState(true);
-  const [sidebar, setSidebar] = useState(true);
+  const [sidebar, setSidebar] = useState(false);
   const [tab, setTab] = useState('lobby');
   const [dashboardTab, setDashboardTab] = useState('overview');
   const [settingsTab, setSettingsTab] = useState('general');
@@ -77,6 +77,10 @@ export default function App() {
     { id: 3, text: 'Pago recibido de Juan Pérez', time: '1h', type: 'info' }
   ];
 
+  const avatarColors = ['from-indigo-500 to-indigo-600', 'from-violet-500 to-violet-600', 'from-pink-500 to-pink-600', 'from-teal-500 to-teal-600', 'from-amber-500 to-amber-600'];
+
+  const getAvatarColor = (id: number) => avatarColors[id % avatarColors.length];
+
   const filteredChats = chats.filter(chat =>
     chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     chat.msg.toLowerCase().includes(searchQuery.toLowerCase())
@@ -114,7 +118,7 @@ export default function App() {
 
   if (!auth) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center p-4" style={{backgroundColor: '#0a0b0d'}}>
         <div className="w-full max-w-md flex flex-col justify-center">
           <div className="text-center mb-6">
             <img
@@ -132,7 +136,7 @@ export default function App() {
                   placeholder="Tu nombre"
                   value={form.name}
                   onChange={(e) => setForm({...form, name: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
                   required
                 />
               </div>
@@ -142,7 +146,7 @@ export default function App() {
                   placeholder="Nombre de la clínica"
                   value={form.clinic}
                   onChange={(e) => setForm({...form, clinic: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
                   required
                 />
               </div>
@@ -152,7 +156,7 @@ export default function App() {
                   placeholder="Teléfono"
                   value={form.phone}
                   onChange={(e) => setForm({...form, phone: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
                   required
                 />
               </div>
@@ -162,7 +166,7 @@ export default function App() {
                   placeholder="Email"
                   value={form.email}
                   onChange={(e) => setForm({...form, email: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
                   required
                 />
               </div>
@@ -172,13 +176,13 @@ export default function App() {
                   placeholder="Contraseña"
                   value={form.pass}
                   onChange={(e) => setForm({...form, pass: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
                   required
                 />
               </div>
               <button
                 type="submit"
-                className="relative w-full bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-cyan-500/30 hover:shadow-2xl hover:shadow-cyan-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
+                className="relative w-full bg-gradient-to-r from-indigo-500 to-teal-500 hover:from-indigo-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
                 <span className="relative">Crear Cuenta</span>
@@ -199,7 +203,7 @@ export default function App() {
                   placeholder="Email"
                   value={form.email}
                   onChange={(e) => setForm({...form, email: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
                   required
                 />
               </div>
@@ -209,13 +213,13 @@ export default function App() {
                   placeholder="Contraseña"
                   value={form.pass}
                   onChange={(e) => setForm({...form, pass: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
                   required
                 />
               </div>
               <button
                 type="submit"
-                className="relative w-full bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-cyan-500/30 hover:shadow-2xl hover:shadow-cyan-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
+                className="relative w-full bg-gradient-to-r from-indigo-500 to-teal-500 hover:from-indigo-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
                 <span className="relative">Iniciar Sesión</span>
@@ -251,12 +255,31 @@ export default function App() {
   ];
 
   return (
-    <div className="flex h-screen bg-black">
-      {!isMobile && (
-        <div className="fixed left-0 top-0 h-screen w-64 bg-slate-900 text-white flex flex-col border-r border-slate-800 shadow-xl z-40">
-        <div className="p-5 border-b border-slate-800">
+    <div className="flex h-screen" style={{backgroundColor: '#0a0b0d'}}>
+      {isMobile && (
+        <div className="fixed top-0 left-0 right-0 h-14 flex items-center justify-between px-4 z-50" style={{backgroundColor: '#13151a', borderBottom: '1px solid #1e293b'}}>
+          <button onClick={() => setSidebar(!sidebar)} className="p-2 hover:bg-[#1c1f26] rounded-lg transition-all duration-200">
+            <Menu size={24} className="text-white" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-teal-500 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-lg">
+              {clinic.name.charAt(0)}
+            </div>
+            <span className="text-white font-semibold text-sm">{clinic.name}</span>
+          </div>
+          <div className="w-10"></div>
+        </div>
+      )}
+
+      {((!isMobile) || (isMobile && sidebar)) && (
+        <>
+          {isMobile && (
+            <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setSidebar(false)}></div>
+          )}
+          <div className={`${isMobile ? 'fixed top-0 left-0 h-screen' : 'fixed left-0 top-0 h-screen'} w-64 text-white flex flex-col shadow-xl z-50`} style={{backgroundColor: '#13151a', borderRight: '1px solid #1e293b'}}>
+        <div className="p-5" style={{borderBottom: '1px solid #1e293b'}}>
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-gradient-to-br from-cyan-500 to-teal-500 rounded-xl flex items-center justify-center font-bold text-white text-base flex-shrink-0 shadow-lg shadow-cyan-500/30">
+            <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-teal-500 rounded-xl flex items-center justify-center font-bold text-white text-base flex-shrink-0 shadow-lg shadow-indigo-500/30">
               {clinic.name.charAt(0)}
             </div>
             <div className="flex-1 min-w-0">
@@ -268,11 +291,11 @@ export default function App() {
 
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
           <button
-            onClick={() => setTab('lobby')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition group ${
+            onClick={() => {setTab('lobby'); if(isMobile) setSidebar(false);}}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 md:px-4 md:py-3 rounded-lg transition group ${
               tab === 'lobby'
-                ? 'text-white border-2 border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.4)]'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800 border-2 border-transparent'
+                ? 'text-white border-2 border-indigo-500/50 bg-indigo-500/10'
+                : 'text-slate-400 hover:text-white border-2 border-transparent transition-all duration-200 hover:bg-[#1c1f26]'
             }`}
           >
             <Home size={19} strokeWidth={2} />
@@ -281,17 +304,17 @@ export default function App() {
           {menuItems.map(item => (
             <button
               key={item.id}
-              onClick={() => setTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition relative group ${
+              onClick={() => {setTab(item.id); if(isMobile) setSidebar(false);}}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 md:px-4 md:py-3 rounded-lg transition relative group ${
                 tab === item.id
-                  ? 'text-white border-2 border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.4)]'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800 border-2 border-transparent'
+                  ? 'text-white border-2 border-indigo-500/50 bg-indigo-500/10'
+                  : 'text-slate-400 hover:text-white border-2 border-transparent transition-all duration-200 hover:bg-[#1c1f26]'
               }`}
             >
               <item.icon size={19} strokeWidth={2} />
               <span className="font-semibold text-sm flex-1 text-left">{item.label}</span>
               {item.badge && (
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-500 text-white shadow-md">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                   {item.badge}
                 </span>
               )}
@@ -299,13 +322,13 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="p-3 border-t border-slate-800 space-y-0.5">
+        <div className="p-3 space-y-0.5" style={{borderTop: '1px solid #1e293b'}}>
           <button
-            onClick={() => setTab('settings')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition ${
+            onClick={() => {setTab('settings'); if(isMobile) setSidebar(false);}}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 md:px-4 md:py-3 rounded-lg transition ${
               tab === 'settings'
-                ? 'text-white border-2 border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.4)]'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800 border-2 border-transparent'
+                ? 'text-white border-2 border-indigo-500/50 bg-indigo-500/10'
+                : 'text-slate-400 hover:text-white border-2 border-transparent transition-all duration-200 hover:bg-[#1c1f26]'
             }`}
           >
             <Settings size={19} strokeWidth={2} />
@@ -317,13 +340,14 @@ export default function App() {
           </button>
         </div>
         </div>
+        </>
       )}
 
-      <div className={`flex-1 flex flex-col ${!isMobile ? 'ml-64' : 'mb-16'}`}>
+      <div className={`flex-1 flex flex-col ${!isMobile ? 'ml-64' : 'pt-14'}`}>
         {tab === 'lobby' && (
           <div className="h-screen flex bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 overflow-hidden relative">
             <div className="absolute inset-0 opacity-30">
-              <div className="absolute top-20 left-20 w-72 h-72 bg-cyan-500/20 rounded-full blur-3xl animate-pulse"></div>
+              <div className="absolute top-20 left-20 w-72 h-72 bg-indigo-500/20 rounded-full blur-3xl animate-pulse"></div>
               <div className="absolute bottom-20 right-20 w-96 h-96 bg-teal-500/20 rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
             </div>
 
@@ -331,7 +355,7 @@ export default function App() {
               <div className="max-w-6xl mx-auto px-4 py-6 md:p-8">
                 <div className="mb-8">
                   <h1 className="text-2xl md:text-4xl font-black text-white mb-2">
-                    Bienvenido, <span className="text-cyan-400">{clinic.name}</span>
+                    Bienvenido, <span className="text-indigo-400">{clinic.name}</span>
                   </h1>
                   <p className="text-slate-400">Aquí está lo que está sucediendo hoy</p>
                 </div>
@@ -340,7 +364,7 @@ export default function App() {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between mb-6">
                       <h2 className="text-2xl font-bold text-white">Actualizaciones</h2>
-                      <div className="bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-full">
+                      <div className="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-xs font-bold px-3 py-1.5 rounded-full">
                         4 nuevas
                       </div>
                     </div>
@@ -352,7 +376,7 @@ export default function App() {
                           text: 'Juan Pérez',
                           desc: 'Consulta general',
                           count: '1',
-                          color: 'cyan',
+                          color: 'indigo',
                           action: 'appointments'
                         },
                         {
@@ -404,11 +428,11 @@ export default function App() {
                             animation: `slideInLeft 0.5s ease-out ${i * 0.1}s both`
                           }}
                         >
-                          <div className="relative bg-white/5 backdrop-blur-2xl rounded-full px-4 py-3 border border-white/10 hover:border-white/20 transition-all duration-300 hover:bg-white/10">
+                          <div className="relative backdrop-blur-2xl rounded-full px-4 py-3 border border-white/10 hover:border-white/20 transition-all duration-300 hover:bg-white/10">
                             <div className="flex items-center gap-3.5">
                               <div className={`
                                 w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0
-                                ${notif.color === 'cyan' ? 'bg-cyan-500/20' : ''}
+                                ${notif.color === 'indigo' ? 'bg-indigo-500/20' : ''}
                                 ${notif.color === 'green' ? 'bg-green-500/20' : ''}
                                 ${notif.color === 'blue' ? 'bg-blue-500/20' : ''}
                                 ${notif.color === 'emerald' ? 'bg-emerald-500/20' : ''}
@@ -417,7 +441,7 @@ export default function App() {
                                 group-hover:scale-110 transition-transform
                               `}>
                                 <notif.icon size={16} className={`
-                                  ${notif.color === 'cyan' ? 'text-cyan-400' : ''}
+                                  ${notif.color === 'indigo' ? 'text-indigo-400' : ''}
                                   ${notif.color === 'green' ? 'text-green-400' : ''}
                                   ${notif.color === 'blue' ? 'text-blue-400' : ''}
                                   ${notif.color === 'emerald' ? 'text-emerald-400' : ''}
@@ -433,7 +457,7 @@ export default function App() {
 
                               <div className={`
                                 min-w-[24px] h-6 rounded-full flex items-center justify-center px-2 flex-shrink-0 text-xs font-bold
-                                ${notif.color === 'cyan' ? 'bg-cyan-500 text-white' : ''}
+                                ${notif.color === 'indigo' ? 'bg-indigo-500 text-white' : ''}
                                 ${notif.color === 'green' ? 'bg-green-500 text-white' : ''}
                                 ${notif.color === 'blue' ? 'bg-blue-500 text-white' : ''}
                                 ${notif.color === 'emerald' ? 'bg-emerald-500 text-white' : ''}
@@ -451,7 +475,7 @@ export default function App() {
                     {isMobile && (
                       <button
                         onClick={() => setShowAllLobbyNotifications(!showAllLobbyNotifications)}
-                        className="w-full py-3 bg-white/5 backdrop-blur-2xl border border-white/10 hover:border-white/20 hover:bg-white/10 text-white font-semibold rounded-full transition-all"
+                        className="w-full py-3 backdrop-blur-2xl border border-white/10 hover:border-white/20 hover:bg-white/10 text-white font-semibold rounded-full transition-all"
                       >
                         {showAllLobbyNotifications ? 'Ver menos' : 'Ver más actualizaciones'}
                       </button>
@@ -483,9 +507,9 @@ export default function App() {
                             animation: `slideInRight 0.5s ease-out ${i * 0.1}s both`
                           }}
                         >
-                          <div className="relative bg-white/5 backdrop-blur-2xl rounded-full px-4 py-3 border border-white/10 hover:border-white/20 transition-all duration-300 hover:bg-white/10">
+                          <div className="relative backdrop-blur-2xl rounded-full px-4 py-3 border border-white/10 hover:border-white/20 transition-all duration-300 hover:bg-white/10">
                             <div className="flex items-center gap-3.5">
-                              <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-teal-500/30 to-cyan-500/30 group-hover:scale-110 transition-transform">
+                              <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-teal-500/30 to-indigo-500/30 group-hover:scale-110 transition-transform">
                                 <span className="text-teal-300 font-bold text-sm">{patient.name.charAt(0)}</span>
                               </div>
 
@@ -522,7 +546,7 @@ export default function App() {
 
                     <button
                       onClick={() => setTab('patients')}
-                      className="w-full py-3.5 bg-white/5 backdrop-blur-2xl border border-white/10 hover:border-white/20 hover:bg-white/10 text-white font-semibold rounded-full transition-all hover:scale-[1.02]"
+                      className="w-full py-3.5 backdrop-blur-2xl border border-white/10 hover:border-white/20 hover:bg-white/10 text-white font-semibold rounded-full transition-all hover:scale-[1.02]"
                     >
                       Ver todos los pacientes
                     </button>
@@ -531,7 +555,7 @@ export default function App() {
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-20 md:mb-0">
                   {[
-                    { icon: Calendar, label: 'Citas hoy', value: '24', color: 'cyan', action: 'appointments' },
+                    { icon: Calendar, label: 'Citas hoy', value: '24', color: 'indigo', action: 'appointments' },
                     { icon: MessageCircle, label: 'Mensajes', value: '6', color: 'purple', action: 'messages' },
                     { icon: Users, label: 'Pacientes', value: '156', color: 'green', action: 'patients' },
                     { icon: DollarSign, label: 'Ingresos', value: '$8.5k', color: 'emerald', action: 'payments' }
@@ -564,14 +588,14 @@ export default function App() {
               <div className="space-y-6">
                 <div className="text-center">
                   <div className="relative inline-block mb-6">
-                    <div className="w-28 h-28 bg-gradient-to-br from-cyan-500 to-teal-500 rounded-2xl flex items-center justify-center shadow-lg mx-auto">
+                    <div className="w-28 h-28 bg-gradient-to-br from-indigo-500 to-teal-500 rounded-2xl flex items-center justify-center shadow-lg mx-auto">
                       <span className="text-4xl font-bold text-white">{clinic.name.charAt(0)}</span>
                     </div>
                   </div>
                   <h2 className="text-2xl font-bold text-white mb-2">{clinic.name}</h2>
                   <p className="text-sm text-slate-400 mb-6">Tu centro de salud</p>
-                  <div className="flex items-center justify-center gap-2 text-cyan-400 mb-8">
-                    <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
+                  <div className="flex items-center justify-center gap-2 text-indigo-400 mb-8">
+                    <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
                     <span className="text-sm font-semibold">En línea</span>
                   </div>
                 </div>
@@ -580,9 +604,9 @@ export default function App() {
                   <h3 className="text-lg font-bold text-white mb-4">Citas de hoy</h3>
                   <div className="space-y-3">
                     {appts.slice(0, 4).map((apt, i) => (
-                      <div key={i} className="p-3 bg-slate-700 rounded-xl border border-slate-600 hover:border-cyan-500 transition-all">
+                      <div key={i} className="p-3 bg-slate-700 rounded-xl border border-slate-600 hover:border-indigo-500 transition-all">
                         <div className="flex items-center gap-3 mb-2">
-                          <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-teal-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">
+                          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-teal-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">
                             {apt.name.charAt(0)}
                           </div>
                           <div className="flex-1 min-w-0">
@@ -593,20 +617,20 @@ export default function App() {
                         <div className="flex items-center gap-2 text-xs text-slate-400">
                           <Clock size={12} />
                           <span>{apt.time}</span>
-                          <span className="ml-auto px-2 py-1 bg-cyan-500/20 text-cyan-400 rounded-md font-semibold">{apt.status}</span>
+                          <span className="ml-auto px-2 py-1 bg-indigo-500/20 text-indigo-400 rounded-md font-semibold">{apt.status}</span>
                         </div>
                       </div>
                     ))}
                   </div>
-                  <button onClick={() => setTab('appointments')} className="w-full mt-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">
+                  <button onClick={() => setTab('appointments')} className="w-full mt-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">
                     Ver todas las citas
                   </button>
                 </div>
 
-                <div className="bg-gradient-to-br from-cyan-500/20 to-teal-500/20 rounded-2xl p-6 border border-cyan-500/30">
+                <div className="bg-gradient-to-br from-indigo-500/20 to-teal-500/20 rounded-2xl p-6 border border-indigo-500/30">
                   <div className="flex items-start gap-3 mb-4">
-                    <div className="w-12 h-12 bg-cyan-500/20 rounded-xl flex items-center justify-center">
-                      <TrendingUp size={24} className="text-cyan-400" />
+                    <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center">
+                      <TrendingUp size={24} className="text-indigo-400" />
                     </div>
                     <div className="flex-1">
                       <h3 className="text-lg font-bold text-white mb-1">Excelente trabajo</h3>
@@ -619,7 +643,7 @@ export default function App() {
                       <span className="text-xl font-bold">+23%</span>
                     </div>
                     <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                      <div className="h-full bg-cyan-400 rounded-full" style={{ width: '73%' }}></div>
+                      <div className="h-full bg-indigo-400 rounded-full" style={{ width: '73%' }}></div>
                     </div>
                   </div>
                 </div>
@@ -809,16 +833,16 @@ export default function App() {
                         ) : (
                           <button onClick={() => setSelected(chat)} className="w-full p-3 text-left relative">
                             <div className="flex items-center gap-3">
-                              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center font-semibold text-white text-sm flex-shrink-0 shadow-md">
+                              <div className={`w-11 h-11 rounded-full bg-gradient-to-br ${getAvatarColor(chat.id)} flex items-center justify-center font-semibold text-white text-sm flex-shrink-0 shadow-md`}>
                                 {chat.name.charAt(0)}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between mb-0.5">
-                                  <p className="font-semibold text-white truncate text-sm">{chat.name}</p>
-                                  <span className="text-xs text-slate-500 ml-2">{chat.time}</span>
+                                  <p className={`font-semibold truncate text-sm ${selected?.id === chat.id ? 'text-slate-900' : 'text-white'}`}>{chat.name}</p>
+                                  <span className={`text-xs ml-2 ${selected?.id === chat.id ? 'text-slate-500' : 'text-slate-400'}`}>{chat.time}</span>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <p className="text-xs text-slate-600 truncate pr-2">{chat.msg}</p>
+                                  <p className={`text-xs truncate pr-2 ${selected?.id === chat.id ? 'text-slate-600' : 'text-slate-400'}`}>{chat.msg}</p>
                                   {chat.unread > 0 && (
                                     <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center flex-shrink-0 shadow-md">
                                       {chat.unread}
@@ -852,7 +876,7 @@ export default function App() {
                           <X size={20} className="text-slate-600" />
                         </button>
                       )}
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center font-semibold text-white text-sm flex-shrink-0 shadow-md">
+                      <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${getAvatarColor(selected.id)} flex items-center justify-center font-semibold text-white text-sm flex-shrink-0 shadow-md`}>
                         {selected.name.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -908,7 +932,7 @@ export default function App() {
               <div className="pb-20 md:pb-6 px-4 md:px-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3">
                   <div>
-                    <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Pacientes</h2>
+                    <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Pacientes</h2>
                     <p className="text-xs md:text-sm text-slate-600">Gestiona tu base de pacientes</p>
                   </div>
                   <button className="bg-slate-900 hover:bg-slate-800 text-white px-4 md:px-6 py-2 md:py-2.5 rounded-lg transition flex items-center gap-2 font-semibold text-sm w-full sm:w-auto justify-center shadow-sm">
@@ -941,7 +965,7 @@ export default function App() {
               <div className="pb-20 md:pb-6 px-4 md:px-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3">
                   <div>
-                    <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Pagos</h2>
+                    <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Pagos</h2>
                     <p className="text-xs md:text-sm text-slate-600">Gestiona ingresos y pagos</p>
                   </div>
                   <button className="bg-slate-900 hover:bg-slate-800 shadow-sm text-white px-4 md:px-6 py-2 md:py-2.5 rounded-lg transition flex items-center gap-2 font-semibold text-sm w-full sm:w-auto justify-center">
@@ -1021,7 +1045,7 @@ export default function App() {
               <div className="pb-20 md:pb-6 px-4 md:px-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3">
                   <div>
-                    <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Calendario de Citas</h2>
+                    <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Calendario de Citas</h2>
                     <p className="text-xs md:text-sm text-slate-600">Gestiona tus citas del mes</p>
                   </div>
                   <button className="bg-slate-900 hover:bg-slate-800 shadow-sm text-white px-4 md:px-6 py-2 md:py-2.5 rounded-lg transition flex items-center gap-2 font-semibold text-sm w-full sm:w-auto justify-center">
@@ -1063,13 +1087,13 @@ export default function App() {
                             aspect-square rounded-xl text-sm font-semibold transition relative
                             ${day < 1 || day > 30 ? 'text-slate-300 cursor-default' : ''}
                             ${isToday ? 'bg-slate-900 text-white shadow-md' : ''}
-                            ${!isToday && hasCita ? 'bg-slate-50 text-slate-900 hover:bg-cyan-100' : ''}
+                            ${!isToday && hasCita ? 'bg-slate-50 text-slate-900 hover:bg-indigo-100' : ''}
                             ${!isToday && !hasCita && day >= 1 && day <= 30 ? 'text-slate-700 hover:bg-slate-50' : ''}
                           `}
                         >
                           {day >= 1 && day <= 30 ? day : ''}
                           {hasCita && (
-                            <span className="absolute bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-cyan-500 rounded-full shadow-[0_0_6px_rgba(6,182,212,0.8)]"></span>
+                            <span className="absolute bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-indigo-500 rounded-full shadow-[0_0_6px_rgba(6,182,212,0.8)]"></span>
                           )}
                         </button>
                       );
@@ -1081,7 +1105,7 @@ export default function App() {
                   <h3 className="text-lg font-bold text-slate-900 mb-4">Próximas citas</h3>
                   <div className="space-y-3">
                     {appts.slice(0, 5).map((a, i) => (
-                      <div key={i} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-cyan-300 transition">
+                      <div key={i} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-indigo-300 transition">
                         <div className="flex items-center gap-3">
                           <div className="w-12 h-12 bg-gradient-to-br from-slate-900 to-slate-800 rounded-full flex items-center justify-center font-semibold text-white text-sm flex-shrink-0 shadow-md">
                             {a.name.charAt(0)}
@@ -1110,7 +1134,7 @@ export default function App() {
                 <div className="mb-8 flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl md:text-4xl font-black text-white mb-1 flex items-center gap-2 md:gap-3">
-                      <BarChart3 size={24} className="text-cyan-400 md:w-8 md:h-8" />
+                      <BarChart3 size={24} className="text-indigo-400 md:w-8 md:h-8" />
                       Analítica en Vivo
                     </h2>
                     <p className="text-slate-400 text-sm flex items-center gap-2">
@@ -1310,7 +1334,7 @@ export default function App() {
             {tab === 'settings' && (
               <div className="pb-20 md:pb-6 px-4 md:px-6">
                 <div className="mb-4 md:mb-6">
-                  <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Configuración</h2>
+                  <h2 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">Configuración</h2>
                   <p className="text-xs md:text-sm text-slate-600">Personaliza tu clínica</p>
                 </div>
 
@@ -1341,15 +1365,15 @@ export default function App() {
                   <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-xl p-4 md:p-6 space-y-4">
                     <div>
                       <label className="block text-sm font-semibold text-slate-300 mb-2">Nombre de la clínica</label>
-                      <input type="text" value={clinic.name} onChange={(e) => setClinic({...clinic, name: e.target.value})} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 text-sm" />
+                      <input type="text" value={clinic.name} onChange={(e) => setClinic({...clinic, name: e.target.value})} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 text-sm" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-300 mb-2">Teléfono</label>
-                      <input type="text" value={clinic.phone} onChange={(e) => setClinic({...clinic, phone: e.target.value})} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 text-sm" />
+                      <input type="text" value={clinic.phone} onChange={(e) => setClinic({...clinic, phone: e.target.value})} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 text-sm" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-300 mb-2">Email</label>
-                      <input type="email" placeholder="clinica@ejemplo.com" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 text-sm" />
+                      <input type="email" placeholder="clinica@ejemplo.com" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 text-sm" />
                     </div>
                     <div className="mt-6">
                       <h3 className="font-semibold text-white text-base mb-4">Integraciones</h3>
@@ -1430,19 +1454,19 @@ export default function App() {
                       <textarea
                         placeholder="Calle, número, colonia, ciudad..."
                         rows={3}
-                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 text-sm resize-none"
+                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 text-sm resize-none"
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-300 mb-2">Código postal</label>
-                      <input type="text" placeholder="11000" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 text-sm" />
+                      <input type="text" placeholder="11000" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 text-sm" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-300 mb-2">Referencias</label>
                       <textarea
                         placeholder="Puntos de referencia para llegar..."
                         rows={2}
-                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none text-white placeholder-slate-500 text-sm resize-none"
+                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 text-sm resize-none"
                       />
                     </div>
                     <button className="w-full bg-slate-900 hover:bg-slate-800 shadow-sm text-white font-semibold py-3 rounded-lg transition text-sm mt-4">
@@ -1528,7 +1552,7 @@ export default function App() {
               <button
                 key={item.id}
                 onClick={() => setTab(item.id)}
-                className={`relative flex flex-col items-center justify-center px-2 py-2.5 rounded-xl transition-all ${tab === item.id ? 'bg-gradient-to-br from-cyan-600 to-teal-600 text-white shadow-lg shadow-cyan-500/30' : 'text-slate-400'}`}
+                className={`relative flex flex-col items-center justify-center px-2 py-2.5 rounded-xl transition-all ${tab === item.id ? 'bg-gradient-to-br from-indigo-600 to-teal-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400'}`}
               >
                 <item.icon size={20} className="mb-0.5" strokeWidth={2.5} fill={tab === item.id ? 'currentColor' : 'none'} />
                 {item.badge && <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 bg-red-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center shadow-md">{item.badge}</span>}
