@@ -416,29 +416,29 @@ function RootApp() {
       {/* TOP BAR MÓVIL - SIMPLE */}
       {isMobile && (
         <div 
-          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3"
+          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-14"
           style={{
-            backgroundColor: '#13151a',
+            backgroundColor: '#0f1117',
             borderBottom: '1px solid #1e293b',
-            paddingTop: 'max(env(safe-area-inset-top), 0.35rem)',
-            paddingBottom: '0.35rem',
-            height: '50px'
+            paddingTop: 'calc(env(safe-area-inset-top) + 4px)',
+            paddingBottom: '4px'
           }}
         >
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-slate-800 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-lg">
+            <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-slate-800 rounded-xl flex items-center justify-center font-bold text-white text-sm shadow-lg">
               {clinic.name.charAt(0)}
             </div>
-            <div className="flex flex-col leading-tight">
-              <span className="text-white text-sm font-semibold">DentalConnect</span>
-              <span className="text-slate-400 text-[11px] truncate max-w-[140px]">{clinic.name}</span>
+            <div className="leading-tight">
+              <span className="block text-white text-sm font-semibold">DentalConnect</span>
+              <span className="block text-slate-400 text-[11px] truncate max-w-[150px]">{clinic.name}</span>
             </div>
           </div>
           <button
             onClick={() => setSidebar(!sidebar)}
-            className="p-2 rounded-lg border border-slate-700 text-white hover:border-slate-500 transition"
+            className="p-2 rounded-lg border border-slate-700 text-white hover:border-slate-500 transition flex-shrink-0"
+            aria-label="Menú"
           >
-            <Menu size={20} />
+            <Menu size={18} />
           </button>
         </div>
       )}
