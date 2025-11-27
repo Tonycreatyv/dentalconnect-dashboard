@@ -1,4 +1,5 @@
 import React, { useState, useEffect, Component, ReactNode } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Calendar, BarChart3, Settings, LogOut, Menu, X, Send, Plus, CreditCard as Edit2, Search, Filter, Bell, User, Clock, TrendingUp, Users, CheckCircle, Home, FileText, DollarSign, AlertCircle, Phone, Upload, MapPin, Info, Check, Zap, Smile } from 'lucide-react';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; msg: string }> {
@@ -44,6 +45,9 @@ function RootApp() {
   const [calendarMode, setCalendarMode] = useState<'dia' | 'semana' | 'mes' | 'año'>('semana');
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [autoMode, setAutoMode] = useState(true);
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://oeeyzqqnxvcpibdwuugu.supabase.co';
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lZXl6cXFueHZjcGliZHd1dWd1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAxODU2OTEsImV4cCI6MjA3NTc2MTY5MX0.bjKLmyZX4eIxKDWIwBxM0Wg6bKZoVeECvA4tzzuh8lk';
+  const supabase = createClient(supabaseUrl, supabaseAnonKey);
   const [selected, setSelected] = useState<{id: number; name: string; msg: string; time: string; unread: number} | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [editingChat, setEditingChat] = useState<number | null>(null);
@@ -100,6 +104,43 @@ function RootApp() {
     }
   }, [tab]);
 
+  useEffect(() => {
+    const loadData = async () => {
+      const { data: appointmentsData } = await supabase
+        .from('appointments')
+        .select('id, service, start_at, status, source_conversation, contacts:contact_id(full_name)')
+        .limit(20);
+      if (appointmentsData) {
+        setSchedule(appointmentsData.map((a, idx) => ({
+          id: idx + 1,
+          name: (a as any).contacts?.full_name || 'Paciente',
+          service: a.service || 'Cita',
+          date: a.start_at ? new Date(a.start_at).toLocaleDateString('es-HN', { day: '2-digit', month: 'short' }) : '',
+          time: a.start_at ? new Date(a.start_at).toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit' }) : '',
+          status: a.status || 'pendiente',
+          channel: 'WhatsApp'
+        })));
+      }
+
+      const { data: contactsData } = await supabase
+        .from('contacts')
+        .select('full_name, created_at')
+        .limit(10);
+      if (contactsData) {
+        setPatients(contactsData.map((c) => ({
+          name: c.full_name || 'Paciente',
+          status: 'activo',
+          phone: '—',
+          lastVisit: c.created_at ? new Date(c.created_at).toLocaleDateString('es-HN') : '—',
+          location: '—',
+          notes: 'Desde Supabase'
+        })));
+      }
+    };
+
+    loadData().catch(() => {});
+  }, []);
+
   const [chats, setChats] = useState([
     { id: 1, name: 'Juan Pérez', msg: 'Quiero agendar cita', time: '5m', unread: 2 },
     { id: 2, name: 'María López', msg: 'Gracias por la info', time: '30m', unread: 0 },
@@ -113,20 +154,13 @@ function RootApp() {
     { id: 3, text: 'Pago recibido de Juan Pérez', time: '1h', type: 'info' }
   ];
 
-  const schedule = [
-    { id: 1, name: 'Juan Pérez', service: 'Limpieza', date: 'Hoy', time: '10:00 AM', status: 'confirmada', channel: 'WhatsApp' },
-    { id: 2, name: 'María López', service: 'Consulta', date: 'Hoy', time: '2:00 PM', status: 'confirmada', channel: 'Web' },
-    { id: 3, name: 'Ana García', service: 'Extracción', date: 'Mañana', time: '9:30 AM', status: 'pendiente', channel: 'Teléfono' },
-    { id: 4, name: 'Luis Gómez', service: 'Revisión', date: 'Mañana', time: '3:00 PM', status: 'pendiente', channel: 'WhatsApp' }
-  ];
+  const [schedule, setSchedule] = useState<{id: number; name: string; service: string; date: string; time: string; status: string; channel: string}[]>([
+    { id: 1, name: 'Juan Pérez', service: 'Limpieza', date: 'Hoy', time: '10:00 AM', status: 'confirmada', channel: 'WhatsApp' }
+  ]);
 
-  const patients = [
-    { name: 'Juan Pérez', status: 'activo', phone: '555-0123', lastVisit: 'Hace 2 días', location: 'Tegucigalpa', notes: 'Interesado en blanqueamiento' },
-    { name: 'María López', status: 'nuevo', phone: '555-0124', lastVisit: 'Hoy', location: 'San Pedro Sula', notes: 'Prefiere mañana' },
-    { name: 'Carlos Rodríguez', status: 'pendiente', phone: '555-0125', lastVisit: 'Hace 1 semana', location: 'Tegucigalpa', notes: 'Falta confirmar pago' },
-    { name: 'Ana García', status: 'activo', phone: '555-0126', lastVisit: 'Hace 3 días', location: 'El Progreso', notes: 'Solicitó radiografía' },
-    { name: 'Roberto Martínez', status: 'inactivo', phone: '555-0127', lastVisit: 'Hace 2 meses', location: 'Tocoa', notes: 'Enviar recordatorio' }
-  ];
+  const [patients, setPatients] = useState<{ name: string; status: string; phone: string; lastVisit: string; location: string; notes: string }[]>([
+    { name: 'Paciente demo', status: 'activo', phone: '—', lastVisit: '—', location: '—', notes: 'Sincroniza con Supabase' }
+  ]);
 
   const paymentHistory = [
     { id: 1, patient: 'Juan Pérez', amount: 150, status: 'pagado', method: 'Tarjeta', date: '15 Dic' },
@@ -316,25 +350,30 @@ function RootApp() {
       {/* TOP BAR MÓVIL - CON SAFE AREA */}
       {isMobile && (
         <div 
-          className="fixed top-0 left-0 right-0 flex items-center justify-between px-4 z-50" 
+          className="fixed top-0 left-0 right-0 flex items-center justify-between px-3 z-50" 
           style={{
             backgroundColor: '#13151a', 
             borderBottom: '1px solid #1e293b',
-            paddingTop: 'max(env(safe-area-inset-top), 0.75rem)',
-            paddingBottom: '0.75rem',
-            height: 'auto'
+            paddingTop: 'max(env(safe-area-inset-top), 0.5rem)',
+            paddingBottom: '0.5rem',
+            height: '58px'
           }}
         >
           <button onClick={() => setSidebar(!sidebar)} className="p-2 hover:bg-[#1c1f26] rounded-lg transition-all duration-200">
-            <Menu size={24} className="text-white" />
+            <Menu size={22} className="text-white" />
           </button>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-teal-500 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-lg">
               {clinic.name.charAt(0)}
             </div>
-            <span className="text-white font-semibold text-sm">{clinic.name}</span>
+            <span className="text-white font-semibold text-sm truncate max-w-[120px]">{clinic.name}</span>
           </div>
-          <div className="w-10"></div>
+          <button
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="p-2 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 transition"
+          >
+            <Bell size={18} className="text-white" />
+          </button>
         </div>
       )}
 
@@ -409,7 +448,7 @@ function RootApp() {
         } : {}}
       >
         <div className="px-3 pt-3 md:px-8 md:pt-4 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 max-w-full">
             {[
               { label: 'Próxima cita', value: '10:00 AM · Hoy', icon: Clock },
               { label: 'Ocupación', value: `${timeSlotsPercent[0]}%`, icon: TrendingUp },
@@ -417,7 +456,7 @@ function RootApp() {
             ].map((item) => (
               <div
                 key={item.label}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm ${
                   isDark
                     ? 'border-slate-800 bg-slate-900/80 text-white'
                     : 'border-slate-200 bg-white text-slate-900 shadow-sm'
@@ -437,7 +476,7 @@ function RootApp() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
                 isDark
                   ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
                   : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
@@ -448,7 +487,7 @@ function RootApp() {
             </button>
             <button
               onClick={() => setAutoMode(!autoMode)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
                 isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'
               }`}
             >
@@ -457,7 +496,7 @@ function RootApp() {
             </button>
             <button
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
                 isDark
                   ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
                   : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
@@ -557,39 +596,6 @@ function RootApp() {
                       </button>
                     )}
                   </div>
-
-                  <div className={`rounded-2xl p-5 border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className={`text-xl font-semibold ${textMain}`}>Pacientes</h2>
-                      <div className={`${textSub} text-xs`}>156 total</div>
-                    </div>
-                    <div className="space-y-2.5">
-                      {[
-                        { name: 'Juan Pérez', info: '555-0123' },
-                        { name: 'María López', info: '555-0124' },
-                        { name: 'Carlos Rodríguez', info: 'carlos@email.com' },
-                        { name: 'Ana García', info: '555-0126' }
-                      ].map((patient, i) => (
-                        <div key={i} onClick={() => setTab('patients')} className={`rounded-xl p-3 border cursor-pointer transition ${isDark ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'}`}>
-                          <div className="flex items-center gap-3">
-                            <div className={`${isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'} w-9 h-9 rounded-lg flex items-center justify-center font-semibold`}>
-                              {patient.name.charAt(0)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className={`${textMain} text-sm font-semibold`}>{patient.name}</p>
-                              <p className={`${textSub} text-xs truncate`}>{patient.info}</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => setTab('patients')}
-                      className={`mt-3 w-full py-3 rounded-xl border text-sm font-semibold ${isDark ? 'border-slate-800 text-white' : 'border-slate-200 text-slate-800'}`}
-                    >
-                      Ver todos los pacientes
-                    </button>
-                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -636,46 +642,44 @@ function RootApp() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className={`text-sm font-semibold ${textMain}`}>
-                            Modo automático (n8n)
+                            Modo automático
                           </p>
                           <p className={`text-xs ${textSub}`}>
-                            Respuestas, recordatorios y confirmaciones vía WhatsApp + n8n.
+                            Respuestas y recordatorios en automático. Cambia a manual cuando quieras.
                           </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-1 rounded-full border ${
-                          theme === 'dark' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        }`}>On</span>
-                        <button
-                          className={`text-xs px-3 py-1.5 rounded-lg border ${
-                            theme === 'dark' ? 'border-slate-700 text-slate-200 bg-slate-800' : 'border-slate-200 text-slate-700 bg-white shadow-sm'
-                          }`}
-                        >
-                          Tomar control manual
-                        </button>
-                      </div>
-                    </div>
-                    <div className="grid sm:grid-cols-3 gap-2 text-xs">
-                      {[
-                        { label: 'Responder leads', status: 'Automático' },
-                        { label: 'Confirmar cita', status: 'Automático' },
-                        { label: 'Recordar pago', status: 'Manual' }
-                      ].map((item) => (
-                        <div
-                          key={item.label}
-                          className={`rounded-xl px-3 py-2 border ${
-                            isDark ? 'border-slate-800 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'
-                          }`}
-                        >
-                          <p className="font-semibold">{item.label}</p>
-                          <p className={`${isDark ? 'text-slate-300' : 'text-slate-600'} font-semibold`}>{item.status}</p>
                         </div>
-                      ))}
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-1 rounded-full border ${
+                            isDark ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}>{autoMode ? 'On' : 'Off'}</span>
+                          <button
+                            className={`text-xs px-3 py-1.5 rounded-lg border ${
+                              isDark ? 'border-slate-700 text-slate-200 bg-slate-800' : 'border-slate-200 text-slate-700 bg-white shadow-sm'
+                            }`}
+                            onClick={() => setAutoMode(!autoMode)}
+                          >
+                            Tomar control manual
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid sm:grid-cols-3 gap-2 text-xs">
+                        {[
+                          { label: 'Responder leads', status: autoMode ? 'Auto' : 'Manual' },
+                          { label: 'Confirmar cita', status: autoMode ? 'Auto' : 'Manual' },
+                          { label: 'Recordar pago', status: autoMode ? 'Auto' : 'Manual' }
+                        ].map((item) => (
+                          <div
+                            key={item.label}
+                            className={`rounded-xl px-3 py-2 border ${
+                              isDark ? 'border-slate-800 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                          >
+                            <p className="font-semibold">{item.label}</p>
+                            <p className={`${isDark ? 'text-slate-300' : 'text-slate-600'} font-semibold`}>{item.status}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className={`rounded-xl p-3 border text-xs ${theme === 'dark' ? 'border-slate-800 bg-slate-800/60 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
-                      Flujo: WhatsApp (QR) ➜ n8n (webhook) ➜ Supabase (paciente + cita) ➜ WhatsApp (confirmación) ➜ Google Calendar. Ajusta pasos desde n8n.
-                    </div>
-                  </div>
 
                   <div className={`rounded-2xl border p-4 space-y-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
                     <div className="flex items-center justify-between">
@@ -1494,9 +1498,18 @@ function RootApp() {
               <button
                 key={item.id}
                 onClick={() => setTab(item.id)}
-                className={`relative flex flex-col items-center justify-center px-2 py-2.5 rounded-xl transition-all ${tab === item.id ? 'bg-gradient-to-br from-indigo-600 to-teal-600 text-white shadow-lg shadow-indigo-500/30' : 'text-slate-400'}`}
+                className={`relative flex flex-col items-center justify-center px-2 py-2.5 rounded-xl transition-all ${
+                  tab === item.id
+                    ? 'text-indigo-500 border border-indigo-500/40 bg-transparent'
+                    : 'text-slate-400 border border-transparent'
+                }`}
               >
-                <item.icon size={20} className="mb-0.5" strokeWidth={2.5} fill={tab === item.id ? 'currentColor' : 'none'} />
+                <item.icon
+                  size={20}
+                  className="mb-0.5"
+                  strokeWidth={2.5}
+                  fill="none"
+                />
                 {item.badge && <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 bg-red-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center shadow-md">{item.badge}</span>}
               </button>
             ))}
