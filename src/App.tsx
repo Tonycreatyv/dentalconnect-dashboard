@@ -274,8 +274,6 @@ function RootApp() {
     chat.msg.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const nowText = new Date().toLocaleString('es-HN', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-
 
   const login = (e: React.FormEvent) => {
     e.preventDefault();
@@ -415,32 +413,32 @@ function RootApp() {
 
   return (
     <div className={`flex h-screen theme-${theme}`} style={{backgroundColor: isDark ? '#0a0b0d' : '#f5f7fb'}}>
-      {/* TOP BAR MÓVIL - CON SAFE AREA */}
+      {/* TOP BAR MÓVIL - SIMPLE */}
       {isMobile && (
         <div 
-          className="fixed top-0 left-0 right-0 flex items-center justify-between px-3 z-50" 
+          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3"
           style={{
-            backgroundColor: '#13151a', 
+            backgroundColor: '#13151a',
             borderBottom: '1px solid #1e293b',
-            paddingTop: 'max(env(safe-area-inset-top), 0.5rem)',
-            paddingBottom: '0.5rem',
-            height: '58px'
+            paddingTop: 'max(env(safe-area-inset-top), 0.35rem)',
+            paddingBottom: '0.35rem',
+            height: '50px'
           }}
         >
-          <button onClick={() => setSidebar(!sidebar)} className="p-2 hover:bg-[#1c1f26] rounded-lg transition-all duration-200">
-            <Menu size={22} className="text-white" />
-          </button>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-teal-500 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-lg">
+            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-slate-800 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-lg">
               {clinic.name.charAt(0)}
             </div>
-            <span className="text-white font-semibold text-sm truncate max-w-[120px]">{clinic.name}</span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-white text-sm font-semibold">DentalConnect</span>
+              <span className="text-slate-400 text-[11px] truncate max-w-[140px]">{clinic.name}</span>
+            </div>
           </div>
           <button
-            onClick={() => setShowNotifications(!showNotifications)}
-            className="p-2 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 transition"
+            onClick={() => setSidebar(!sidebar)}
+            className="p-2 rounded-lg border border-slate-700 text-white hover:border-slate-500 transition"
           >
-            <Bell size={18} className="text-white" />
+            <Menu size={20} />
           </button>
         </div>
       )}
@@ -516,55 +514,28 @@ function RootApp() {
         } : {}}
       >
         <div className="px-3 pt-3 md:px-8 md:pt-4 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-2 max-w-full">
-            {[
-              { label: 'Próxima cita', value: '10:00 AM · Hoy', icon: Clock },
-              { label: 'Ocupación', value: `${timeSlotsPercent[0]}%`, icon: TrendingUp },
-              { label: 'Fecha/Hora', value: nowText, icon: Calendar }
-            ].map((item) => (
-              <div
-                key={item.label}
-                className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border text-xs ${
-                  isDark
-                    ? 'border-slate-800 bg-slate-900/80 text-white'
-                    : 'border-slate-200 bg-white text-slate-900 shadow-sm'
-                }`}
-              >
-                <item.icon size={16} className={isDark ? 'text-slate-200' : 'text-slate-700'} />
-                <div className="leading-tight">
-                  <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {item.label}
-                  </p>
-                  <p className="text-sm font-semibold">{item.value}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
+              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
                 isDark
                   ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
                   : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
               }`}
             >
-              <Bell size={16} />
               Notificaciones
             </button>
             <button
               onClick={() => persistAutoMode(!autoMode)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
+              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
                 isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'
               }`}
             >
-              <Zap size={16} />
               {autoMode ? 'Auto' : 'Manual'}
             </button>
             <button
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
+              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
                 isDark
                   ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
                   : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
