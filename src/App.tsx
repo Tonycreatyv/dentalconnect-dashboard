@@ -432,7 +432,7 @@ function RootApp() {
       {/* TOP BAR MÓVIL - SIMPLE */}
       {isMobile && (
         <div 
-          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-[48px]"
+          className="fixed top-0 left-0 right-0 z-50 flex items-center px-3 h-[44px]"
           style={{
             backgroundColor: '#ffffff',
             borderBottom: '1px solid #e2e8f0',
@@ -440,18 +440,9 @@ function RootApp() {
             paddingBottom: '4px'
           }}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-slate-700 rounded-xl flex items-center justify-center font-bold text-white text-sm shadow-sm flex-shrink-0">
-              {clinic.name.charAt(0)}
-            </div>
-            <div className="leading-tight min-w-0">
-              <span className="block text-slate-900 text-[13px] font-semibold leading-tight truncate max-w-[140px]">DentalConnect</span>
-              <span className="block text-slate-500 text-[11px] truncate max-w-[140px] leading-tight">{clinic.name}</span>
-            </div>
-          </div>
           <button
             onClick={() => setSidebar(!sidebar)}
-            className="p-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 transition flex-shrink-0 bg-white"
+            className="p-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 transition bg-white"
             aria-label="Menú"
           >
             <Menu size={18} />
@@ -525,7 +516,7 @@ function RootApp() {
       <div 
         className={`flex-1 flex flex-col ${!isMobile ? 'ml-64' : ''}`} 
         style={isMobile ? {
-          paddingTop: 'calc(48px + env(safe-area-inset-top) + 6px)',
+          paddingTop: 'calc(44px + env(safe-area-inset-top) + 6px)',
           paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'
         } : { paddingTop: '12px', paddingBottom: '16px' }}
       >
