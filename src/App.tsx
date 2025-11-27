@@ -165,6 +165,8 @@ function RootApp() {
     chat.msg.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const nowText = new Date().toLocaleString('es-HN', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+
   const msgs = selected ? [
     { from: 'user', text: '¿Cuándo puedo agendar?', time: '10:30' },
     { from: 'bot', text: '¡Hola! ¿Qué servicio necesitas?', time: '10:31' },
@@ -202,20 +204,20 @@ function RootApp() {
             <div className="w-56 h-56 mx-auto rounded-[32px] bg-gradient-to-br from-slate-900 to-black flex items-center justify-center shadow-2xl shadow-indigo-500/30 border border-slate-800">
               <img
                 src="/creatyv image.png"
-                alt="CREATYV Logo"
+                alt="DentalConnect"
                 className="w-44 h-44 object-contain drop-shadow-2xl"
               />
             </div>
           </div>
 
             <div className="rounded-2xl bg-slate-900/90 border border-slate-800 shadow-2xl p-5 backdrop-blur">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-white font-semibold text-lg">{loginMode ? 'Iniciar sesión' : 'Crear cuenta'}</p>
-              <button
-                type="button"
-                onClick={() => setLoginMode(!loginMode)}
-                className="text-xs text-sky-300 hover:text-sky-200"
-              >
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-white font-semibold text-lg">DentalConnect</p>
+                <button
+                  type="button"
+                  onClick={() => setLoginMode(!loginMode)}
+                  className="text-xs text-sky-300 hover:text-sky-200"
+                >
                 {loginMode ? 'Crear cuenta' : 'Ya tengo cuenta'}
               </button>
             </div>
@@ -289,6 +291,12 @@ function RootApp() {
                 </button>
               </form>
             )}
+
+            <div className="mt-4 pt-4 border-t border-slate-800">
+              <p className="text-center text-slate-400 text-xs">
+                Powered by <span className="font-semibold text-white">creatyv.io</span>
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -333,7 +341,7 @@ function RootApp() {
       )}
 
       {/* SIDEBAR */}
-      {((!isMobile) || (isMobile && sidebar)) && (
+        {((!isMobile) || (isMobile && sidebar)) && (
         <>
           {isMobile && (
             <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setSidebar(false)}></div>
@@ -413,27 +421,24 @@ function RootApp() {
           paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'
         } : {}}
       >
-        <div className="px-4 pt-4 md:px-8 md:pt-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-3">
+        <div className="px-3 pt-3 md:px-8 md:pt-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
             {[
               { label: 'Próxima cita', value: '10:00 AM · Hoy', icon: Clock },
-              { label: 'Slots ocupados', value: `${timeSlotsPercent[0]}%`, icon: TrendingUp },
-              { label: 'Satisfacción', value: `${satisfactionPercent}%`, icon: CheckCircle }
+              { label: 'Ocupación', value: `${timeSlotsPercent[0]}%`, icon: TrendingUp },
+              { label: 'Fecha/Hora', value: nowText, icon: Calendar }
             ].map((item) => (
               <div
                 key={item.label}
                 className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${
-                  theme === 'dark'
+                  isDark
                     ? 'border-slate-800 bg-slate-900/80 text-white'
                     : 'border-slate-200 bg-white text-slate-900 shadow-sm'
                 }`}
               >
-                <item.icon
-                  size={16}
-                  className={theme === 'dark' ? 'text-sky-300' : 'text-sky-600'}
-                />
-                <div>
-                  <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+                <item.icon size={16} className={isDark ? 'text-slate-200' : 'text-slate-700'} />
+                <div className="leading-tight">
+                  <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     {item.label}
                   </p>
                   <p className="text-sm font-semibold">{item.value}</p>
@@ -444,6 +449,26 @@ function RootApp() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition ${
+                isDark
+                  ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
+              }`}
+            >
+              <Bell size={16} />
+              Notificaciones
+            </button>
+            <button
+              onClick={() => setAutoMode(!autoMode)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition ${
+                isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'
+              }`}
+            >
+              <Zap size={16} />
+              {autoMode ? 'Auto' : 'Manual'}
+            </button>
+            <button
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition ${
                 isDark
@@ -451,29 +476,7 @@ function RootApp() {
                   : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
               }`}
             >
-              {theme === 'dark' ? '🌙 Modo oscuro' : '☀️ Modo claro'}
-            </button>
-            <button
-              onClick={() => setAutoMode(!autoMode)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition ${
-                autoMode
-                  ? isDark ? 'border-slate-600 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'
-                  : isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'
-              }`}
-            >
-              <Zap size={16} />
-              {autoMode ? 'Automático' : 'Manual'}
-            </button>
-            <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition ${
-                theme === 'dark'
-                  ? 'border-indigo-500/40 text-indigo-100 bg-indigo-500/10 hover:bg-indigo-500/20'
-                  : 'border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
-              }`}
-            >
-              <Bell size={16} />
-              <span className="text-sm font-semibold">Centro de notificaciones</span>
+              {theme === 'dark' ? '🌙' : '☀️'}
             </button>
           </div>
         </div>
@@ -519,12 +522,7 @@ function RootApp() {
 
         {tab === 'lobby' && (
           <div className={`h-full flex overflow-hidden relative ${isDark ? 'bg-slate-950' : 'bg-[#f4f5f7]'}`}>
-            <div className="absolute inset-0 pointer-events-none opacity-20" style={{backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(79,70,229,0.08), transparent 35%), radial-gradient(circle at 80% 0%, rgba(99,102,241,0.08), transparent 35%)'}}></div>
-            <div className="absolute inset-0 pointer-events-none opacity-25 blur-3xl" style={{backgroundImage: 'radial-gradient(circle at 60% 30%, rgba(99,102,241,0.18), transparent 40%), radial-gradient(circle at 30% 70%, rgba(15,23,42,0.18), transparent 45%)'}}></div>
-            <div className="absolute right-6 bottom-6 w-64 h-64 pointer-events-none opacity-30">
-              <div className="w-full h-full rounded-[28px] bg-gradient-to-br from-slate-200 via-white to-indigo-100 shadow-2xl shadow-indigo-500/15" style={{transform: 'rotate(-8deg) skew(-4deg)'}}></div>
-              <div className="absolute inset-6 rounded-3xl bg-gradient-to-br from-indigo-500/10 to-transparent border border-white/30 backdrop-blur-sm"></div>
-            </div>
+            <div className="absolute inset-0 pointer-events-none opacity-10" style={{backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(79,70,229,0.08), transparent 35%), radial-gradient(circle at 80% 0%, rgba(99,102,241,0.08), transparent 35%)'}}></div>
             <div className="flex-1 overflow-y-auto relative z-10">
               <div className="max-w-6xl mx-auto px-4 py-6 md:p-8">
                 <div className="mb-8">
@@ -852,7 +850,7 @@ function RootApp() {
                         {selected.name.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className={`text-sm md:text-base font-semibold leading-tight ${isDark ? 'text-white' : ''}`}>{selected.name}</h3>
+                        <h3 className={`text-sm md:text-base font-semibold leading-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{selected.name}</h3>
                         <p className={`text-xs leading-tight ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>en línea</p>
                       </div>
                       <button
