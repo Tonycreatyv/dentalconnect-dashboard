@@ -43,7 +43,7 @@ function RootApp() {
   const [settingsTab, setSettingsTab] = useState('general');
   const [appointmentsView, setAppointmentsView] = useState<'calendar' | 'list'>('calendar');
   const [calendarMode, setCalendarMode] = useState<'dia' | 'semana' | 'mes' | 'año'>('semana');
-  const [theme] = useState<'dark' | 'light'>('light');
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [autoMode, setAutoMode] = useState(true);
   const [clinicId] = useState<string>(import.meta.env.VITE_CLINIC_ID || '8cba38dd-2da4-4388-a931-eaa9550b33bb');
   const [messageDraft, setMessageDraft] = useState('');
@@ -432,12 +432,12 @@ function RootApp() {
       {/* TOP BAR MÓVIL - SIMPLE */}
       {isMobile && (
         <div 
-          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-[52px]"
+          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-[44px]"
           style={{
             backgroundColor: '#ffffff',
             borderBottom: '1px solid #e2e8f0',
-            paddingTop: 'calc(env(safe-area-inset-top) + 4px)',
-            paddingBottom: '6px'
+            paddingTop: 'calc(env(safe-area-inset-top) + 2px)',
+            paddingBottom: '2px'
           }}
         >
           <button
@@ -448,22 +448,22 @@ function RootApp() {
             <Menu size={18} />
           </button>
           <div className="flex items-center gap-2 overflow-hidden">
-            {[
-              { label: 'Próxima', value: '10:00', icon: Clock },
-              { label: 'Ocupación', value: `${timeSlotsPercent[0]}%`, icon: TrendingUp },
-              { label: 'Hoy', value: new Date().toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit' }), icon: Calendar }
-            ].map((chip) => (
-              <div
-                key={chip.label}
-                className="flex items-center gap-1 px-2 py-1 rounded-xl border border-slate-200 bg-white text-[11px] text-slate-700 shadow-sm"
-              >
-                <chip.icon size={14} />
-                <div className="leading-tight">
-                  <p className="text-[10px] text-slate-500">{chip.label}</p>
-                  <p className="font-semibold">{chip.value}</p>
-                </div>
+            <div className="flex items-center gap-1 px-2 py-1 rounded-xl border border-slate-200 bg-white text-[10px] text-slate-700 shadow-sm">
+              <TrendingUp size={12} />
+              <div className="leading-tight">
+                <p className="text-[9px] text-slate-500">Ocupación</p>
+                <p className="font-semibold">{timeSlotsPercent[0]}%</p>
               </div>
-            ))}
+            </div>
+            <div className="flex items-center gap-1 px-2 py-1 rounded-xl border border-slate-200 bg-white text-[10px] text-slate-700 shadow-sm">
+              <span className="text-[9px] text-slate-500">Tema</span>
+              <button
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                className="px-2 py-0.5 rounded-lg border border-slate-200 text-[11px] text-slate-700 bg-white"
+              >
+                {theme === 'dark' ? '🌙' : '☀️'}
+              </button>
+            </div>
           </div>
         </div>
       )}
