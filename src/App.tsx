@@ -43,7 +43,7 @@ function RootApp() {
   const [settingsTab, setSettingsTab] = useState('general');
   const [appointmentsView, setAppointmentsView] = useState<'calendar' | 'list'>('calendar');
   const [calendarMode, setCalendarMode] = useState<'dia' | 'semana' | 'mes' | 'año'>('semana');
-  const [theme, setTheme] = useState<'dark' | 'light'>('light');
+  const [theme] = useState<'dark' | 'light'>('light');
   const [autoMode, setAutoMode] = useState(true);
   const [clinicId] = useState<string>(import.meta.env.VITE_CLINIC_ID || '8cba38dd-2da4-4388-a931-eaa9550b33bb');
   const [messageDraft, setMessageDraft] = useState('');
@@ -56,7 +56,7 @@ function RootApp() {
   const [editingChat, setEditingChat] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showNotifications, setShowNotifications] = useState(false);
+  const [showNotifications] = useState(false);
   const [showAllLobbyNotifications, setShowAllLobbyNotifications] = useState(false);
 
   const [liveStats, setLiveStats] = useState({
@@ -432,21 +432,21 @@ function RootApp() {
       {/* TOP BAR MÓVIL - SIMPLE */}
       {isMobile && (
         <div 
-          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-14"
+          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-[52px]"
           style={{
             backgroundColor: '#0f1117',
             borderBottom: '1px solid #1e293b',
-            paddingTop: 'calc(env(safe-area-inset-top) + 4px)',
+            paddingTop: 'env(safe-area-inset-top)',
             paddingBottom: '4px'
           }}
         >
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-slate-800 rounded-xl flex items-center justify-center font-bold text-white text-sm shadow-lg">
+            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-slate-800 rounded-xl flex items-center justify-center font-bold text-white text-sm shadow-lg">
               {clinic.name.charAt(0)}
             </div>
             <div className="leading-tight">
-              <span className="block text-white text-sm font-semibold">DentalConnect</span>
-              <span className="block text-slate-400 text-[11px] truncate max-w-[150px]">{clinic.name}</span>
+              <span className="block text-white text-sm font-semibold leading-tight">DentalConnect</span>
+              <span className="block text-slate-400 text-[11px] truncate max-w-[140px] leading-tight">{clinic.name}</span>
             </div>
           </div>
           <button
@@ -525,42 +525,10 @@ function RootApp() {
       <div 
         className={`flex-1 flex flex-col ${!isMobile ? 'ml-64' : ''}`} 
         style={isMobile ? {
-          paddingTop: 'calc(56px + env(safe-area-inset-top) + 8px)',
+          paddingTop: 'calc(52px + env(safe-area-inset-top) + 6px)',
           paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'
-        } : { paddingTop: '16px', paddingBottom: '16px' }}
+        } : { paddingTop: '12px', paddingBottom: '16px' }}
       >
-        <div className="px-3 pt-3 md:px-8 md:pt-4 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
-                isDark
-                  ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
-              }`}
-            >
-              Notificaciones
-            </button>
-            <button
-              onClick={() => persistAutoMode(!autoMode)}
-              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
-                isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'
-              }`}
-            >
-              {autoMode ? 'Auto' : 'Manual'}
-            </button>
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold transition ${
-                isDark
-                  ? 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 shadow-sm'
-              }`}
-            >
-              {theme === 'dark' ? '🌙' : '☀️'}
-            </button>
-          </div>
-        </div>
 
         {showNotifications && (
           <div className="px-4 md:px-8 mt-2">
