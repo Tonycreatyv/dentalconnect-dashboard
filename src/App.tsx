@@ -525,9 +525,9 @@ function RootApp() {
       <div 
         className={`flex-1 flex flex-col ${!isMobile ? 'ml-64' : ''}`} 
         style={isMobile ? {
-          paddingTop: 'calc(3.5rem + max(env(safe-area-inset-top), 0.75rem))',
+          paddingTop: 'calc(56px + env(safe-area-inset-top) + 8px)',
           paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'
-        } : {}}
+        } : { paddingTop: '16px', paddingBottom: '16px' }}
       >
         <div className="px-3 pt-3 md:px-8 md:pt-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
@@ -611,6 +611,37 @@ function RootApp() {
                     Bienvenido, <span className={isDark ? 'text-indigo-300' : 'text-slate-700'}>{clinic.name}</span>
                   </h1>
                   <p className={textSub}>Aquí está lo que está sucediendo hoy</p>
+                </div>
+
+                <div className={`rounded-2xl p-4 md:p-5 border mb-6 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className={`${textSub} text-xs`}>Próxima cita</p>
+                      <p className={`${textMain} text-xl font-semibold`}>10:00 AM · Hoy</p>
+                      <p className={`${textSub} text-sm`}>Paciente nuevo · Limpieza</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button className={`px-3 py-2 rounded-xl border text-sm font-semibold transition ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'}`}>
+                        Confirmar
+                      </button>
+                      <button className={`px-3 py-2 rounded-xl border text-sm font-semibold transition ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700 shadow-sm'}`}>
+                        Reprogramar
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    {[
+                      { label: 'Mensajes sin responder', value: '2' },
+                      { label: 'Citas pendientes', value: '3' },
+                      { label: 'Ingresos estimados', value: '$1.2k' },
+                      { label: 'Auto modo', value: autoMode ? 'On' : 'Off' }
+                    ].map((item) => (
+                      <div key={item.label} className={`rounded-lg px-3 py-2 border ${isDark ? 'border-slate-800 bg-slate-900 text-slate-200' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                        <p className="text-[11px]">{item.label}</p>
+                        <p className="text-sm font-semibold">{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="grid lg:grid-cols-3 gap-4 md:gap-6 mb-8">
