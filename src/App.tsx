@@ -432,12 +432,12 @@ function RootApp() {
       {/* TOP BAR MÓVIL - SIMPLE */}
       {isMobile && (
         <div 
-          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-[54px]"
+          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-3 h-[48px]"
           style={{
             backgroundColor: '#ffffff',
             borderBottom: '1px solid #e2e8f0',
             paddingTop: 'env(safe-area-inset-top)',
-            paddingBottom: '6px'
+            paddingBottom: '4px'
           }}
         >
           <div className="flex items-center gap-2 min-w-0">
@@ -445,7 +445,7 @@ function RootApp() {
               {clinic.name.charAt(0)}
             </div>
             <div className="leading-tight min-w-0">
-              <span className="block text-slate-900 text-sm font-semibold leading-tight truncate max-w-[140px]">DentalConnect</span>
+              <span className="block text-slate-900 text-[13px] font-semibold leading-tight truncate max-w-[140px]">DentalConnect</span>
               <span className="block text-slate-500 text-[11px] truncate max-w-[140px] leading-tight">{clinic.name}</span>
             </div>
           </div>
@@ -525,7 +525,7 @@ function RootApp() {
       <div 
         className={`flex-1 flex flex-col ${!isMobile ? 'ml-64' : ''}`} 
         style={isMobile ? {
-          paddingTop: 'calc(54px + env(safe-area-inset-top) + 6px)',
+          paddingTop: 'calc(48px + env(safe-area-inset-top) + 6px)',
           paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'
         } : { paddingTop: '12px', paddingBottom: '16px' }}
       >
