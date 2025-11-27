@@ -194,157 +194,105 @@ function RootApp() {
     }
   };
 
+  const isDark = theme === 'dark';
+  const textMain = isDark ? 'text-white' : 'text-slate-900';
+  const textSub = isDark ? 'text-slate-400' : 'text-slate-600';
+
   if (!auth) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{background: 'radial-gradient(circle at 20% 20%, rgba(99,102,241,0.1), transparent 25%), radial-gradient(circle at 80% 0%, rgba(14,165,233,0.12), transparent 30%), #0a0b0d'}}>
-        <div className="w-full max-w-5xl grid md:grid-cols-2 gap-6 items-center">
-          <div className="hidden md:block space-y-4">
-            <img
-              src="/creatyv image.png"
-              alt="CREATYV Logo"
-              className="w-32 drop-shadow-2xl"
-            />
-            <h1 className="text-3xl font-black text-white leading-tight">
-              Automatiza WhatsApp y agenda sin fricción.
-            </h1>
-            <p className="text-slate-300">
-              Responde leads, confirma citas y envía recordatorios en automático. Toma control manual cuando quieras.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              {['Respuestas en minutos','Recordatorios automáticos','Agenda sincronizada','Links de pago rápidos'].map((item) => (
-                <div key={item} className="flex items-center gap-2 text-slate-200 text-sm">
-                  <CheckCircle size={16} className="text-emerald-300" />
-                  <span>{item}</span>
-                </div>
-              ))}
+      <div className="min-h-screen flex items-center justify-center p-4" style={{backgroundColor: '#0a0b0d'}}>
+        <div className="w-full max-w-md space-y-4">
+          <div className="text-center">
+            <div className="w-24 h-24 mx-auto rounded-3xl bg-black flex items-center justify-center shadow-xl">
+              <img
+                src="/creatyv image.png"
+                alt="CREATYV Logo"
+                className="w-20 h-20 object-contain"
+              />
             </div>
           </div>
 
-          <div className="w-full max-w-md md:ml-auto">
-            <div className="flex justify-between items-center mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold">
-                  C
-                </div>
-                <div>
-                  <p className="text-white font-semibold leading-tight">Creatyv Dental</p>
-                  <p className="text-xs text-slate-400">Dashboard de la clínica</p>
-                </div>
-              </div>
+          <div className="rounded-2xl bg-slate-900/90 border border-slate-800 shadow-2xl p-5 backdrop-blur">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-white font-semibold text-lg">{loginMode ? 'Iniciar sesión' : 'Crear cuenta'}</p>
               <button
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 bg-slate-900 hover:border-sky-400/50 transition"
+                type="button"
+                onClick={() => setLoginMode(!loginMode)}
+                className="text-xs text-sky-300 hover:text-sky-200"
               >
-                {theme === 'dark' ? 'Modo oscuro' : 'Modo claro'}
+                {loginMode ? 'Crear cuenta' : 'Ya tengo cuenta'}
               </button>
             </div>
 
-            <div className="rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl p-5 backdrop-blur">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-white font-semibold text-lg">{loginMode ? 'Iniciar sesión' : 'Crear cuenta'}</p>
+            {!loginMode ? (
+              <form onSubmit={register} className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="Nombre de la clínica"
+                  value={form.clinic}
+                  onChange={(e) => setForm({...form, clinic: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Tu nombre"
+                  value={form.name}
+                  onChange={(e) => setForm({...form, name: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  required
+                />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={form.email}
+                  onChange={(e) => setForm({...form, email: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Contraseña"
+                  value={form.pass}
+                  onChange={(e) => setForm({...form, pass: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  required
+                />
                 <button
-                  type="button"
-                  onClick={() => setLoginMode(!loginMode)}
-                  className="text-xs text-sky-300 hover:text-sky-200"
+                  type="submit"
+                  className="relative w-full bg-gradient-to-r from-indigo-500 to-teal-500 hover:from-indigo-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
                 >
-                  {loginMode ? 'Crear cuenta' : 'Ya tengo cuenta'}
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
+                  <span className="relative">Crear Cuenta</span>
                 </button>
-              </div>
-
-              {!loginMode ? (
-                <form onSubmit={register} className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      placeholder="Tu nombre"
-                      value={form.name}
-                      onChange={(e) => setForm({...form, name: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
-                      required
-                    />
-                    <input
-                      type="text"
-                      placeholder="Nombre de la clínica"
-                      value={form.clinic}
-                      onChange={(e) => setForm({...form, clinic: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
-                      required
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="tel"
-                      placeholder="Teléfono"
-                      value={form.phone}
-                      onChange={(e) => setForm({...form, phone: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
-                      required
-                    />
-                    <input
-                      type="email"
-                      placeholder="Email"
-                      value={form.email}
-                      onChange={(e) => setForm({...form, email: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="password"
-                      placeholder="Contraseña"
-                      value={form.pass}
-                      onChange={(e) => setForm({...form, pass: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
-                      required
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="relative w-full bg-gradient-to-r from-indigo-500 to-teal-500 hover:from-indigo-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
-                    <span className="relative">Crear Cuenta</span>
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={login} className="space-y-3">
-                  <div>
-                    <input
-                      type="email"
-                      placeholder="Email"
-                      value={form.email}
-                      onChange={(e) => setForm({...form, email: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="password"
-                      placeholder="Contraseña"
-                      value={form.pass}
-                      onChange={(e) => setForm({...form, pass: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
-                      required
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="relative w-full bg-gradient-to-r from-indigo-500 to-teal-500 hover:from-indigo-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
-                    <span className="relative">Iniciar Sesión</span>
-                  </button>
-                </form>
-              )}
-
-              <div className="mt-4 pt-4 border-t border-slate-800">
-                <p className="text-center text-slate-400 text-xs">
-                  Conecta tu sesión de WhatsApp por QR, automatiza y toma control manual cuando quieras.
-                </p>
-              </div>
-            </div>
+              </form>
+            ) : (
+              <form onSubmit={login} className="space-y-3">
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={form.email}
+                  onChange={(e) => setForm({...form, email: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Contraseña"
+                  value={form.pass}
+                  onChange={(e) => setForm({...form, pass: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none text-white placeholder-slate-500 transition text-sm"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="relative w-full bg-gradient-to-r from-indigo-500 to-teal-500 hover:from-indigo-400 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/50 hover:scale-[1.02] overflow-hidden group text-sm"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
+                  <span className="relative">Iniciar Sesión</span>
+                </button>
+              </form>
+            )}
           </div>
         </div>
       </div>
@@ -360,8 +308,6 @@ function RootApp() {
     { id: 'analytics', icon: BarChart3, label: 'Analítica' },
     { id: 'settings', icon: Settings, label: 'Configuración' }
   ];
-
-  const isDark = theme === 'dark';
 
   return (
     <div className={`flex h-screen theme-${theme}`} style={{backgroundColor: isDark ? '#0a0b0d' : '#f5f7fb'}}>
@@ -1059,8 +1005,8 @@ function RootApp() {
             <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white">Agenda y calendario</h1>
-                  <p className="text-slate-400 text-sm">Coordina citas, recordatorios y la disponibilidad del equipo</p>
+                  <h1 className={`text-2xl md:text-3xl font-black ${textMain}`}>Agenda y calendario</h1>
+                  <p className={`${textSub} text-sm`}>Coordina citas, recordatorios y la disponibilidad del equipo</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-teal-500 text-white font-semibold shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:scale-[1.02] transition">
@@ -1196,8 +1142,8 @@ function RootApp() {
             <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white">Pacientes</h1>
-                  <p className="text-slate-400 text-sm">Historial, contacto y notas rápidas</p>
+                  <h1 className={`text-2xl md:text-3xl font-black ${textMain}`}>Pacientes</h1>
+                  <p className={`${textSub} text-sm`}>Historial, contacto y notas rápidas</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 flex items-center gap-2">
@@ -1259,8 +1205,8 @@ function RootApp() {
             <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white">Pagos y facturación</h1>
-                  <p className="text-slate-400 text-sm">Recaudación, métodos y estados de cobro</p>
+                  <h1 className={`text-2xl md:text-3xl font-black ${textMain}`}>Pagos y facturación</h1>
+                  <p className={`${textSub} text-sm`}>Recaudación, métodos y estados de cobro</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 flex items-center gap-2">
@@ -1326,8 +1272,8 @@ function RootApp() {
             <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white">Reportes</h1>
-                  <p className="text-slate-400 text-sm">Descarga PDF o comparte con dirección</p>
+                  <h1 className={`text-2xl md:text-3xl font-black ${textMain}`}>Reportes</h1>
+                  <p className={`${textSub} text-sm`}>Descarga PDF o comparte con dirección</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 flex items-center gap-2">
@@ -1381,8 +1327,8 @@ function RootApp() {
             <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white">Analítica</h1>
-                  <p className="text-slate-400 text-sm">Rendimiento en tiempo real</p>
+                  <h1 className={`text-2xl md:text-3xl font-black ${textMain}`}>Analítica</h1>
+                  <p className={`${textSub} text-sm`}>Rendimiento en tiempo real</p>
                 </div>
                 <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1">
                   {['overview', 'conversion'].map((item) => (
@@ -1481,8 +1427,8 @@ function RootApp() {
             <div className="max-w-5xl mx-auto px-4 py-6 md:p-8 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white">Configuración</h1>
-                  <p className="text-slate-400 text-sm">Ajusta tu clínica, notificaciones e integraciones</p>
+                  <h1 className={`text-2xl md:text-3xl font-black ${textMain}`}>Configuración</h1>
+                  <p className={`${textSub} text-sm`}>Ajusta tu clínica, notificaciones e integraciones</p>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-1 flex items-center gap-1">
                   {[
