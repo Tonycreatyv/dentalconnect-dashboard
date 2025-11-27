@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MessageCircle, Calendar, BarChart3, Settings, LogOut, Menu, X, Send, Plus, CreditCard as Edit2, Search, Filter, Bell, User, Clock, TrendingUp, Users, CheckCircle, Home, FileText, DollarSign, AlertCircle, Phone, Upload, MapPin, Info, Check, Zap } from 'lucide-react';
+import { MessageCircle, Calendar, BarChart3, Settings, LogOut, Menu, X, Send, Plus, CreditCard as Edit2, Search, Filter, Bell, User, Clock, TrendingUp, Users, CheckCircle, Home, FileText, DollarSign, AlertCircle, Phone, Upload, MapPin, Info, Check, Zap, Smile } from 'lucide-react';
 
 export default function App() {
   const [auth, setAuth] = useState(false);
@@ -41,7 +41,8 @@ export default function App() {
 
   // SCROLL TO TOP cuando cambia tab
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    // Scroll reset when cambia la sección
+    window.scrollTo({ top: 0, behavior: 'auto' });
   }, [tab]);
 
   useEffect(() => {
@@ -75,6 +76,42 @@ export default function App() {
     { id: 1, text: 'Nueva cita agendada', time: '5m', type: 'success' },
     { id: 2, text: 'Recordatorio: Cita en 30 min', time: '15m', type: 'warning' },
     { id: 3, text: 'Pago recibido de Juan Pérez', time: '1h', type: 'info' }
+  ];
+
+  const schedule = [
+    { id: 1, name: 'Juan Pérez', service: 'Limpieza', date: 'Hoy', time: '10:00 AM', status: 'confirmada', channel: 'WhatsApp' },
+    { id: 2, name: 'María López', service: 'Consulta', date: 'Hoy', time: '2:00 PM', status: 'confirmada', channel: 'Web' },
+    { id: 3, name: 'Ana García', service: 'Extracción', date: 'Mañana', time: '9:30 AM', status: 'pendiente', channel: 'Teléfono' },
+    { id: 4, name: 'Luis Gómez', service: 'Revisión', date: 'Mañana', time: '3:00 PM', status: 'pendiente', channel: 'WhatsApp' }
+  ];
+
+  const patients = [
+    { name: 'Juan Pérez', status: 'activo', phone: '555-0123', lastVisit: 'Hace 2 días', location: 'Tegucigalpa', notes: 'Interesado en blanqueamiento' },
+    { name: 'María López', status: 'nuevo', phone: '555-0124', lastVisit: 'Hoy', location: 'San Pedro Sula', notes: 'Prefiere mañana' },
+    { name: 'Carlos Rodríguez', status: 'pendiente', phone: '555-0125', lastVisit: 'Hace 1 semana', location: 'Tegucigalpa', notes: 'Falta confirmar pago' },
+    { name: 'Ana García', status: 'activo', phone: '555-0126', lastVisit: 'Hace 3 días', location: 'El Progreso', notes: 'Solicitó radiografía' },
+    { name: 'Roberto Martínez', status: 'inactivo', phone: '555-0127', lastVisit: 'Hace 2 meses', location: 'Tocoa', notes: 'Enviar recordatorio' }
+  ];
+
+  const paymentHistory = [
+    { id: 1, patient: 'Juan Pérez', amount: 150, status: 'pagado', method: 'Tarjeta', date: '15 Dic' },
+    { id: 2, patient: 'María López', amount: 80, status: 'pendiente', method: 'Transferencia', date: '15 Dic' },
+    { id: 3, patient: 'Ana García', amount: 220, status: 'pagado', method: 'Efectivo', date: '14 Dic' },
+    { id: 4, patient: 'Carlos Rodríguez', amount: 95, status: 'reembolsado', method: 'Tarjeta', date: '13 Dic' }
+  ];
+
+  const reportCards = [
+    { title: 'Citas completadas', value: '42', change: '+8%', icon: CheckCircle, color: 'emerald' },
+    { title: 'Ingresos', value: '$8.5k', change: '+12%', icon: DollarSign, color: 'indigo' },
+    { title: 'Nuevos pacientes', value: '18', change: '+5%', icon: Users, color: 'blue' },
+    { title: 'Tasa de respuesta', value: '98%', change: '+1%', icon: TrendingUp, color: 'teal' }
+  ];
+
+  const integrations = [
+    { name: 'WhatsApp Business', status: 'activo', detail: 'Responde en menos de 5 minutos', icon: MessageCircle },
+    { name: 'Calendario Google', status: 'sincronizado', detail: 'Actualiza agenda en tiempo real', icon: Calendar },
+    { name: 'Pagos Stripe', status: 'activo', detail: 'Cobros seguros y rápidos', icon: DollarSign },
+    { name: 'Notificaciones push', status: 'beta', detail: 'Alertas en móviles', icon: Bell }
   ];
 
   // COLORES PROFESIONALES (no dulces)
@@ -369,6 +406,74 @@ export default function App() {
           paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'
         } : {}}
       >
+        <div className="px-4 pt-4 md:px-8 md:pt-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-3">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-800 bg-slate-900/80 text-white">
+              <Clock size={16} className="text-indigo-400" />
+              <div>
+                <p className="text-xs text-slate-400">Próxima cita</p>
+                <p className="text-sm font-semibold">10:00 AM · Hoy</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-800 bg-slate-900/80 text-white">
+              <TrendingUp size={16} className="text-emerald-400" />
+              <div>
+                <p className="text-xs text-slate-400">Slots ocupados</p>
+                <p className="text-sm font-semibold">{timeSlotsPercent[0]}%</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-800 bg-slate-900/80 text-white">
+              <CheckCircle size={16} className="text-teal-400" />
+              <div>
+                <p className="text-xs text-slate-400">Satisfacción</p>
+                <p className="text-sm font-semibold">{satisfactionPercent}%</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-100 bg-indigo-500/10 hover:bg-indigo-500/20 transition"
+            >
+              <Bell size={16} />
+              <span className="text-sm font-semibold">Centro de notificaciones</span>
+            </button>
+          </div>
+        </div>
+
+        {showNotifications && (
+          <div className="px-4 md:px-8 mt-2">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 grid md:grid-cols-3 gap-3">
+              {notifications.map((n) => (
+                <div key={n.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/80 border border-slate-700">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    n.type === 'success' ? 'bg-emerald-500/20 text-emerald-300' :
+                    n.type === 'warning' ? 'bg-amber-500/20 text-amber-300' :
+                    'bg-indigo-500/20 text-indigo-300'
+                  }`}>
+                    <Bell size={18} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-semibold text-sm truncate">{n.text}</p>
+                    <p className="text-xs text-slate-400">{n.time}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (n.type === 'success') setTab('appointments');
+                      if (n.type === 'warning') setTab('appointments');
+                      if (n.type === 'info') setTab('payments');
+                    }}
+                    className="text-indigo-300 text-xs font-semibold hover:text-white"
+                  >
+                    Ver
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {tab === 'lobby' && (
           <div className="h-full flex bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 overflow-hidden relative">
             <div className="absolute inset-0 opacity-30">
@@ -766,8 +871,561 @@ export default function App() {
           </div>
         )}
 
-        {/* Keep other tabs the same for brevity - but ensure they all scroll to top */}
+        {tab === 'appointments' && (
+          <div className="flex-1 overflow-auto bg-slate-950">
+            <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white">Agenda y calendario</h1>
+                  <p className="text-slate-400 text-sm">Coordina citas, recordatorios y la disponibilidad del equipo</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-teal-500 text-white font-semibold shadow-lg shadow-indigo-500/30 hover:shadow-2xl hover:scale-[1.02] transition">
+                    <Plus size={16} /> Nueva cita
+                  </button>
+                  <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-white border border-slate-700 hover:border-indigo-500/50 transition">
+                    <Upload size={16} /> Exportar
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-2xl p-2 w-full">
+                <button
+                  onClick={() => setAppointmentsView('calendar')}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
+                    appointmentsView === 'calendar' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Calendar size={16} /> Calendario
+                </button>
+                <button
+                  onClick={() => setAppointmentsView('list')}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
+                    appointmentsView === 'list' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <FileText size={16} /> Lista
+                </button>
+              </div>
+
+              {appointmentsView === 'calendar' ? (
+                <div className="grid lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2 space-y-3">
+                    {schedule.map((item) => (
+                      <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 hover:border-indigo-500/40 transition">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500/30 to-teal-500/30 flex items-center justify-center text-white font-bold">
+                          <Clock size={20} />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-white font-semibold">{item.name}</p>
+                              <p className="text-slate-400 text-sm">{item.service} · {item.channel}</p>
+                            </div>
+                            <span className="text-xs px-2 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">{item.date}</span>
+                          </div>
+                          <div className="flex items-center gap-3 mt-2">
+                            <span className="text-sm text-indigo-300 font-semibold">{item.time}</span>
+                            <span className={`
+                              text-xs px-2 py-1 rounded-full border
+                              ${item.status === 'confirmada' ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40' : 'bg-amber-500/20 text-amber-200 border-amber-500/40'}
+                            `}>
+                              {item.status}
+                            </span>
+                          </div>
+                        </div>
+                        <button className="px-3 py-2 rounded-xl bg-indigo-500/20 text-indigo-200 border border-indigo-500/40 hover:bg-indigo-500/30 transition text-xs font-semibold">
+                          Reprogramar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-white font-semibold">Slots por horario</p>
+                        <Info size={16} className="text-slate-400" />
+                      </div>
+                      <div className="space-y-2">
+                        {timeSlotsPercent.map((value, idx) => (
+                          <div key={idx}>
+                            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                              <span>{['9 AM', '12 PM', '3 PM', '6 PM'][idx]}</span>
+                              <span>{value}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                              <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-teal-500" style={{width: `${value}%`}}></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-white font-semibold">Recordatorios</p>
+                        <Bell size={16} className="text-slate-400" />
+                      </div>
+                      {appts.map((appt, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-sm text-slate-300">
+                          <div className="flex items-center gap-2">
+                            <AlertCircle size={14} className="text-indigo-300" />
+                            <span>{appt.name}</span>
+                          </div>
+                          <span className="text-slate-400">{appt.time}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                  <div className="grid grid-cols-5 px-4 py-3 text-xs font-semibold text-slate-400 border-b border-slate-800">
+                    <span>Paciente</span>
+                    <span>Servicio</span>
+                    <span>Fecha</span>
+                    <span>Estado</span>
+                    <span className="text-right">Canal</span>
+                  </div>
+                  <div className="divide-y divide-slate-800">
+                    {schedule.map((item) => (
+                      <div key={item.id} className="grid grid-cols-5 px-4 py-4 text-sm text-slate-200 hover:bg-slate-800/60 transition">
+                        <div className="flex items-center gap-2">
+                          <User size={16} className="text-indigo-300" />
+                          <span>{item.name}</span>
+                        </div>
+                        <span className="text-slate-300">{item.service}</span>
+                        <span className="text-slate-400">{item.date} · {item.time}</span>
+                        <span className={item.status === 'confirmada' ? 'text-emerald-300' : 'text-amber-300'}>{item.status}</span>
+                        <span className="text-right text-slate-400">{item.channel}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'patients' && (
+          <div className="flex-1 overflow-auto bg-slate-950">
+            <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white">Pacientes</h1>
+                  <p className="text-slate-400 text-sm">Historial, contacto y notas rápidas</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 flex items-center gap-2">
+                    <Filter size={15} /> Filtros
+                  </button>
+                  <button className="px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-indigo-500 text-white font-semibold flex items-center gap-2 shadow-lg shadow-indigo-500/30">
+                    <Plus size={16} /> Nuevo paciente
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                {patients.map((patient, idx) => (
+                  <div key={idx} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3 hover:border-indigo-500/40 transition">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500/40 to-teal-500/40 text-white font-bold flex items-center justify-center">
+                          {patient.name.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="text-white font-semibold">{patient.name}</p>
+                          <p className="text-xs text-slate-400">{patient.status === 'nuevo' ? 'Nuevo' : 'Seguimiento'} · {patient.lastVisit}</p>
+                        </div>
+                      </div>
+                      <span className={`
+                        text-xs px-2 py-1 rounded-full border
+                        ${patient.status === 'activo' ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40' : ''}
+                        ${patient.status === 'nuevo' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : ''}
+                        ${patient.status === 'pendiente' ? 'bg-amber-500/20 text-amber-200 border-amber-500/40' : ''}
+                        ${patient.status === 'inactivo' ? 'bg-slate-800 text-slate-300 border-slate-700' : ''}
+                      `}>
+                        {patient.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm text-slate-300">
+                      <Phone size={14} className="text-teal-300" />
+                      <span>{patient.phone}</span>
+                      <MapPin size={14} className="text-indigo-300 ml-2" />
+                      <span>{patient.location}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2 text-slate-400">
+                        <Info size={14} />
+                        <span>{patient.notes}</span>
+                      </div>
+                      <button className="px-3 py-1.5 rounded-lg bg-indigo-500/20 text-indigo-200 border border-indigo-500/40 text-xs font-semibold">
+                        Enviar recordatorio
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'payments' && (
+          <div className="flex-1 overflow-auto bg-slate-950">
+            <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white">Pagos y facturación</h1>
+                  <p className="text-slate-400 text-sm">Recaudación, métodos y estados de cobro</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 flex items-center gap-2">
+                    <Upload size={15} /> Exportar CSV
+                  </button>
+                  <button className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold flex items-center gap-2 shadow-lg shadow-emerald-500/30">
+                    <DollarSign size={16} /> Cobro rápido
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Ingresos del mes', value: '$12,400', change: '+14%' },
+                  { label: 'Pendientes', value: '$540', change: '-6%' },
+                  { label: 'Ticket promedio', value: '$148', change: '+3%' },
+                  { label: 'Pagos en línea', value: '74%', change: '+9%' }
+                ].map((card, idx) => (
+                  <div key={idx} className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <p className="text-slate-400 text-xs">{card.label}</p>
+                    <p className="text-white text-2xl font-black mt-1">{card.value}</p>
+                    <p className="text-emerald-300 text-xs font-semibold">{card.change} vs mes anterior</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                <div className="grid grid-cols-5 px-4 py-3 text-xs font-semibold text-slate-400 border-b border-slate-800">
+                  <span>Paciente</span>
+                  <span>Monto</span>
+                  <span>Estado</span>
+                  <span>Método</span>
+                  <span className="text-right">Fecha</span>
+                </div>
+                <div className="divide-y divide-slate-800">
+                  {paymentHistory.map((pay) => (
+                    <div key={pay.id} className="grid grid-cols-5 px-4 py-3 text-sm text-slate-200 hover:bg-slate-800/60 transition">
+                      <span className="flex items-center gap-2">
+                        <User size={15} className="text-indigo-300" />
+                        {pay.patient}
+                      </span>
+                      <span className="text-white font-semibold">${pay.amount}</span>
+                      <span className={`
+                        text-xs px-2 py-1 rounded-full border justify-self-start
+                        ${pay.status === 'pagado' ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40' : ''}
+                        ${pay.status === 'pendiente' ? 'bg-amber-500/20 text-amber-200 border-amber-500/40' : ''}
+                        ${pay.status === 'reembolsado' ? 'bg-slate-800 text-slate-300 border-slate-700' : ''}
+                      `}>
+                        {pay.status}
+                      </span>
+                      <span className="text-slate-300">{pay.method}</span>
+                      <span className="text-right text-slate-400">{pay.date}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'reports' && (
+          <div className="flex-1 overflow-auto bg-slate-950">
+            <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white">Reportes</h1>
+                  <p className="text-slate-400 text-sm">Descarga PDF o comparte con dirección</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 flex items-center gap-2">
+                    <FileText size={15} /> Generar PDF
+                  </button>
+                  <button className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-sky-500 text-white font-semibold flex items-center gap-2 shadow-lg shadow-indigo-500/30">
+                    <Upload size={16} /> Compartir
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-4 gap-3">
+                {reportCards.map((card, idx) => (
+                  <div key={idx} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
+                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br from-${card.color}-500/30 to-${card.color}-600/30 flex items-center justify-center`}>
+                      <card.icon size={18} className="text-white" />
+                    </div>
+                    <p className="text-slate-400 text-xs">{card.title}</p>
+                    <p className="text-white text-2xl font-black">{card.value}</p>
+                    <p className="text-emerald-300 text-xs font-semibold">{card.change} vs mes anterior</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-white font-semibold">Resumen ejecutivo</p>
+                  <Zap size={16} className="text-amber-300" />
+                </div>
+                <div className="grid md:grid-cols-3 gap-4 text-sm text-slate-300">
+                  <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                    <p className="text-white font-semibold">Productividad</p>
+                    <p className="text-slate-400 text-sm mt-1">Tiempo promedio de respuesta de 6m y ocupación al 82%.</p>
+                  </div>
+                  <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                    <p className="text-white font-semibold">Finanzas</p>
+                    <p className="text-slate-400 text-sm mt-1">Ticket promedio estable y 74% de pagos digitales.</p>
+                  </div>
+                  <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                    <p className="text-white font-semibold">Pacientes</p>
+                    <p className="text-slate-400 text-sm mt-1">18 nuevos este mes. Mayor origen: WhatsApp.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'analytics' && (
+          <div className="flex-1 overflow-auto bg-slate-950">
+            <div className="max-w-6xl mx-auto px-4 py-6 md:p-8 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white">Analítica</h1>
+                  <p className="text-slate-400 text-sm">Rendimiento en tiempo real</p>
+                </div>
+                <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1">
+                  {['overview', 'conversion'].map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => setDashboardTab(item)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition ${
+                        dashboardTab === item ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Mensajes', value: liveStats.messages, icon: MessageCircle, color: 'indigo' },
+                  { label: 'Citas activas', value: liveStats.appointments, icon: Calendar, color: 'teal' },
+                  { label: 'Pacientes activos', value: liveStats.activePatients, icon: Users, color: 'blue' },
+                  { label: 'Tasa respuesta', value: `${liveStats.responseRate.toFixed(1)}%`, icon: TrendingUp, color: 'emerald' }
+                ].map((stat, idx) => (
+                  <div key={idx} className={`bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2`}>
+                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br from-${stat.color}-500/30 to-${stat.color}-600/30 flex items-center justify-center`}>
+                      <stat.icon size={18} className="text-white" />
+                    </div>
+                    <p className="text-slate-400 text-xs">{stat.label}</p>
+                    <p className="text-white text-2xl font-black">{stat.value}</p>
+                    <p className="text-emerald-300 text-xs font-semibold">Tiempo real</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4">
+                <div className="md:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-white font-semibold">Ocupación por franja</p>
+                    <Clock size={16} className="text-slate-400" />
+                  </div>
+                  <div className="space-y-2">
+                    {timeSlotsPercent.map((value, idx) => (
+                      <div key={idx} className="flex items-center gap-3">
+                        <span className="w-14 text-xs text-slate-400">{['9 AM', '12 PM', '3 PM', '6 PM'][idx]}</span>
+                        <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden">
+                          <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-teal-500" style={{width: `${value}%`}}></div>
+                        </div>
+                        <span className="text-xs text-slate-300">{value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-white font-semibold">Satisfacción</p>
+                    <Smile size={16} className="text-amber-300" />
+                  </div>
+                  <div className="relative">
+                    <div className="h-3 rounded-full bg-slate-800 overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full" style={{width: `${satisfactionPercent}%`}}></div>
+                    </div>
+                    <p className="text-white font-semibold mt-2">{satisfactionPercent}%</p>
+                    <p className="text-slate-400 text-xs">Feedback promedio de los últimos 30 días</p>
+                  </div>
+                </div>
+              </div>
+
+              {dashboardTab === 'conversion' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-white font-semibold">Embudo de conversión</p>
+                    <TrendingUp size={16} className="text-emerald-300" />
+                  </div>
+                  <div className="grid md:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Nuevos leads', value: 72, rate: '100%' },
+                      { label: 'Conversaciones', value: 58, rate: '81%' },
+                      { label: 'Agendados', value: 36, rate: '62%' },
+                      { label: 'Asistieron', value: 31, rate: '52%' }
+                    ].map((step, idx) => (
+                      <div key={idx} className="bg-slate-800/60 border border-slate-700 rounded-xl p-3">
+                        <p className="text-slate-400 text-xs">{step.label}</p>
+                        <p className="text-white text-xl font-black mt-1">{step.value}</p>
+                        <p className="text-emerald-300 text-xs font-semibold">{step.rate} conversión</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'settings' && (
+          <div className="flex-1 overflow-auto bg-slate-950">
+            <div className="max-w-5xl mx-auto px-4 py-6 md:p-8 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white">Configuración</h1>
+                  <p className="text-slate-400 text-sm">Ajusta tu clínica, notificaciones e integraciones</p>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-1 flex items-center gap-1">
+                  {[
+                    { id: 'general', label: 'General' },
+                    { id: 'notifications', label: 'Alertas' },
+                    { id: 'integrations', label: 'Integraciones' }
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => setSettingsTab(item.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                        settingsTab === item.id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {settingsTab === 'general' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                  <p className="text-white font-semibold">Perfil de la clínica</p>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs text-slate-400">Nombre</label>
+                      <input
+                        value={clinic.name}
+                        onChange={(e) => setClinic({...clinic, name: e.target.value})}
+                        className="w-full mt-1 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400">Teléfono</label>
+                      <input
+                        value={clinic.phone}
+                        onChange={(e) => setClinic({...clinic, phone: e.target.value})}
+                        className="w-full mt-1 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-800/50 border border-slate-700 rounded-xl p-3">
+                    <div className="flex items-center gap-2 text-slate-300 text-sm">
+                      <Upload size={14} />
+                      <span>Sube tu logo para personalizar la app</span>
+                    </div>
+                    <button className="px-3 py-1.5 rounded-lg bg-indigo-500/20 text-indigo-200 border border-indigo-500/40 text-xs font-semibold">
+                      Cargar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === 'notifications' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Bell size={16} className="text-amber-300" />
+                    <p className="text-white font-semibold">Alertas inteligentes</p>
+                  </div>
+                  <div className="space-y-3">
+                    {['Citas nuevas', 'Pagos recibidos', 'Pacientes sin responder'].map((label, idx) => (
+                      <label key={idx} className="flex items-center justify-between bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+                        <span>{label}</span>
+                        <input type="checkbox" defaultChecked className="accent-indigo-500 w-4 h-4" />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === 'integrations' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                  <p className="text-white font-semibold">Integraciones</p>
+                  <div className="space-y-2">
+                    {integrations.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center">
+                            <item.icon size={16} className="text-indigo-300" />
+                          </div>
+                          <div>
+                            <p className="text-white font-semibold text-sm">{item.name}</p>
+                            <p className="text-slate-400 text-xs">{item.detail}</p>
+                          </div>
+                        </div>
+                        <span className={`text-xs px-2 py-1 rounded-full border ${item.status === 'activo' || item.status === 'sincronizado' ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40' : 'bg-amber-500/20 text-amber-200 border-amber-500/40'}`}>
+                          {item.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      <button
+        onClick={() => setShowNotifications(!showNotifications)}
+        className="fixed bottom-24 right-4 bg-slate-900 border border-slate-800 text-white rounded-full p-3 shadow-lg shadow-indigo-500/30 hover:shadow-2xl transition z-50"
+        style={{paddingBottom: isMobile ? 'calc(env(safe-area-inset-bottom) + 12px)' : '12px'}}
+      >
+        <Bell size={20} />
+        <span className="absolute -top-1 -right-1 bg-red-500 text-[10px] font-bold rounded-full px-1.5 py-0.5">3</span>
+      </button>
+
+      {showNotifications && (
+        <div className="fixed bottom-36 right-4 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-3 space-y-2 z-50">
+          <div className="flex items-center justify-between">
+            <p className="text-white font-semibold text-sm">Notificaciones</p>
+            <button onClick={() => setShowNotifications(false)} className="p-1 hover:bg-slate-800 rounded-lg">
+              <X size={14} className="text-slate-400" />
+            </button>
+          </div>
+          {notifications.map((n) => (
+            <div key={n.id} className="flex items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
+              <AlertCircle size={15} className={n.type === 'success' ? 'text-emerald-300' : n.type === 'warning' ? 'text-amber-300' : 'text-indigo-300'} />
+              <div className="flex-1">
+                <p className="text-slate-200 text-sm">{n.text}</p>
+                <p className="text-slate-500 text-xs">{n.time}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* BOTTOM NAVBAR MÓVIL - CON SAFE AREA */}
       {isMobile && (
