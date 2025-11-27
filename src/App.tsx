@@ -1,7 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component, ReactNode } from 'react';
 import { MessageCircle, Calendar, BarChart3, Settings, LogOut, Menu, X, Send, Plus, CreditCard as Edit2, Search, Filter, Bell, User, Clock, TrendingUp, Users, CheckCircle, Home, FileText, DollarSign, AlertCircle, Phone, Upload, MapPin, Info, Check, Zap, Smile } from 'lucide-react';
 
-export default function App() {
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; msg: string }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, msg: '' };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, msg: error.message };
+  }
+
+  componentDidCatch(error: Error, info: unknown) {
+    // eslint-disable-next-line no-console
+    console.error('UI error', error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white px-4">
+          <div className="max-w-md text-center space-y-3">
+            <h1 className="text-2xl font-bold">Ups, algo se rompió</h1>
+            <p className="text-slate-400 text-sm">
+              Refresca la página. Si continúa, comparte este mensaje: <span className="text-indigo-300 font-mono text-xs">{this.state.msg}</span>
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function RootApp() {
   const [auth, setAuth] = useState(false);
   const [loginMode, setLoginMode] = useState(true);
   const [sidebar, setSidebar] = useState(false);
@@ -1469,5 +1501,13 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <RootApp />
+    </ErrorBoundary>
   );
 }
