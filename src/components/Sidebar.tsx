@@ -4,57 +4,83 @@ import {
   LineChart,
   ClipboardList,
   MessageSquareText,
-  Plug,
   Settings,
   Stethoscope,
   Users,
 } from "lucide-react";
+import { useClinic } from "../context/ClinicContext";
 
 const navItems = [
   { to: "/", label: "Overview", icon: LineChart },
-  { to: "/conversations", label: "Conversations", icon: MessageSquareText },
-  { to: "/patients", label: "Patients", icon: Users },
-  { to: "/appointments", label: "Appointments", icon: Calendar },
+  { to: "/conversations", label: "Inbox", icon: MessageSquareText },
+  { to: "/patients", label: "Leads", icon: Users },
+  { to: "/appointments", label: "Citas", icon: Calendar },
   { to: "/analytics", label: "Analytics", icon: ClipboardList },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export const Sidebar = () => {
+  const { clinic } = useClinic();
+
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-slate-800 bg-slate-900/70 px-5 py-6">
-      <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-500/10">
-          <Stethoscope className="h-5 w-5 text-teal-300" />
+    <aside className="h-screen w-72 border-r border-white/10 bg-slate-950/40 backdrop-blur px-5 py-6">
+      {/* Brand block */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-subtle">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/10">
+            <Stethoscope className="h-5 w-5 text-teal-300" />
+          </div>
+          <div className="leading-tight">
+            <p className="text-sm font-semibold tracking-[0.22em] uppercase text-white">
+              DentalConnect
+            </p>
+            <p className="text-[11px] tracking-[0.18em] uppercase text-white/50">
+              Creatyv
+            </p>
+          </div>
         </div>
-        <div>
-          <p className="text-sm font-semibold text-slate-100">DentalConnect</p>
-          <p className="text-xs text-slate-400">Creatyv</p>
+
+        <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+          <p className="text-[10px] tracking-[0.22em] uppercase text-white/55">
+            Clínica activa
+          </p>
+          <p className="mt-1 text-sm font-medium text-white">
+            {clinic?.name ?? "Clinic Demo"}
+          </p>
+          <p className="text-xs text-white/45">{clinic?.domain ?? "dental.creatyv.io"}</p>
         </div>
       </div>
 
-      <nav className="mt-8 flex flex-1 flex-col gap-1">
+      {/* Nav */}
+      <nav className="mt-6 flex flex-1 flex-col gap-1">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.to === "/"}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+              [
+                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
                 isActive
-                  ? "bg-teal-500/10 text-teal-200"
-                  : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
-              }`
+                  ? "bg-white/10 text-white"
+                  : "text-white/70 hover:text-white hover:bg-white/5",
+              ].join(" ")
             }
           >
-            <item.icon className="h-4 w-4" />
+            <item.icon className="h-4 w-4 text-white/70 group-hover:text-white" />
             {item.label}
           </NavLink>
         ))}
       </nav>
 
-      <div className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-3 text-xs text-slate-400">
-        <p className="font-medium text-slate-200">Dental SaaS</p>
-        <p className="mt-1">Enterprise-grade messaging automation.</p>
+      {/* Footer note */}
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs text-white/55">
+        <p className="text-[10px] tracking-[0.22em] uppercase text-white/60">
+          Messaging Automation
+        </p>
+        <p className="mt-2 leading-relaxed">
+          Inbox estilo WhatsApp/Messenger, leads, citas y follow-ups — con plantillas editables por clínica.
+        </p>
       </div>
     </aside>
   );

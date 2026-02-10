@@ -1,37 +1,36 @@
-import { Bell, LogOut, Search } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { LogOut } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useClinic } from "../context/ClinicContext";
 
 export const Topbar = () => {
-  const { signOut, user } = useAuth();
+  const { signOut } = useAuth();
   const { clinic } = useClinic();
+  const navigate = useNavigate();
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 bg-slate-950/70 px-8 py-4">
-      <div>
-        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Clinic</p>
-        <h1 className="text-lg font-semibold text-slate-100">
-          {clinic?.name ?? "DentalConnect Workspace"}
-        </h1>
-        <p className="text-xs text-slate-500">{clinic?.domain ?? "dental.creatyv.io"}</p>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div className="hidden items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-400 md:flex">
-          <Search className="h-4 w-4" />
-          <span>Search patients, conversations...</span>
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/75 backdrop-blur">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 md:px-8">
+        <div className="min-w-0">
+          <p className="text-[10px] tracking-[0.22em] uppercase text-white/55">
+            DentalConnect
+          </p>
+          <p className="truncate text-sm font-semibold text-white">
+            {clinic?.name ?? "Clinic Demo"}
+          </p>
         </div>
-        <button className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-800 bg-slate-900 text-slate-300">
-          <Bell className="h-4 w-4" />
-        </button>
-        <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5">
-          <span className="text-xs text-slate-300">{user?.email ?? "user@clinic.com"}</span>
+
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => signOut()}
-            className="flex items-center gap-1 text-xs text-teal-300 hover:text-teal-200"
+            type="button"
+            onClick={async () => {
+              await signOut();
+              navigate("/login", { replace: true });
+            }}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-white/80 hover:text-white hover:bg-white/[0.06] transition"
           >
-            <LogOut className="h-3 w-3" />
-            Logout
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline">Salir</span>
           </button>
         </div>
       </div>
