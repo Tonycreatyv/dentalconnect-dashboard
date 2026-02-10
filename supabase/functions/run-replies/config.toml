@@ -1,0 +1,11 @@
+[functions.run-replies]
+verify_jwt = false
+
+[functions.run-followups]
+verify_jwt = false
+
+[functions.meta-webhook]
+verify_jwt = false
+
+[functions.trial-signup]
+verify_jwt = false
