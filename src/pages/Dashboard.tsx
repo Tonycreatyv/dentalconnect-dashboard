@@ -1,207 +1,167 @@
+// src/pages/Overview.tsx
 import { useEffect, useMemo, useState } from "react";
-import { CalendarCheck, MessageSquareText, Plug, Users } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { useClinic } from "../context/ClinicContext";
-import { StatCard } from "../components/StatCard";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
 import { SectionCard } from "../components/SectionCard";
-import { BarChart, type ChartDatum } from "../components/BarChart";
-import { formatDateTime } from "../lib/format";
-import type { ConversationMessage } from "../lib/types";
-import { EmptyState } from "../components/EmptyState";
 
-const Dashboard = () => {
-  const { clinicId } = useClinic();
+const ORG = "clinic-demo";
+
+type LeadRow = {
+  id: string;
+  full_name: string | null;
+  channel: string | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_bot_reply_at: string | null;
+  follow_up_due_at: string | null;
+};
+
+type MsgRow = {
+  id: string;
+  lead_id: string | null;
+  actor: string | null;
+  content: string | null;
+  created_at: string;
+};
+
+function StatCard({
+  title,
+  value,
+  hint,
+  onClick,
+}: {
+  title: string;
+  value: number;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-left hover:bg-white/[0.06] transition"
+    >
+      <div className="text-xs tracking-[0.25em] text-white/40 uppercase">{title}</div>
+      <div className="mt-2 text-3xl font-semibold text-white">{value}</div>
+      <div className="mt-2 text-sm text-white/60">{hint}</div>
+    </button>
+  );
+}
+
+export default function Overview() {
+  const navigate = useNavigate();
+
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [recent, setRecent] = useState<MsgRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    patients: 0,
-    conversations: 0,
-    appointments: 0,
-    integrations: 0,
-  });
-  const [recentMessages, setRecentMessages] = useState<ConversationMessage[]>([]);
-  const [messagesChart, setMessagesChart] = useState<ChartDatum[]>([]);
-  const [leadsChart, setLeadsChart] = useState<ChartDatum[]>([]);
+
+  async function load() {
+    setLoading(true);
+
+    const { data: ldata } = await supabase
+      .from("leads")
+      .select("id, full_name, channel, last_message_at, last_message_preview, last_bot_reply_at, follow_up_due_at")
+      .eq("organization_id", ORG)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(200);
+
+    const { data: mdata } = await supabase
+      .from("messages")
+      .select("id, lead_id, actor, content, created_at")
+      .eq("organization_id", ORG)
+      .order("created_at", { ascending: false })
+      .limit(8);
+
+    setLeads((ldata as any) ?? []);
+    setRecent((mdata as any) ?? []);
+    setLoading(false);
+  }
 
   useEffect(() => {
-    let mounted = true;
+    load();
+  }, []);
 
-    const loadDashboard = async () => {
-      setLoading(true);
+  const now = useMemo(() => new Date(), []);
+  const todayStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
 
-      const patientsQuery = supabase.from("patients").select("id", { count: "exact", head: true });
-      const conversationsQuery = supabase
-        .from("conversation_messages")
-        .select("id", { count: "exact", head: true });
-      const appointmentsQuery = supabase
-        .from("appointments")
-        .select("id", { count: "exact", head: true });
-      const integrationsQuery = supabase
-        .from("integrations")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "connected");
+  const followupsToday = useMemo(() => {
+    return leads.filter((l) => l.follow_up_due_at && new Date(l.follow_up_due_at) >= todayStart).length;
+  }, [leads, todayStart]);
 
-      if (clinicId) {
-        patientsQuery.eq("clinic_id", clinicId);
-        conversationsQuery.eq("clinic_id", clinicId);
-        appointmentsQuery.eq("clinic_id", clinicId);
-        integrationsQuery.eq("clinic_id", clinicId);
-      }
+  const noBotReply = useMemo(() => {
+    // Leads con mensaje reciente pero sin respuesta del bot “cerca” (simple heurística)
+    return leads.filter((l) => l.last_message_at && !l.last_bot_reply_at).length;
+  }, [leads]);
 
-      const [patients, conversations, appointments, integrations] = await Promise.all([
-        patientsQuery,
-        conversationsQuery,
-        appointmentsQuery,
-        integrationsQuery,
-      ]);
+  const activeLeads = useMemo(() => {
+    return leads.filter((l) => l.last_message_at).length;
+  }, [leads]);
 
-      const recentMessagesQuery = supabase
-        .from("conversation_messages")
-        .select("patient_phone, role, message, channel, created_at")
-        .order("created_at", { ascending: false })
-        .limit(6);
-
-      if (clinicId) {
-        recentMessagesQuery.eq("clinic_id", clinicId);
-      }
-
-      const { data: recentMessagesData } = await recentMessagesQuery;
-
-      const chartStart = new Date();
-      chartStart.setDate(chartStart.getDate() - 6);
-      chartStart.setHours(0, 0, 0, 0);
-
-      const chartQuery = supabase
-        .from("conversation_messages")
-        .select("created_at, channel")
-        .gte("created_at", chartStart.toISOString())
-        .order("created_at", { ascending: true });
-
-      if (clinicId) {
-        chartQuery.eq("clinic_id", clinicId);
-      }
-
-      const { data: chartMessages } = await chartQuery;
-
-      const countsByDay: Record<string, number> = {};
-      const countsByChannel: Record<string, number> = {};
-
-      (chartMessages ?? []).forEach((message) => {
-        const createdAt = message.created_at ? new Date(message.created_at) : null;
-        if (!createdAt) return;
-        const key = createdAt.toLocaleDateString();
-        countsByDay[key] = (countsByDay[key] ?? 0) + 1;
-        const channel = message.channel ?? "unknown";
-        countsByChannel[channel] = (countsByChannel[channel] ?? 0) + 1;
-      });
-
-      const chartDays: ChartDatum[] = Array.from({ length: 7 }).map((_, index) => {
-        const date = new Date(chartStart);
-        date.setDate(chartStart.getDate() + index);
-        const label = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-        const key = date.toLocaleDateString();
-        return { label, value: countsByDay[key] ?? 0 };
-      });
-
-      const channels: ChartDatum[] = Object.entries(countsByChannel).map(([label, value]) => ({
-        label,
-        value,
-      }));
-
-      if (!mounted) return;
-
-      setStats({
-        patients: patients.count ?? 0,
-        conversations: conversations.count ?? 0,
-        appointments: appointments.count ?? 0,
-        integrations: integrations.count ?? 0,
-      });
-      setRecentMessages(recentMessagesData ?? []);
-      setMessagesChart(chartDays);
-      setLeadsChart(channels.length ? channels : [{ label: "No data", value: 0 }]);
-      setLoading(false);
-    };
-
-    loadDashboard();
-
-    return () => {
-      mounted = false;
-    };
-  }, [clinicId]);
-
-  const statsCards = useMemo(
-    () => [
-      {
-        label: "Patients",
-        value: stats.patients,
-        icon: <Users className="h-5 w-5 text-teal-300" />,
-      },
-      {
-        label: "Conversations",
-        value: stats.conversations,
-        icon: <MessageSquareText className="h-5 w-5 text-teal-300" />,
-      },
-      {
-        label: "Appointments",
-        value: stats.appointments,
-        icon: <CalendarCheck className="h-5 w-5 text-teal-300" />,
-      },
-      {
-        label: "Active Integrations",
-        value: stats.integrations,
-        icon: <Plug className="h-5 w-5 text-teal-300" />,
-      },
-    ],
-    [stats]
-  );
+  const pendingConfirm = useMemo(() => {
+    // placeholder realista: después lo conectamos a appointments.status='pending'
+    return leads.filter((l) => l.last_message_preview?.toLowerCase().includes("mañana")).length;
+  }, [leads]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-slate-100">Operations overview</h2>
-        <p className="mt-2 text-sm text-slate-400">
-          Real-time visibility across patient communications and scheduling.
-        </p>
+    <div className="space-y-4">
+      <h2 className="text-2xl font-semibold text-white">Overview</h2>
+      <p className="text-sm text-white/60">
+        Operación diaria: confirmaciones, follow-ups y actividad reciente.
+      </p>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+        <StatCard
+          title="Leads activos"
+          value={loading ? 0 : activeLeads}
+          hint="Conversaciones con actividad."
+          onClick={() => navigate("/inbox")}
+        />
+        <StatCard
+          title="Pendientes"
+          value={loading ? 0 : pendingConfirm}
+          hint="Revisar y confirmar citas."
+          onClick={() => navigate("/agenda")}
+        />
+        <StatCard
+          title="Follow-ups hoy"
+          value={loading ? 0 : followupsToday}
+          hint="Contactar antes que se enfríe."
+          onClick={() => navigate("/inbox")}
+        />
+        <StatCard
+          title="Sin respuesta"
+          value={loading ? 0 : noBotReply}
+          hint="Leads esperando respuesta."
+          onClick={() => navigate("/inbox")}
+        />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {statsCards.map((card) => (
-          <StatCard key={card.label} label={card.label} value={card.value} icon={card.icon} />
-        ))}
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-        <BarChart title="Messages per day" data={messagesChart} />
-        <BarChart title="Leads per channel" data={leadsChart} />
-      </div>
-
-      <SectionCard
-        title="Recent conversations"
-        description="Latest patient messages across all channels."
-      >
-        {loading ? (
-          <p className="text-sm text-slate-400">Loading recent messages...</p>
-        ) : recentMessages.length === 0 ? (
-          <EmptyState
-            title="No conversations yet"
-            message="Messages will appear here once patients start chatting."
-          />
+      <SectionCard title="Actividad reciente" description="Últimos mensajes capturados.">
+        {recent.length === 0 ? (
+          <div className="text-sm text-white/60">Sin actividad.</div>
         ) : (
-          <div className="grid gap-3">
-            {recentMessages.map((message, index) => (
+          <div className="grid gap-2">
+            {recent.map((m) => (
               <div
-                key={`${message.patient_phone ?? "patient"}-${index}`}
-                className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3"
+                key={m.id}
+                className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium text-slate-100">
-                      {message.patient_phone ?? "Unknown patient"}
-                    </p>
-                    <p className="text-xs text-slate-500">{message.channel ?? "unknown"}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs text-white/50">
+                      {m.actor === "user" ? "Usuario" : "Bot"}
+                    </div>
+                    <div className="truncate text-sm font-semibold text-white">
+                      {m.content || "—"}
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-500">{formatDateTime(message.created_at)}</p>
+                  <div className="text-[11px] text-white/40">
+                    {new Date(m.created_at).toLocaleString()}
+                  </div>
                 </div>
-                <p className="mt-2 text-sm text-slate-300">{message.message ?? "(no content)"}</p>
               </div>
             ))}
           </div>
@@ -209,6 +169,4 @@ const Dashboard = () => {
       </SectionCard>
     </div>
   );
-};
-
-export default Dashboard;
+}

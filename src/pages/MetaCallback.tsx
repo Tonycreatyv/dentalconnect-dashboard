@@ -10,7 +10,7 @@ export default function MetaCallback() {
     const error = params.get("error");
 
     if (error) {
-      console.error("❌ Meta OAuth error:", error);
+      console.error("❌ Meta connection error:", error);
       navigate("/settings");
       return;
     }
@@ -21,7 +21,7 @@ export default function MetaCallback() {
       return;
     }
 
-    console.log("✅ Meta OAuth code:", code);
+    console.log("✅ Meta connection code:", code);
 
     // POR AHORA solo redirigimos
     // Luego este code se envía a n8n o backend

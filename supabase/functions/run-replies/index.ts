@@ -1,492 +1,517 @@
-// supabase/functions/run-replies/index.ts
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+/// <reference deno-types="https://deno.land/x/types/index.d.ts" />
 
-type RunPayload = {
-  org?: string;
-  limit?: number;
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+type Json = Record<string, any>;
+
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers":
+    "authorization, x-client-info, apikey, content-type, x-run-replies-secret",
 };
 
-function json(body: unknown, status = 200) {
+function j(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers":
-        "authorization, x-client-info, apikey, content-type, x-run-replies-secret",
-    },
+    headers: { ...corsHeaders, "content-type": "application/json" },
   });
 }
 
-function authOk(req: Request) {
-  const expected = Deno.env.get("RUN_REPLIES_SECRET") || "";
-  const got = req.headers.get("x-run-replies-secret") || "";
-  return expected.length > 0 && got === expected;
+function env(name: string, fallback?: string) {
+  const v = Deno.env.get(name) ?? fallback;
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
 }
 
-// =========================
-// Router anti-tokens
-// =========================
-function shouldUseOpenAI(inboundText: string) {
-  const t = (inboundText || "").trim().toLowerCase();
-  if (!t) return false;
-
-  // normaliza
-  const cleaned = t.replace(/[^\p{L}\p{N}\s:]/gu, " ").replace(/\s+/g, " ").trim();
-  const words = cleaned.split(" ").filter(Boolean);
-
-  // ultra corto => NO OpenAI
-  const shortKey = words.join(" ");
-  const cheap = new Set([
-    "hola",
-    "holi",
-    "hols",
-    "hey",
-    "buenas",
-    "buenos dias",
-    "buenas noches",
-    "ok",
-    "oka",
-    "dale",
-    "listo",
-    "gracias",
-    "si",
-    "sí",
-    "no",
-    "aja",
-    "ajá",
-  ]);
-
-  if (words.length <= 2 && (cheap.has(shortKey) || cheap.has(shortKey.replace(" ", "")))) {
-    return false;
-  }
-
-  // señales claras de intención => SÍ OpenAI
-  const intentHints = [
-    "cita",
-    "agendar",
-    "turno",
-    "horario",
-    "hoy",
-    "mañana",
-    "martes",
-    "miercoles",
-    "miércoles",
-    "jueves",
-    "viernes",
-    "sabado",
-    "sábado",
-    "domingo",
-    "am",
-    "pm",
-    ":",
-    "dolor",
-    "muela",
-    "caries",
-    "inflam",
-    "sangra",
-    "limpieza",
-    "extraccion",
-    "extracción",
-    "brackets",
-    "ortodoncia",
-    "blanqueamiento",
-    "endodoncia",
-    "precio",
-    "cuanto",
-    "cuánto",
-    "costo",
-    "vale",
-  ];
-
-  if (intentHints.some((k) => t.includes(k))) return true;
-
-  // si es mediano/largo, normalmente vale OpenAI
-  return cleaned.length >= 25 || words.length >= 5;
+function safeStr(x: any, d = ""): string {
+  if (typeof x === "string") return x;
+  if (x == null) return d;
+  return String(x);
 }
 
-// =========================
-// Plantillas (fallback)
-// =========================
-function fallbackReplyFromInbound(inboundText: string) {
-  const t = (inboundText || "").trim().toLowerCase();
-  const cleaned = t.replace(/\s+/g, " ").trim();
-
-  if (!cleaned) return "¡Listo! ✅ ¿Me confirmas tu nombre y teléfono para ayudarte rápido?";
-
-  // Saludos
-  if (["hola", "holi", "hols", "hey", "buenas", "buenos dias", "buenas noches"].some((k) => t.includes(k))) {
-    return "¡Hola! 👋 ¿Buscas agendar una cita o hacer una consulta? Si es cita: dime tu nombre y el motivo.";
-  }
-
-  // Precio / costo
-  if (t.includes("precio") || t.includes("cuanto") || t.includes("cuánto") || t.includes("costo") || t.includes("vale")) {
-    return "Te ayudo ✅ ¿Qué servicio necesitas (limpieza, extracción, blanqueamiento, ortodoncia) y para qué día lo quieres?";
-  }
-
-  // Dolor / urgencia
-  if (t.includes("dolor") || t.includes("muela") || t.includes("inflam") || t.includes("sangra")) {
-    return "Entiendo ✅ ¿Hace cuánto empezó el dolor y en qué lado es? Si quieres cita, dime 2 horarios (día + hora) y tu teléfono.";
-  }
-
-  // Cita explícita
-  if (t.includes("cita") || t.includes("agendar") || t.includes("turno") || t.includes("horario")) {
-    return "Perfecto ✅ Para agendar necesito: 1) nombre completo 2) teléfono 3) día y hora (o 2 opciones).";
-  }
-
-  // Servicio común
-  if (t.includes("limpieza")) {
-    return "Perfecto ✅ Para tu limpieza: ¿qué día y a qué hora te gustaría? (Si puedes, dime 2 opciones).";
-  }
-  if (t.includes("blanque")) {
-    return "¡Perfecto! ✅ Para blanqueamiento: ¿qué día y hora te queda bien? También dime tu nombre y teléfono.";
-  }
-  if (t.includes("ortodon") || t.includes("brackets")) {
-    return "Perfecto ✅ Para ortodoncia/brackets: ¿es primera evaluación? Dime tu nombre, teléfono y 2 horarios posibles.";
-  }
-
-  return "¡Gracias por escribir! ✅ ¿Quieres agendar cita o solo hacer una consulta? Si es cita: nombre + teléfono + día/hora.";
+function nowIso() {
+  return new Date().toISOString();
 }
 
-// =========================
-// Meta send
-// =========================
-async function sendToMessenger({
-  pageAccessToken,
-  graphVersion,
-  psid,
-  text,
-}: {
-  pageAccessToken: string;
+function clampText(s: string, max = 900) {
+  const t = (s ?? "").trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1) + "…";
+}
+
+function normalizeChannel(ch: string) {
+  const c = (ch ?? "").toLowerCase();
+  if (c.includes("messenger")) return "messenger";
+  if (c.includes("instagram")) return "instagram";
+  if (c.includes("whatsapp")) return "whatsapp";
+  return c || "messenger";
+}
+
+/** ===== OpenAI (Chat Completions) ===== */
+async function callLLM(args: {
+  apiKey: string;
+  model: string;
+  system: string;
+  user: string;
+  temperature?: number;
+  maxTokens?: number;
+}) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${args.apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: args.model,
+      temperature: args.temperature ?? 0.4,
+      max_tokens: args.maxTokens ?? 320,
+      messages: [
+        { role: "system", content: args.system },
+        { role: "user", content: args.user },
+      ],
+      // Forzamos JSON. (Si el modelo no lo soporta, igual parseamos fallback)
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`OpenAI error: ${res.status} ${JSON.stringify(data)}`);
+  }
+  const text = data?.choices?.[0]?.message?.content ?? "";
+  return String(text);
+}
+
+function tryParseJson(text: string): any | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const m =
+      text.match(/```json\s*([\s\S]*?)\s*```/i) ||
+      text.match(/```\s*([\s\S]*?)\s*```/);
+    if (m?.[1]) {
+      try {
+        return JSON.parse(m[1]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+/** ===== Meta send ===== */
+async function sendToMeta(args: {
   graphVersion: string;
-  psid: string;
+  pageAccessToken: string;
+  recipientId: string;
   text: string;
 }) {
-  const url = `https://graph.facebook.com/${graphVersion}/me/messages`;
-
-  const payload = {
-    messaging_type: "RESPONSE",
-    recipient: { id: psid },
-    message: { text },
-    access_token: pageAccessToken,
-  };
-
-  const resp = await fetch(url, {
+  const url = `https://graph.facebook.com/${args.graphVersion}/me/messages`;
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      messaging_type: "RESPONSE",
+      recipient: { id: args.recipientId },
+      message: { text: args.text },
+      access_token: args.pageAccessToken,
+    }),
   });
 
-  const bodyText = await resp.text();
-
-  console.log("[run-replies] META_SEND status:", resp.status);
-  console.log("[run-replies] META_SEND body:", bodyText);
-  console.log("[run-replies] META_SEND psid:", psid);
-
-  if (!resp.ok) {
-    throw new Error(`Meta send failed: ${resp.status} ${bodyText}`);
-  }
-
-  return bodyText;
+  const data = await res.json();
+  if (!res.ok) throw new Error(`Meta error: ${res.status} ${JSON.stringify(data)}`);
+  return data;
 }
 
-// =========================
-// OpenAI (solo cuando conviene)
-// =========================
-async function generateReplyText({
-  openaiKey,
-  inboundText,
-}: {
-  openaiKey: string | null;
+/** ===== Default system prompt (fallback) =====
+ *  Nota: si existe org_settings.system_prompt, lo usamos en vez de este.
+ */
+function defaultSystemPrompt() {
+  return `
+Eres una recepcionista HUMANA de una clínica dental en Honduras. Hablas español hondureño natural.
+Objetivo: ayudar rápido, sin sonar a guion.
+
+Estilo:
+- 1 a 3 oraciones, cálidas y claras.
+- Nada de “Hola, gracias por escribir…” repetido.
+- Si el usuario se enoja o insiste, baja fricción: responde directo.
+
+Reglas:
+- NO inventes precios/horarios/ubicación. Usa el contexto de clínica. Si falta, pregunta lo mínimo.
+- No te quedes trabado pidiendo lo mismo. Si ya pediste algo y no responde, ofrece 2 opciones concretas.
+- Si pregunta por un servicio: responde SI/NO + mini detalle + siguiente paso.
+- Si detectas urgencia (dolor fuerte, sangrado, hinchazón): prioriza y ofrece llamada/atención.
+
+Salida: responde SOLO JSON válido con este formato:
+{
+  "intent": "appointment|pricing|faq|handoff|other",
+  "reply": "texto",
+  "state_patch": { "any": "json" }
+}
+`.trim();
+}
+
+/** ===== Construye user prompt compacto ===== */
+function buildUserPrompt(args: {
+  clinic: Json;
+  leadState: Json;
+  recent: Array<{ role: "user" | "assistant"; content: string }>;
   inboundText: string;
 }) {
-  // Si no hay key -> plantillas
-  if (!openaiKey) return fallbackReplyFromInbound(inboundText);
+  const clinic = args.clinic ?? {};
+  const services = Array.isArray(clinic.services) ? clinic.services : [];
+  const faqs = Array.isArray(clinic.faqs) ? clinic.faqs : [];
+  const hours = clinic.hours ?? null;
 
-  // Router anti-tokens
-  if (!shouldUseOpenAI(inboundText)) {
-    return fallbackReplyFromInbound(inboundText);
+  return `
+CLINIC_CONTEXT (fuente de verdad):
+- name: ${safeStr(clinic.name, "Clínica")}
+- phone: ${safeStr(clinic.phone, "")}
+- address: ${safeStr(clinic.address, "")}
+- google_maps_url: ${safeStr(clinic.google_maps_url, "")}
+- hours_json: ${JSON.stringify(hours)}
+- services_json: ${JSON.stringify(services)}
+- faqs_json: ${JSON.stringify(faqs)}
+- policies_json: ${JSON.stringify(clinic.policies ?? {})}
+- emergency: ${safeStr(clinic.emergency, "")}
+
+LEAD_STATE_JSON (memoria actual):
+${JSON.stringify(args.leadState ?? {})}
+
+RECENT_TURNS (últimos 8):
+${args.recent.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n")}
+
+INBOUND_MESSAGE:
+${args.inboundText}
+
+Tarea:
+- Responde natural, sin sonar pre-escrito.
+- Si el lead_state.stage es "done" pero el usuario sigue preguntando, responde y reabre flujo si hace falta.
+- Devuelve SOLO JSON con intent/reply/state_patch.
+`.trim();
+}
+
+function mergeStatePatch(prev: Json, patch: Json, inboundMessageId?: string) {
+  const next: Json = { ...(prev ?? {}) };
+
+  // aplica patch superficial
+  for (const [k, v] of Object.entries(patch ?? {})) {
+    next[k] = v;
   }
 
-  try {
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.4,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Eres un asistente de recepción para clínica dental. Responde breve, claro y orientado a agendar. Español hondureño neutro. No inventes precios exactos; pide datos si faltan.",
-          },
-          { role: "user", content: inboundText || "hola" },
-        ],
-      }),
-    });
+  // housekeeping
+  next.updated_at = nowIso();
+  if (inboundMessageId) next.last_inbound_message_id = inboundMessageId;
 
-    const data = await resp.json().catch(() => null);
-    const text =
-      data?.choices?.[0]?.message?.content && String(data.choices[0].message.content).trim();
-
-    if (!resp.ok || !text) return fallbackReplyFromInbound(inboundText);
-    return text.slice(0, 800);
-  } catch {
-    return fallbackReplyFromInbound(inboundText);
+  // garantizamos asked si no existe
+  if (!next.asked || typeof next.asked !== "object") {
+    next.asked = { full_name: false, phone: false, availability: false, service: false };
   }
+
+  return next;
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return json({ ok: true }, 200);
-  if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  if (!authOk(req)) return json({ ok: false, error: "unauthorized" }, 401);
+  try {
+    // ===== AUTH =====
+    const expected = env("RUN_REPLIES_SECRET");
+    const provided = req.headers.get("x-run-replies-secret") ?? "";
+    if (!provided || provided !== expected) {
+      return j(401, { ok: false, error: "unauthorized" });
+    }
 
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-  const META_PAGE_ACCESS_TOKEN = Deno.env.get("META_PAGE_ACCESS_TOKEN") || "";
-  const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") || "v24.0";
-  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || null;
+    const SUPABASE_URL = env("SUPABASE_URL");
+    const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
+    const OPENAI_API_KEY = env("OPENAI_API_KEY");
 
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-    return json({ ok: false, error: "missing_supabase_env" }, 500);
-  }
-  if (!META_PAGE_ACCESS_TOKEN) {
-    return json({ ok: false, error: "missing_meta_token" }, 500);
-  }
+    const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+    const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
+    const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ?? "clinic-demo";
 
-  const body = (await req.json().catch(() => ({}))) as RunPayload;
-  const org = (body.org || "").trim();
-  const limit = Math.min(Math.max(body.limit || 10, 1), 50);
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
+      auth: { persistSession: false },
+    });
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    // organization_id puede venir en body o query
+    const url = new URL(req.url);
+    const body = req.headers.get("content-type")?.includes("application/json")
+      ? await req.json().catch(() => ({}))
+      : {};
 
-  // 1) Pick queued + unlocked
-  let pick = supabase
-    .from("reply_outbox")
-    .select(
-      "id, organization_id, channel, channel_user_id, inbound_message_id, message_text, attempt_count, provider_payload, created_at"
-    )
-    .eq("status", "queued")
-    .is("locked_at", null)
-    .order("created_at", { ascending: true })
-    .limit(limit);
+    const organization_id =
+      safeStr(body?.organization_id, "") ||
+      safeStr(url.searchParams.get("organization_id"), "") ||
+      DEFAULT_ORG;
 
-  if (org) pick = pick.eq("organization_id", org);
+    if (!organization_id) {
+      return j(400, {
+        ok: false,
+        error: "missing_organization_id",
+        build: "2026-02-15-natural-flex-v2",
+      });
+    }
 
-  const { data: jobs, error: pickErr } = await pick;
-  if (pickErr) return json({ ok: false, error: pickErr.message }, 500);
-  if (!jobs || jobs.length === 0) return json({ ok: true, claimed: 0, sent: 0, skipped: 0, failures: [] }, 200);
+    // ===== Load org prompt + token =====
+    let pageAccessToken = Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "";
+    let systemPrompt = defaultSystemPrompt();
 
-  // 2) Lock (claim)
-  const lockedBy = crypto.randomUUID();
-  const nowIso = new Date().toISOString();
-  const ids = jobs.map((j) => j.id);
-
-  const { error: lockErr } = await supabase
-    .from("reply_outbox")
-    .update({ locked_at: nowIso, locked_by: lockedBy, last_attempt_at: nowIso })
-    .in("id", ids)
-    .eq("status", "queued")
-    .is("locked_at", null);
-
-  if (lockErr) return json({ ok: false, error: lockErr.message }, 500);
-
-  // Re-fetch: solo lo que realmente quedó bloqueado por este worker
-  const { data: lockedJobs, error: refetchErr } = await supabase
-    .from("reply_outbox")
-    .select("id, organization_id, channel, channel_user_id, inbound_message_id, message_text, attempt_count, provider_payload")
-    .eq("locked_by", lockedBy)
-    .eq("status", "queued")
-    .order("created_at", { ascending: true })
-    .limit(limit);
-
-  if (refetchErr) return json({ ok: false, error: refetchErr.message }, 500);
-  if (!lockedJobs || lockedJobs.length === 0) {
-    return json({ ok: true, claimed: 0, sent: 0, skipped: 0, failures: [] }, 200);
-  }
-
-  // 3) Send
-  const failures: Array<{ id: string; error: string }> = [];
-  let sent = 0;
-  let skipped = 0;
-
-  for (const job of lockedJobs) {
-    try {
-      if (job.channel !== "messenger") {
-        await supabase
-          .from("reply_outbox")
-          .update({
-            status: "failed",
-            last_error: `unsupported_channel:${job.channel}`,
-            locked_at: null,
-            locked_by: null,
-            attempt_count: (job.attempt_count || 0) + 1,
-            updated_at: nowIso,
-          })
-          .eq("id", job.id);
-
-        failures.push({ id: job.id, error: `unsupported_channel:${job.channel}` });
-        continue;
-      }
-
-      const psid = String(job.channel_user_id || "").trim();
-      if (!psid) {
-        await supabase
-          .from("reply_outbox")
-          .update({
-            status: "failed",
-            last_error: "missing_channel_user_id(psid)",
-            locked_at: null,
-            locked_by: null,
-            attempt_count: (job.attempt_count || 0) + 1,
-            updated_at: nowIso,
-          })
-          .eq("id", job.id);
-
-        failures.push({ id: job.id, error: "missing_channel_user_id(psid)" });
-        continue;
-      }
-
-      // ✅ Cooldown anti-storm por PSID (10s) usando leads.last_outbound_at
-      const { data: recentLead } = await supabase
-        .from("leads")
-        .select("last_outbound_at")
-        .eq("organization_id", job.organization_id)
-        .eq("channel_user_id", psid)
+    // org_secrets token
+    {
+      const sec = await supabase
+        .from("org_secrets")
+        .select("meta_page_access_token")
+        .eq("organization_id", organization_id)
         .maybeSingle();
 
-      if (recentLead?.last_outbound_at) {
-        const last = new Date(recentLead.last_outbound_at).getTime();
-        if (Date.now() - last < 10_000) {
-          await supabase
-            .from("reply_outbox")
-            .update({
-              // tu constraint NO permite "skipped", entonces lo marcamos failed + motivo
-              status: "failed",
-              last_error: "cooldown_10s",
-              locked_at: null,
-              locked_by: null,
-              updated_at: nowIso,
-            })
-            .eq("id", job.id);
+      if (!sec.error && sec.data?.meta_page_access_token) {
+        pageAccessToken = sec.data.meta_page_access_token;
+      }
+    }
 
-          skipped += 1;
-          continue;
+    // org_settings prompt + clinic context
+    let clinicCtx: Json = {
+      name: "Clínica",
+      phone: "",
+      address: "",
+      google_maps_url: "",
+      hours: null,
+      services: [],
+      faqs: [],
+      policies: {},
+      emergency: "",
+    };
+
+    {
+      // incluimos system_prompt si lo agregaste
+      const os = await supabase
+        .from("org_settings")
+        .select(
+          "name, phone, address, google_maps_url, hours, services, faqs, policies, emergency, system_prompt"
+        )
+        .eq("organization_id", organization_id)
+        .maybeSingle();
+
+      if (!os.error && os.data) {
+        const { system_prompt, ...rest } = os.data as any;
+        clinicCtx = { ...clinicCtx, ...rest };
+        if (system_prompt && typeof system_prompt === "string" && system_prompt.trim()) {
+          systemPrompt = system_prompt.trim();
         }
       }
+    }
 
-      // texto (si viene null -> generamos)
-      let text = job.message_text ? String(job.message_text).trim() : "";
+    // ===== Claim jobs =====
+    const { data: jobs, error: qErr } = await supabase
+      .from("reply_outbox")
+      .select("*")
+      .eq("organization_id", organization_id)
+      .in("status", ["pending", "queued"])
+      .order("created_at", { ascending: true })
+      .limit(10);
 
-      if (!text) {
-        let inboundText = "";
-        const inboundId = job.inbound_message_id;
+    if (qErr) return j(500, { ok: false, error: qErr.message, build: "2026-02-15-natural-flex-v2" });
 
-        if (inboundId) {
-          const { data: inboundMsg } = await supabase
-            .from("messages")
-            .select("content")
-            .eq("id", inboundId)
-            .maybeSingle();
+    if (!jobs?.length) {
+      return j(200, {
+        ok: true,
+        claimed: 0,
+        sent: 0,
+        skipped: 0,
+        failures: [],
+        build: "2026-02-15-natural-flex-v2",
+      });
+    }
 
-          inboundText = String(inboundMsg?.content || "").trim();
-        }
+    let claimed = 0;
+    let sent = 0;
+    let skipped = 0;
+    const failures: Array<{ id: string; error: string }> = [];
 
-        text = await generateReplyText({ openaiKey: OPENAI_API_KEY, inboundText });
+    for (const job of jobs) {
+      const jobId = safeStr(job.id);
 
-        await supabase
-          .from("reply_outbox")
-          .update({ message_text: text, updated_at: nowIso })
-          .eq("id", job.id);
-      }
+      // claim best-effort
+      const claim = await supabase
+        .from("reply_outbox")
+        .update({
+          status: "processing",
+          processing_started_at: nowIso(),
+          attempts: (job.attempts ?? 0) + 1,
+        })
+        .eq("id", jobId)
+        .in("status", ["pending", "queued"])
+        .select("id")
+        .maybeSingle();
 
-      if (!text) {
-        await supabase
-          .from("reply_outbox")
-          .update({
-            status: "failed",
-            last_error: "empty_generated_text",
-            locked_at: null,
-            locked_by: null,
-            attempt_count: (job.attempt_count || 0) + 1,
-            updated_at: nowIso,
-          })
-          .eq("id", job.id);
-
-        failures.push({ id: job.id, error: "empty_generated_text" });
+      if (claim.error || !claim.data?.id) {
+        skipped++;
         continue;
       }
+      claimed++;
 
-      const metaResp = await sendToMessenger({
-        pageAccessToken: META_PAGE_ACCESS_TOKEN,
-        graphVersion: META_GRAPH_VERSION,
-        psid,
-        text,
-      });
+      try {
+        const channel = normalizeChannel(safeStr(job.channel, "messenger"));
+        const recipientId =
+          safeStr(job.channel_user_id, "") ||
+          safeStr(job.recipient_id, "") ||
+          safeStr(job.psid, "");
 
-      // ✅ Marca sent
-      await supabase
-        .from("reply_outbox")
-        .update({
-          status: "sent",
-          sent_at: nowIso,
-          last_error: null,
-          provider_payload: { ...(job.provider_payload || {}), meta_response: metaResp },
-          locked_at: null,
-          locked_by: null,
-          attempt_count: (job.attempt_count || 0) + 1,
-          updated_at: nowIso,
-        })
-        .eq("id", job.id);
+        const leadId = safeStr(job.lead_id, "");
+        const inboundText = clampText(
+          safeStr(job.inbound_text, "") ||
+            safeStr(job.text, "") ||
+            safeStr(job.message_text, "") ||
+            ""
+        );
 
-      // ✅ Actualiza last_outbound_at para el cooldown
-      await supabase
-        .from("leads")
-        .update({ last_outbound_at: nowIso, updated_at: nowIso })
-        .eq("organization_id", job.organization_id)
-        .eq("channel_user_id", psid);
+        const inboundMessageId = safeStr(job.inbound_message_id, "") || safeStr(job.inbound_provider_message_id, "");
 
-      sent += 1;
+        if (!recipientId) throw new Error("Missing recipient id (channel_user_id/psid).");
 
-      // ✅ DEDUPE: si hay otros queued del MISMO inbound, los anulamos (sin "skipped")
-      if (job.inbound_message_id) {
+        // ===== Lead state =====
+        let leadState: Json = {};
+        if (leadId) {
+          const ld = await supabase.from("leads").select("state").eq("id", leadId).maybeSingle();
+          if (!ld.error && ld.data?.state) leadState = (ld.data.state as Json) ?? {};
+        }
+
+        // ===== recent messages =====
+        let recent: Array<{ role: "user" | "assistant"; content: string }> = [];
+        if (leadId) {
+          const ms = await supabase
+            .from("messages")
+            .select("direction, text, body, created_at")
+            .eq("lead_id", leadId)
+            .order("created_at", { ascending: false })
+            .limit(12);
+
+          if (!ms.error && Array.isArray(ms.data)) {
+            recent = ms.data
+              .map((r: any) => {
+                const dir = safeStr(r.direction, "");
+                const content = clampText(safeStr(r.text, "") || safeStr(r.body, ""));
+                if (!content) return null;
+                return {
+                  role: dir === "outbound" ? ("assistant" as const) : ("user" as const),
+                  content,
+                };
+              })
+              .filter(Boolean)
+              .reverse() as any;
+
+            if (recent.length > 8) recent = recent.slice(recent.length - 8);
+          }
+        }
+
+        // ===== LLM =====
+        const userPrompt = buildUserPrompt({
+          clinic: clinicCtx,
+          leadState,
+          recent,
+          inboundText: inboundText || "(sin texto)",
+        });
+
+        const raw = await callLLM({
+          apiKey: OPENAI_API_KEY,
+          model: OPENAI_MODEL,
+          system: systemPrompt,
+          user: userPrompt,
+          temperature: 0.5, // más natural
+          maxTokens: 320,
+        });
+
+        const parsed = tryParseJson(raw);
+        const reply = clampText(safeStr(parsed?.reply, ""), 950);
+        const intent = safeStr(parsed?.intent, "other");
+        const state_patch =
+          parsed?.state_patch && typeof parsed.state_patch === "object" ? (parsed.state_patch as Json) : {};
+
+        if (!reply) {
+          throw new Error(`LLM missing reply. raw=${raw.slice(0, 200)}...`);
+        }
+
+        // ===== Update lead state =====
+        const nextState = mergeStatePatch(
+          leadState,
+          {
+            ...state_patch,
+            intent,
+            last_bot_step: state_patch?.last_bot_step ?? leadState?.last_bot_step ?? null,
+          },
+          inboundMessageId
+        );
+
+        if (leadId) {
+          await supabase.from("leads").update({ state: nextState }).eq("id", leadId);
+        }
+
+        // store outbound message
+        const outMsgInsert = await supabase
+          .from("messages")
+          .insert({
+            organization_id,
+            lead_id: leadId || null,
+            channel,
+            direction: "outbound",
+            text: reply,
+            created_at: nowIso(),
+          })
+          .select("id")
+          .maybeSingle();
+
+        const outbound_message_id = outMsgInsert.data?.id ?? null;
+
+        // send to Meta
+        if (!pageAccessToken) throw new Error("No Meta page access token configured.");
+
+        const metaResp = await sendToMeta({
+          graphVersion: META_GRAPH_VERSION,
+          pageAccessToken,
+          recipientId,
+          text: reply,
+        });
+
+        // mark sent
         await supabase
           .from("reply_outbox")
           .update({
-            status: "failed",
-            last_error: "duplicate_inbound_message_id",
-            updated_at: nowIso,
+            status: "sent",
+            sent_at: nowIso(),
+            outbound_message_id,
+            meta_message_id: metaResp?.message_id ?? null,
+            last_error: null,
           })
-          .eq("status", "queued")
-          .eq("inbound_message_id", job.inbound_message_id)
-          .neq("id", job.id);
+          .eq("id", jobId);
 
-        // no contamos como skipped porque ya se van a ver como failed/duplicate
+        sent++;
+      } catch (e: any) {
+        const msg = safeStr(e?.message, String(e));
+        failures.push({ id: safeStr(job.id), error: msg });
+
+        await supabase
+          .from("reply_outbox")
+          .update({
+            status: "error",
+            last_error: msg,
+            updated_at: nowIso(),
+          })
+          .eq("id", safeStr(job.id));
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.log("[run-replies] SEND FAILED job:", job.id, msg);
-
-      await supabase
-        .from("reply_outbox")
-        .update({
-          status: "failed",
-          last_error: msg,
-          locked_at: null,
-          locked_by: null,
-          attempt_count: (job.attempt_count || 0) + 1,
-          updated_at: nowIso,
-        })
-        .eq("id", job.id);
-
-      failures.push({ id: job.id, error: msg });
     }
-  }
 
-  return json({ ok: true, claimed: lockedJobs.length, sent, skipped, failures }, 200);
+    return j(200, {
+      ok: true,
+      claimed,
+      sent,
+      skipped,
+      failures,
+      build: "2026-02-15-natural-flex-v2",
+    });
+  } catch (e: any) {
+    return j(500, { ok: false, error: safeStr(e?.message, String(e)), build: "2026-02-15-natural-flex-v2" });
+  }
 });

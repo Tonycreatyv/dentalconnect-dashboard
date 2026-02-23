@@ -1,134 +1,354 @@
+// src/pages/Conversations.tsx
 import { useEffect, useMemo, useState } from "react";
-import { MessageSquareText } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { useClinic } from "../context/ClinicContext";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
 import { SectionCard } from "../components/SectionCard";
-import { EmptyState } from "../components/EmptyState";
-import { formatDateTime } from "../lib/format";
-import type { ConversationMessage } from "../lib/types";
+import { dedupeByKey } from "../lib/dedupe";
+import { messageKey } from "../lib/messages";
 
-const Conversations = () => {
-  const { clinicId } = useClinic();
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+const ORG = "clinic-demo";
 
-  useEffect(() => {
-    let mounted = true;
-
-    const loadMessages = async () => {
-      setLoading(true);
-      const query = supabase
-        .from("conversation_messages")
-        .select("patient_phone, role, message, channel, created_at")
-        .order("created_at", { ascending: false })
-        .limit(500);
-
-      if (clinicId) {
-        query.eq("clinic_id", clinicId);
-      }
-
-      const { data } = await query;
-      if (!mounted) return;
-      setMessages(data ?? []);
-      setLoading(false);
-    };
-
-    loadMessages();
-
-    return () => {
-      mounted = false;
-    };
-  }, [clinicId]);
-
-  const grouped = useMemo(() => {
-    const buckets: Record<
-      string,
-      { patient: string; channel?: string | null; lastMessage?: ConversationMessage; count: number }
-    > = {};
-
-    messages.forEach((message) => {
-      const key = message.patient_phone ?? "Unknown";
-      if (!buckets[key]) {
-        buckets[key] = {
-          patient: key,
-          channel: message.channel,
-          lastMessage: message,
-          count: 0,
-        };
-      }
-      buckets[key].count += 1;
-      if (!buckets[key].lastMessage && message.created_at) {
-        buckets[key].lastMessage = message;
-      }
-    });
-
-    return Object.values(buckets).sort((a, b) => {
-      const dateA = a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0;
-      const dateB = b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0;
-      return dateB - dateA;
-    });
-  }, [messages]);
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-slate-100">Conversations</h2>
-        <p className="mt-2 text-sm text-slate-400">
-          Read-only messaging history grouped by patient.
-        </p>
-      </div>
-
-      <SectionCard
-        title="Patient threads"
-        description="WhatsApp, Instagram, and Messenger conversations."
-        action={
-          <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-1 text-xs text-slate-400">
-            <MessageSquareText className="h-4 w-4" />
-            {grouped.length} threads
-          </div>
-        }
-      >
-        {loading ? (
-          <p className="text-sm text-slate-400">Loading conversations...</p>
-        ) : grouped.length === 0 ? (
-          <EmptyState
-            title="No messages yet"
-            message="Once patients start chatting, their conversations appear here."
-          />
-        ) : (
-          <div className="overflow-hidden rounded-xl border border-slate-800">
-            <table className="min-w-full divide-y divide-slate-800 text-sm">
-              <thead className="bg-slate-950/60 text-xs uppercase tracking-[0.2em] text-slate-500">
-                <tr>
-                  <th className="px-4 py-3 text-left">Patient</th>
-                  <th className="px-4 py-3 text-left">Channel</th>
-                  <th className="px-4 py-3 text-left">Last message</th>
-                  <th className="px-4 py-3 text-left">Messages</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800 text-slate-300">
-                {grouped.map((thread) => (
-                  <tr key={thread.patient} className="bg-slate-950/30">
-                    <td className="px-4 py-3 font-medium text-slate-100">{thread.patient}</td>
-                    <td className="px-4 py-3">{thread.channel ?? "--"}</td>
-                    <td className="px-4 py-3">
-                      <div className="text-xs text-slate-400">
-                        {formatDateTime(thread.lastMessage?.created_at)}
-                      </div>
-                      <div className="text-sm text-slate-200">
-                        {thread.lastMessage?.message ?? "(no content)"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">{thread.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
-    </div>
-  );
+type LeadRow = {
+  id: string;
+  organization_id: string;
+  full_name: string | null;
+  phone: string | null;
+  status: string | null;
+  channel: string | null;
+  channel_user_id: string | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
 };
 
-export default Conversations;
+type MsgRow = {
+  id: string;
+  organization_id: string;
+  lead_id: string | null;
+  actor: string | null; // "user" | "bot"
+  role: string | null;  // "user" | "assistant"
+  content: string | null;
+  created_at: string;
+};
+
+export default function Conversations() {
+  const { leadId } = useParams();
+  const navigate = useNavigate();
+
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [thread, setThread] = useState<MsgRow[]>([]);
+  const [loadingLeads, setLoadingLeads] = useState(true);
+  const [loadingThread, setLoadingThread] = useState(false);
+
+  const [composer, setComposer] = useState("");
+  const [sending, setSending] = useState(false);
+  const [uiError, setUiError] = useState<string | null>(null);
+
+  const quickReplies = [
+    {
+      label: "Precios",
+      text: "Con gusto. ¿Qué tratamiento te interesa? Te comparto precios aproximados y opciones de pago.",
+    },
+    {
+      label: "Ubicación",
+      text: "Estamos ubicados en el centro de la ciudad. ¿Querés que te envíe la ubicación exacta?",
+    },
+    {
+      label: "Horarios",
+      text: "Atendemos de lunes a sábado. ¿Qué día y horario te conviene?",
+    },
+    {
+      label: "Agendar",
+      text: "¡Perfecto! Decime el día y la hora que preferís y lo coordinamos.",
+    },
+    {
+      label: "Enviar requisitos",
+      text: "Para tu cita solo necesitamos tu nombre completo y un número de contacto. ¿Me los compartís?",
+    },
+  ];
+
+  const selectedLead = useMemo(
+    () => leads.find((l) => l.id === leadId) ?? null,
+    [leads, leadId]
+  );
+
+  async function loadLeads() {
+    setLoadingLeads(true);
+    setUiError(null);
+
+    const { data, error } = await supabase
+      .from("leads")
+      .select(
+        "id, organization_id, full_name, phone, status, channel, channel_user_id, last_message_at, last_message_preview"
+      )
+      .eq("organization_id", ORG)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (error) {
+      setUiError(error.message);
+      setLeads([]);
+    } else {
+      setLeads(
+        dedupeByKey((data ?? []) as any, (item) => `${item.organization_id ?? "org"}::${item.id}::${item.channel ?? "channel"}`)
+      );
+    }
+    setLoadingLeads(false);
+  }
+
+  async function loadThread(targetLeadId: string) {
+    setLoadingThread(true);
+    setUiError(null);
+
+    const { data, error } = await supabase
+      .from("messages")
+      .select("id, organization_id, lead_id, actor, role, content, created_at")
+      .eq("organization_id", ORG)
+      .eq("lead_id", targetLeadId)
+      .order("created_at", { ascending: true })
+      .limit(250);
+
+    if (error) {
+      setUiError(error.message);
+      setThread([]);
+    } else {
+      setThread(dedupeByKey((data ?? []) as any, messageKey));
+    }
+    setLoadingThread(false);
+  }
+
+  useEffect(() => {
+    loadLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!leadId) {
+      setThread([]);
+      return;
+    }
+    loadThread(leadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId]);
+
+  useEffect(() => {
+    const ch = supabase
+      .channel(`rt-messages-${ORG}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `organization_id=eq.${ORG}`,
+        },
+        async (payload) => {
+          await loadLeads();
+          const newMsg = payload.new as { lead_id?: string | null };
+          if (leadId && newMsg?.lead_id === leadId) {
+            await loadThread(leadId);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId]);
+
+  async function sendReply() {
+    if (!selectedLead) return;
+    const text = composer.trim();
+    if (!text) return;
+
+    setSending(true);
+    setUiError(null);
+
+    try {
+      const nowIso = new Date().toISOString();
+      const { error: msgErr } = await supabase.from("messages").upsert([
+        {
+          organization_id: ORG,
+          lead_id: selectedLead.id,
+          channel: selectedLead.channel ?? "messenger",
+          actor: "bot",
+          role: "assistant",
+          content: text,
+          created_at: nowIso,
+        },
+      ]);
+
+      if (msgErr) throw msgErr;
+
+      const { error: outboxErr } = await supabase.from("reply_outbox").insert([
+        {
+          organization_id: ORG,
+          lead_id: selectedLead.id,
+          channel: selectedLead.channel ?? "messenger",
+          channel_user_id: selectedLead.channel_user_id,
+          status: "pending",
+          scheduled_for: new Date().toISOString(),
+          message_text: text,
+          payload: {
+            organization_id: ORG,
+            lead_id: selectedLead.id,
+            channel: selectedLead.channel ?? "messenger",
+            channel_user_id: selectedLead.channel_user_id,
+            outbound_text: text,
+            source: "ui_manual_reply",
+          },
+        },
+      ]);
+
+      if (outboxErr) throw outboxErr;
+
+      setComposer("");
+      await loadLeads();
+      await loadThread(selectedLead.id);
+    } catch (e: any) {
+      setUiError(e?.message ?? "Error enviando respuesta.");
+      // eslint-disable-next-line no-console
+      console.error(e);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="grid grid-cols-12 gap-4 min-w-0 overflow-x-hidden">
+      <div className="col-span-12 lg:col-span-5 min-w-0">
+        <SectionCard title="Leads" description="Conversaciones activas, actualizadas automáticamente.">
+          {uiError ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {uiError}
+            </div>
+          ) : null}
+
+          {loadingLeads ? (
+            <div className="text-sm text-slate-700">Cargando…</div>
+          ) : leads.length === 0 ? (
+            <div className="text-sm text-slate-700">
+              No hay leads visibles.
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {leads.map((l) => {
+                const active = l.id === leadId;
+                return (
+                  <button
+                    key={l.id}
+                    onClick={() => navigate(`/conversations/${l.id}`)}
+                    className={[
+                      "w-full rounded-2xl border px-4 py-3 text-left transition",
+                      active
+                        ? "border-blue-200 bg-blue-50"
+                        : "border-[#E5E7EB] bg-white hover:bg-[#F4F5F7]",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center justify-between gap-3 min-w-0">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">
+                          {l.full_name || "Sin nombre"}
+                        </div>
+                        <div className="truncate text-xs text-slate-500">
+                          {l.last_message_preview || "—"}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-[11px] text-slate-500">
+                        {l.last_message_at ? new Date(l.last_message_at).toLocaleString() : ""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </SectionCard>
+      </div>
+
+      <div className="col-span-12 lg:col-span-7 min-w-0">
+        <SectionCard
+          title="Conversación"
+          description={
+            selectedLead ? `Lead: ${selectedLead.full_name ?? selectedLead.id}` : "Seleccioná un lead"
+          }
+        >
+          {!leadId ? (
+            <div className="text-sm text-slate-700">Elegí un lead de la izquierda.</div>
+          ) : loadingThread ? (
+            <div className="text-sm text-slate-700">Cargando mensajes…</div>
+          ) : (
+            <div className="relative overflow-hidden">
+              <div className="max-h-[520px] overflow-y-auto pr-1">
+                {thread.length === 0 ? (
+                  <div className="text-sm text-slate-700">
+                    No hay mensajes visibles.
+                  </div>
+                ) : (
+                  <div className="grid gap-2">
+                    {thread.map((m) => {
+                      const isUser = (m.actor ?? m.role) === "user";
+                      return (
+                        <div
+                          key={messageKey(m)}
+                          className={[
+                            "max-w-[78%] rounded-2xl px-4 py-3 text-sm break-words whitespace-pre-wrap",
+                            isUser ? "ml-auto bg-[#F4F5F7] text-slate-900" : "mr-auto bg-slate-900 text-white",
+                          ].join(" ")}
+                        >
+                          <div>{m.content}</div>
+                          <div className="mt-1 text-[11px] opacity-60">
+                            {new Date(m.created_at).toLocaleString()}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-white p-3">
+                <div className="flex flex-wrap gap-2">
+                  {quickReplies.map((reply) => (
+                    <button
+                      key={reply.label}
+                      type="button"
+                      onClick={() => setComposer(reply.text)}
+                      className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                    >
+                      {reply.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-3 flex items-end gap-2">
+                  <textarea
+                    value={composer}
+                    onChange={(e) => setComposer(e.target.value)}
+                    placeholder="Escribí una respuesta…"
+                    rows={2}
+                    className="w-full resize-none rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-500"
+                  />
+                  <button
+                    onClick={sendReply}
+                    disabled={!selectedLead || sending || !composer.trim()}
+                    className={[
+                      "shrink-0 rounded-2xl px-4 py-2 text-sm font-semibold",
+                      sending || !composer.trim()
+                        ? "bg-[#F4F5F7] text-slate-500"
+                        : "bg-blue-600 text-white hover:bg-blue-700",
+                    ].join(" ")}
+                  >
+                    {sending ? "Enviando…" : "Responder"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </SectionCard>
+      </div>
+    </div>
+  );
+}

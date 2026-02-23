@@ -1,14 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? "";
+const anon = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? "";
 
-// ❌ NUNCA lances throw en producción
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Missing Supabase environment variables");
-}
+export const hasSupabaseEnv = Boolean(url && anon);
 
-// ✅ Crear cliente solo si existen las variables
-export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+/**
+ * Nota:
+ * - Supabase anon key NO es secreto (es “public”), pero Netlify puede bloquearlo por scanner.
+ * - Si faltan env vars, igual creamos un client “dummy” para que la UI no reviente.
+ *   (Auth fallará, pero no crashea la app completa).
+ */
+export const supabase = createClient(
+  hasSupabaseEnv ? url : "http://localhost",
+  hasSupabaseEnv ? anon : "public-anon-key"
+);
