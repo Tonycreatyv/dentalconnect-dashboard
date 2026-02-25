@@ -7,7 +7,9 @@ export function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (nex
       onClick={() => onChange(!enabled)}
       className={cn(
         "relative inline-flex h-8 w-14 items-center rounded-full border transition",
-        enabled ? "border-blue-600 bg-blue-600" : "border-[#E5E7EB] bg-[#F4F5F7]"
+        enabled
+          ? "border-[#3CBDB9] bg-gradient-to-r from-[#0894C1] to-[#59E0B8]"
+          : "border-white/15 bg-white/10"
       )}
     >
       <span
