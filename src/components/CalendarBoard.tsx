@@ -1,5 +1,5 @@
 // src/components/CalendarBoard.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { CalendarDays, Clock, PencilLine, Plus } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -288,7 +288,9 @@ export default function CalendarBoard() {
 
   const ORG = clinic?.organization_id ?? DEFAULT_ORG;
 
-  const [view, setView] = useState<ViewMode>("week");
+  const [view, setView] = useState<ViewMode>(() =>
+    typeof window !== "undefined" && window.innerWidth < 1024 ? "day" : "week"
+  );
   const [selected, setSelected] = useState<Date>(toStartOfDay(new Date()));
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -307,6 +309,7 @@ export default function CalendarBoard() {
     reason: "",
   });
   const [saving, setSaving] = useState(false);
+  const touchStartX = useRef<number | null>(null);
 
   useEffect(() => {
     const viewParam = searchParams.get("view") as ViewMode | null;
@@ -322,6 +325,26 @@ export default function CalendarBoard() {
       setSelected(toStartOfDay(new Date(dateParam)));
     }
   }, [searchParams]);
+
+  function handleTouchStart(e: React.TouchEvent) {
+    if (view !== "day") return;
+    touchStartX.current = e.touches[0]?.clientX ?? null;
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (view !== "day") return;
+    if (touchStartX.current === null) return;
+    const endX = e.changedTouches[0]?.clientX ?? null;
+    if (endX === null) return;
+    const delta = endX - touchStartX.current;
+    touchStartX.current = null;
+    if (Math.abs(delta) < 60) return;
+    if (delta < 0) {
+      setSelected((prev) => addDays(prev, 1));
+    } else {
+      setSelected((prev) => addDays(prev, -1));
+    }
+  }
 
   const week = useMemo(() => {
     const start = startOfWeekSunday(selected);
@@ -750,7 +773,7 @@ export default function CalendarBoard() {
         ) : null}
 
         {view === "day" ? (
-          <div className="px-6 py-6">
+          <div className="px-6 py-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs text-slate-500">Día</div>

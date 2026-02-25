@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { CalendarPlus, CheckCircle2, UserRound } from "lucide-react";
+import { ArrowLeft, CalendarPlus, CheckCircle2, UserRound } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { SectionCard } from "../components/SectionCard";
 import { dedupeByKey } from "../lib/dedupe";
@@ -199,9 +199,9 @@ export default function Inbox() {
 
   return (
     <div className="grid grid-cols-12 gap-4 min-w-0 overflow-x-hidden">
-      <div className="col-span-12 lg:col-span-5 min-w-0">
-        <SectionCard title="Leads" description="Conversaciones activas.">
-          <div className="max-h-[calc(100vh-240px)] overflow-y-auto pr-1">
+      <div className={["col-span-12 lg:col-span-5 min-w-0", leadId ? "hidden lg:block" : "block"].join(" ")}>
+        <SectionCard title="Leads" description="Conversaciones activas." className="lg:min-h-[calc(100vh-190px)]">
+          <div className="max-h-[calc(100vh-240px)] overflow-y-auto pr-1 sm:max-h-[calc(100vh-220px)]">
             {loadingLeads ? (
               <div className="text-sm text-slate-700">Cargando…</div>
             ) : leads.length === 0 ? (
@@ -220,8 +220,8 @@ export default function Inbox() {
                         "w-full rounded-2xl border px-4 py-3 text-left transition",
                         "min-w-0 overflow-hidden",
                         active
-                          ? "border-blue-200 bg-blue-50"
-                          : "border-[#E5E7EB] bg-white hover:bg-[#F4F5F7]",
+                          ? "border-[#3CBDB9]/45 bg-[#0894C1]/18"
+                          : "border-[#E5E7EB] bg-white hover:bg-white/[0.09]",
                       ].join(" ")}
                     >
                       <div className="flex items-center justify-between gap-3 min-w-0">
@@ -246,7 +246,7 @@ export default function Inbox() {
         </SectionCard>
       </div>
 
-      <div className="col-span-12 lg:col-span-7 min-w-0">
+      <div className={["col-span-12 lg:col-span-7 min-w-0", leadId ? "block" : "hidden lg:block"].join(" ")}>
         <SectionCard
           title="Conversación"
           description={
@@ -283,7 +283,22 @@ export default function Inbox() {
             ) : null
           }
         >
-          <div className="max-h-[calc(100vh-260px)] overflow-y-auto pr-1">
+          {leadId ? (
+            <div className="mb-4 flex items-center gap-2 lg:hidden sticky top-0 z-10 rounded-2xl border border-white/10 bg-black/35 px-2 py-2 backdrop-blur">
+              <button
+                type="button"
+                onClick={() => navigate("/inbox")}
+                className="inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Volver
+              </button>
+              <div className="text-xs text-slate-500 truncate">
+                {selectedLead?.full_name ?? "Conversación"}
+              </div>
+            </div>
+          ) : null}
+          <div className="max-h-[calc(100vh-340px)] overflow-y-auto pr-1 sm:max-h-[calc(100vh-300px)]">
             {!leadId ? (
               <div className="text-sm text-slate-700">Elegí un lead de la izquierda.</div>
             ) : loadingThread ? (
@@ -317,7 +332,7 @@ export default function Inbox() {
           </div>
 
           {leadId ? (
-            <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-white p-3">
+            <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-white p-3 sticky bottom-0 z-10">
               <div className="flex flex-wrap gap-2">
                 {quickReplies.map((reply) => (
                   <button

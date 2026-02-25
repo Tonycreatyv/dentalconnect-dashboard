@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Image, RefreshCw, Sparkles } from "lucide-react";
+import { Image, Sparkles } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { SectionCard } from "../components/SectionCard";
@@ -51,11 +51,6 @@ const TONE_OPTIONS = [
   { value: "promocional", label: "Promocional" },
 ];
 
-const PLATFORM_OPTIONS = [
-  { value: "facebook", label: "Facebook" },
-  { value: "instagram", label: "Instagram" },
-];
-
 function buildCaption(day: number, objective: string, service: string, tone: string, city?: string) {
   const base =
     tone === "promocional"
@@ -87,20 +82,6 @@ function makeImagePlaceholder(text: string) {
   <text x='50%' y='50%' fill='#1F2937' font-size='32' font-family='Arial' text-anchor='middle'>${safe}</text>
 </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-function statusChip(status?: string | null) {
-  const s = (status ?? "draft").toLowerCase();
-  if (s === "scheduled") return "bg-blue-50 text-blue-700 border-blue-200";
-  if (s === "published") return "bg-blue-100 text-blue-700 border-blue-200";
-  return "bg-[#F4F5F7] text-slate-700 border-[#E5E7EB]";
-}
-
-function statusLabel(status?: string | null) {
-  const s = (status ?? "draft").toLowerCase();
-  if (s === "scheduled") return "Scheduled";
-  if (s === "published") return "Published";
-  return "Draft";
 }
 
 export default function MarketingAI() {
@@ -267,12 +248,6 @@ export default function MarketingAI() {
     await Promise.all(updates.map((u) => supabase.from("post_items").update({ image_url: u.image_url }).eq("id", u.id)));
   }
 
-  async function regenerateImage(item: PostItemRow) {
-    const nextUrl = makeImagePlaceholder(item.caption ?? "DentalConnect");
-    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, image_url: nextUrl } : i)));
-    await supabase.from("post_items").update({ image_url: nextUrl }).eq("id", item.id);
-  }
-
   function addService() {
     const trimmed = serviceInput.trim();
     if (!trimmed) return;
@@ -285,19 +260,19 @@ export default function MarketingAI() {
       <div>
         <h2 className="text-2xl font-semibold text-slate-900">Marketing IA</h2>
         <p className="text-sm text-slate-700">
-          Planificá tu semana en minutos y mantené una presencia constante en redes.
+          Planificá tu semana con un flujo simple y activá publicaciones consistentes.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SectionCard title="Nueva campaña" description="Generá 7 días de publicaciones.">
+      <div className="space-y-4">
+        <SectionCard title="1. Objetivo" description="Definí qué querés lograr esta semana.">
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-medium text-slate-700">Objetivo de la campaña</label>
+              <label className="text-xs font-medium text-slate-700">Objetivo</label>
               <input
                 value={objective}
                 onChange={(e) => setObjective(e.target.value)}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                className="mt-2 h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
                 placeholder="Ej: aumentar citas de limpieza"
               />
             </div>
@@ -308,7 +283,7 @@ export default function MarketingAI() {
                 <select
                   value={tone}
                   onChange={(e) => setTone(e.target.value)}
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  className="mt-2 h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
                 >
                   {TONE_OPTIONS.map((t) => (
                     <option key={t.value} value={t.value}>
@@ -322,17 +297,20 @@ export default function MarketingAI() {
                 <input
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  className="mt-2 h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
                   placeholder="Ej: Tegucigalpa"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-slate-700">Servicios a promocionar</label>
+              <label className="text-xs font-medium text-slate-700">Servicios a destacar</label>
               <div className="mt-2 flex flex-wrap gap-2">
                 {services.map((service) => (
-                  <span key={service} className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-1 text-xs text-slate-700">
+                  <span
+                    key={service}
+                    className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-1 text-xs text-slate-700"
+                  >
                     {service}
                   </span>
                 ))}
@@ -341,7 +319,7 @@ export default function MarketingAI() {
                 <input
                   value={serviceInput}
                   onChange={(e) => setServiceInput(e.target.value)}
-                  className="h-10 flex-1 rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  className="h-11 flex-1 rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
                   placeholder="Agregar servicio"
                 />
                 <button
@@ -358,20 +336,94 @@ export default function MarketingAI() {
               type="button"
               onClick={generateCampaign}
               disabled={generating || !objective.trim()}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7] disabled:opacity-60"
             >
               <Sparkles className="h-4 w-4" />
-              {generating ? "Generando…" : "Generar campaña"}
+              {generating ? "Generando…" : "Generar contenido"}
             </button>
           </div>
         </SectionCard>
 
-        <SectionCard title="Automatizaciones" description="Controla respuestas y límites diarios.">
+        <SectionCard title="2. Contenido" description="Revisá y ajustá el texto de cada publicación.">
+          {loading ? (
+            <div className="text-sm text-slate-700">Cargando…</div>
+          ) : activeItems.length === 0 ? (
+            <EmptyState title="Sin contenido" message="Genera una campaña para ver las publicaciones." />
+          ) : (
+            <div className="space-y-4">
+              {activeItems.map((item, idx) => (
+                <div key={item.id} className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-900">Día {idx + 1}</div>
+                    <span className="text-xs text-slate-500">{item.platform ?? "instagram"}</span>
+                  </div>
+                  <textarea
+                    value={item.caption ?? ""}
+                    onChange={(e) => updateItem(item.id, { caption: e.target.value })}
+                    className="mt-3 min-h-[110px] w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard title="3. Publicación" description="Elegí fecha y hora para cada publicación.">
+          {activeItems.length === 0 ? (
+            <EmptyState title="Sin programación" message="Genera contenido para programar publicaciones." />
+          ) : (
+            <div className="space-y-3">
+              {activeItems.map((item, idx) => (
+                <div key={item.id} className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <div className="text-sm font-semibold text-slate-900">Día {idx + 1}</div>
+                  <input
+                    type="datetime-local"
+                    value={item.scheduled_at ? item.scheduled_at.slice(0, 16) : ""}
+                    onChange={(e) => updateItem(item.id, { scheduled_at: e.target.value })}
+                    className="mt-3 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard title="4. Vista previa" description="Cómo se verá tu publicación destacada.">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start">
+            <div className="h-48 w-full overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] md:w-64">
+              {activeItems[0]?.image_url ? (
+                <img src={activeItems[0].image_url as string} alt="Preview" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-slate-500">
+                  Imagen pendiente
+                </div>
+              )}
+            </div>
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-slate-900">Texto principal</div>
+              <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">
+                {activeItems[0]?.caption ?? "Generá contenido para ver la vista previa."}
+              </div>
+              {activeItems.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={generateImages}
+                  className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
+                >
+                  <Image className="h-4 w-4" />
+                  Actualizar imagen
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="5. Activar" description="Listo para comenzar con Marketing IA.">
           <div className="space-y-4">
             <div className="flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Auto-respuestas en comentarios</div>
-                <div className="text-xs text-slate-700">Respondé consultas frecuentes sin esfuerzo.</div>
+                <div className="text-sm font-semibold text-slate-900">Respuestas en comentarios</div>
+                <div className="text-xs text-slate-700">Respondé consultas frecuentes automáticamente.</div>
               </div>
               <button
                 type="button"
@@ -387,7 +439,7 @@ export default function MarketingAI() {
             <div className="flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-slate-900">Revisión manual</div>
-                <div className="text-xs text-slate-700">Aprueba respuestas antes de publicar.</div>
+                <div className="text-xs text-slate-700">Aprobá respuestas antes de publicar.</div>
               </div>
               <button
                 type="button"
@@ -413,183 +465,13 @@ export default function MarketingAI() {
             <button
               type="button"
               onClick={saveBrandProfile}
-              className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
+              className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
             >
-              Guardar automatizaciones
-            </button>
-          </div>
-        </SectionCard>
-
-        <SectionCard title="Perfil de marca" description="Mantén consistencia en tono y estilo.">
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-medium text-slate-700">Tono principal</label>
-              <select
-                value={tone}
-                onChange={(e) => setTone(e.target.value)}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-              >
-                {TONE_OPTIONS.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-slate-700">Servicios destacados</label>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {services.map((service) => (
-                  <span key={service} className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-1 text-xs text-slate-700">
-                    {service}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={saveBrandProfile}
-              className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
-            >
-              Guardar perfil
+              Activar Marketing IA
             </button>
           </div>
         </SectionCard>
       </div>
-
-      <SectionCard
-        title="Campañas recientes"
-        description="Revisa, edita y programa cada publicación."
-        action={
-          activeItems.length > 0 ? (
-            <button
-              type="button"
-              onClick={generateImages}
-              className="inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
-            >
-              <Image className="h-4 w-4" />
-              Generar imágenes
-            </button>
-          ) : null
-        }
-      >
-        {loading ? (
-          <div className="text-sm text-slate-700">Cargando…</div>
-        ) : campaigns.length === 0 ? (
-          <EmptyState title="Sin campañas" message="Genera tu primera campaña para comenzar." />
-        ) : (
-          <div className="grid grid-cols-1 gap-4">
-            <div className="flex flex-wrap gap-2">
-              {campaigns.map((campaign) => (
-                <button
-                  key={campaign.id}
-                  onClick={async () => {
-                    setActiveCampaign(campaign);
-                    const itemsRes = await supabase
-                      .from("post_items")
-                      .select("id, campaign_id, platform, caption, hashtags, cta, image_url, image_prompt, scheduled_at, status")
-                      .eq("campaign_id", campaign.id)
-                      .order("scheduled_at", { ascending: true });
-                    setItems((itemsRes.data as any) ?? []);
-                  }}
-                  className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition ${
-                    activeCampaign?.id === campaign.id
-                      ? "border-blue-200 bg-blue-50 text-blue-700"
-                      : "border-[#E5E7EB] bg-white text-slate-700 hover:bg-[#F4F5F7]"
-                  }`}
-                >
-                  {campaign.prompt ?? "Campaña"}
-                </button>
-              ))}
-            </div>
-
-            {activeItems.length === 0 ? (
-              <EmptyState title="Sin publicaciones" message="Selecciona una campaña para ver las publicaciones." />
-            ) : (
-              <div className="grid grid-cols-1 gap-4">
-                {activeItems.map((item, idx) => (
-                  <div key={item.id} className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold text-slate-900">Día {idx + 1}</div>
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className={item.status === "approved" ? "h-4 w-4 text-blue-600" : "h-4 w-4 text-slate-500"} />
-                            <span className={`text-xs border rounded-full px-2 py-0.5 ${statusChip(item.status)}`}>
-                              {statusLabel(item.status)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 flex items-center gap-2">
-                          <span className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-2 py-0.5 text-xs text-slate-700">
-                            {item.platform ?? "instagram"}
-                          </span>
-                          <span className="text-xs text-slate-500">Publicación</span>
-                        </div>
-
-                        <div className="mt-3">
-                          <label className="text-xs font-medium text-slate-700">Caption</label>
-                          <textarea
-                            value={item.caption ?? ""}
-                            onChange={(e) => updateItem(item.id, { caption: e.target.value })}
-                            className="mt-2 min-h-[110px] w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300"
-                          />
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                          <div>
-                            <label className="text-xs font-medium text-slate-700">CTA</label>
-                            <input
-                              value={item.cta ?? ""}
-                              onChange={(e) => updateItem(item.id, { cta: e.target.value })}
-                              className="mt-2 h-10 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs font-medium text-slate-700">Programar</label>
-                            <input
-                              type="datetime-local"
-                              value={item.scheduled_at ? item.scheduled_at.slice(0, 16) : ""}
-                              onChange={(e) => updateItem(item.id, { scheduled_at: e.target.value })}
-                              className="mt-2 h-10 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="w-full max-w-[240px]">
-                        <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-3">
-                          <div className="text-xs text-slate-500">Vista previa</div>
-                          <div className="mt-3 h-40 w-full overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white">
-                            {item.image_url ? (
-                              <img src={item.image_url} alt="Preview" className="h-full w-full object-cover" />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-xs text-slate-500">
-                                Imagen pendiente
-                              </div>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => regenerateImage(item)}
-                            className="mt-3 inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-[#F4F5F7]"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            Regenerar imagen
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </SectionCard>
     </div>
   );
 }

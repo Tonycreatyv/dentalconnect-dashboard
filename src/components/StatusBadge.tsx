@@ -1,12 +1,17 @@
 export const StatusBadge = ({ value }: { value?: string | null }) => {
-  const normalized = value?.toLowerCase() ?? "unknown";
+  const normalized = value?.toLowerCase()?.replace("-", "_") ?? "unknown";
   const styles: Record<string, string> = {
     connected: "bg-emerald-400/10 text-emerald-200 border-emerald-400/30",
-    pending: "bg-[#0894C1]/12 text-[#59E0B8] border-[#3CBDB9]/35",
+    pending: "bg-amber-400/12 text-amber-200 border-amber-300/35",
+    pendiente: "bg-amber-400/12 text-amber-200 border-amber-300/35",
     disconnected: "bg-rose-500/10 text-rose-200 border-rose-400/30",
     requested: "bg-[#0894C1]/12 text-[#59E0B8] border-[#3CBDB9]/35",
+    solicitada: "bg-sky-400/12 text-sky-200 border-sky-300/35",
+    requested_info: "bg-sky-400/12 text-sky-200 border-sky-300/35",
     confirmed: "bg-[#0894C1]/12 text-[#59E0B8] border-[#3CBDB9]/35",
+    confirmada: "bg-emerald-400/12 text-emerald-200 border-emerald-300/35",
     cancelled: "bg-rose-500/10 text-rose-200 border-rose-400/30",
+    cancelada: "bg-rose-500/10 text-rose-200 border-rose-400/30",
     active: "bg-[#0894C1]/12 text-[#59E0B8] border-[#3CBDB9]/35",
     paused: "bg-amber-500/10 text-amber-200 border-amber-400/30",
   };

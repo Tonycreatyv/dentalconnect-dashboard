@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import { Topbar } from "../components/Topbar";
 import { supabase } from "../lib/supabaseClient";
+import { Toast, type ToastKind } from "../components/ui/Toast";
+import { useClinic } from "../context/ClinicContext";
+import BottomNav from "../components/BottomNav";
 
 const PAGE_TITLES: Record<string, string> = {
   "/overview": "Overview",
@@ -18,63 +21,90 @@ const PAGE_TITLES: Record<string, string> = {
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
+  const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
+  const { setClinic, setClinicId } = useClinic();
 
   const pageTitle = useMemo(() => {
     const key = Object.keys(PAGE_TITLES).find((path) => location.pathname.startsWith(path));
     return key ? PAGE_TITLES[key] : "Panel";
   }, [location.pathname]);
 
-  async function logout() {
+  function clearLocalCache() {
     try {
-      await supabase.auth.signOut();
+      const keysToClear = ["dc_activity_log_v1", "dc_activity_ui_v1", "clinicId", "clinic_id", "organization_id"];
+      for (const key of keysToClear) {
+        localStorage.removeItem(key);
+      }
+
+      for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("dc_")) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function logout() {
+    if (logoutLoading) return;
+    setLogoutLoading(true);
+
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error("[logout] error", err);
+      setToast({ kind: "error", message: "No se pudo cerrar la sesión." });
     } finally {
+      clearLocalCache();
+      setClinic(null);
+      setClinicId(null);
+      setLogoutLoading(false);
       navigate("/login", { replace: true });
     }
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F5F7] text-slate-900 overflow-x-hidden">
-      <div className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="relative min-h-screen overflow-x-hidden dc-bg text-white">
+      <div className="pointer-events-none absolute inset-0 dc-bg-overlay" />
+      <div className="relative mx-auto w-full max-w-[1360px] px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex gap-6">
           <div className="hidden shrink-0 lg:block lg:w-[272px]">
             <Sidebar />
           </div>
 
-          <div className="min-w-0 flex-1 overflow-x-hidden">
+          <div className="min-w-0 flex-1 overflow-x-hidden pb-24 lg:pb-0">
             <div className="mb-4">
               <Topbar
                 onLogout={logout}
-                onMenu={() => setMobileOpen(true)}
                 title={pageTitle}
+                loading={logoutLoading}
               />
             </div>
 
             <Outlet />
 
             <div className="mt-10 flex justify-center">
-              <div className="text-[11px] text-slate-500">
-                Powered by <span className="text-blue-600 font-semibold">CREATYV</span>
+              <div className="text-[11px] text-white/50">
+                Powered by <span className="font-semibold text-[#59E0B8]">CREATYV</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {mobileOpen ? (
-        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setMobileOpen(false)}
-          />
-          <div
-            className="absolute left-0 top-0 h-full w-[272px] bg-[#0F172A] p-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Sidebar onNavigate={() => setMobileOpen(false)} />
-          </div>
-        </div>
-      ) : null}
+      <BottomNav />
+
+      <Toast
+        open={Boolean(toast)}
+        kind={toast?.kind}
+        message={toast?.message ?? ""}
+        onClose={() => setToast(null)}
+      />
     </div>
   );
 }

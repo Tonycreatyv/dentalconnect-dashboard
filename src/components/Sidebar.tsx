@@ -22,8 +22,8 @@ function NavItem({
         [
           "flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-semibold transition",
           isActive
-            ? "bg-blue-500/10 text-blue-400"
-            : "text-white/70 hover:text-white hover:bg-white/5",
+            ? "bg-[#0894C1]/12 text-[#59E0B8]"
+            : "text-white/72 hover:text-white/92 hover:bg-white/5",
         ].join(" ")
       }
     >
@@ -37,7 +37,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { clinic } = useClinic();
 
   return (
-    <aside className="rounded-3xl border border-white/10 bg-[#0F172A] p-4 text-white">
+    <aside className="rounded-3xl border border-white/10 bg-[#0B0D12] p-4 text-white">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <BrandMark clinicName={clinic?.name ?? "Clínica"} />
       </div>
@@ -52,7 +52,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3">
-        <div className="text-xs font-semibold text-white">Tip de hoy</div>
+        <div className="text-xs font-semibold text-white/95">Tip de hoy</div>
         <div className="mt-1 text-xs text-white/70">
           Confirmá citas del día con 1 click y evitá no-shows.
         </div>

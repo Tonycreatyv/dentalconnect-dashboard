@@ -1,5 +1,3 @@
-import React from "react";
-
 type Props = {
   clinicName?: string;
 };
@@ -12,10 +10,10 @@ export default function BrandMark({ clinicName = "Clínica" }: Props) {
           className="absolute inset-0 rounded-2xl"
           style={{
             background:
-              "radial-gradient(circle at 30% 20%, rgba(37,99,235,0.25), transparent 55%), radial-gradient(circle at 70% 80%, rgba(37,99,235,0.12), transparent 60%)",
+              "radial-gradient(circle at 30% 20%, rgba(8,148,193,0.28), transparent 55%), radial-gradient(circle at 70% 80%, rgba(89,224,184,0.18), transparent 60%)",
           }}
         />
-        <div className="absolute inset-0 rounded-2xl shadow-[0_0_20px_rgba(37,99,235,0.2)]" />
+        <div className="absolute inset-0 rounded-2xl shadow-[0_0_20px_rgba(8,148,193,0.22)]" />
         <div className="absolute inset-0 grid place-items-center">
           <span className="text-xs font-bold text-white">D</span>
         </div>

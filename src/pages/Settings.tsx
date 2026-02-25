@@ -423,6 +423,7 @@ export default function Settings() {
   const ORG = clinic?.organization_id ?? DEFAULT_ORG;
 
   const [tab, setTab] = useState<TabKey>("integraciones");
+  const [openSection, setOpenSection] = useState<TabKey | null>("integraciones");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -792,6 +793,509 @@ export default function Settings() {
     []
   );
 
+  const renderIntegrations = () => (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {INTEGRATIONS.map((integration) => {
+        const status = statusFor(integration.key);
+        const Icon = integration.icon;
+        const isDisabled = integration.key === "google_calendar";
+
+        return (
+          <div key={integration.key} className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7]">
+                  <Icon className="h-5 w-5 text-slate-700" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">{integration.name}</div>
+                  <div className="mt-1 text-sm text-slate-700">{integration.description}</div>
+                </div>
+              </div>
+
+              <StatusBadge label={status.label} tone={status.tone} />
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                disabled={status.disabled}
+                onClick={() => {
+                  if (integration.key === "messenger") {
+                    connectMeta();
+                    return;
+                  }
+                  if (integration.key === "google_calendar") {
+                    return;
+                  }
+                  setRequestOpen(integration.key);
+                }}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                  status.disabled
+                    ? "border border-[#E5E7EB] bg-white text-slate-500"
+                    : "bg-white text-black hover:opacity-95"
+                }`}
+              >
+                {isDisabled ? "Conectar" : status.primary}
+              </button>
+
+              {isDisabled ? (
+                <button
+                  type="button"
+                  onClick={() => setWaitlistOpen(true)}
+                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                >
+                  Unirme a lista de espera
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setGuideOpen(integration.key)}
+                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                >
+                  Ver guía
+                </button>
+              )}
+            </div>
+
+            {isDisabled ? (
+              <button
+                type="button"
+                onClick={() => setGuideOpen(integration.key)}
+                className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-slate-700 hover:text-slate-900"
+              >
+                Ver guía
+              </button>
+            ) : null}
+
+            {isDisabled ? (
+              <div className="mt-3 flex items-center gap-2 text-xs text-slate-700">
+                <BadgeCheck className="h-4 w-4 text-slate-500" />
+                Inscribite para recibir acceso prioritario cuando esté disponible.
+              </div>
+            ) : null}
+
+            {showTechnicalDetails ? (
+              <details className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4 text-xs text-slate-700">
+                <summary className="cursor-pointer text-sm text-slate-700">Detalles técnicos</summary>
+                <div className="mt-3 space-y-2">
+                  <div>Identificador de conexión:</div>
+                  <div className="break-all text-slate-500">{META_REDIRECT_URI || "(faltante)"}</div>
+                </div>
+              </details>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const renderClinica = () => (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="lg:col-span-1 rounded-3xl border border-[#E5E7EB] bg-white p-6">
+        <p className="text-[10px] tracking-[0.22em] uppercase text-slate-500">Clínica</p>
+
+        <label className="mt-4 block text-xs font-medium text-slate-700">Nombre de la clínica</label>
+        <input
+          value={clinicName}
+          onChange={(e) => setClinicName(e.target.value)}
+          className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
+          placeholder="Ej: Clínica Sonrisas"
+        />
+      </div>
+
+      <div className="lg:col-span-2 space-y-6">
+        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
+          <p className="text-sm font-semibold text-slate-900">Datos de la clínica</p>
+          <p className="mt-1 text-sm text-slate-700">
+            Lo más preguntado: teléfono, ubicación, dirección, horarios.
+          </p>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-slate-700">Teléfono</label>
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Ej: +504 9999-9999"
+                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-700">Ubicación (Google Maps)</label>
+              <input
+                value={mapsUrl}
+                onChange={(e) => setMapsUrl(e.target.value)}
+                placeholder="Pega el link de Maps"
+                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="text-xs font-medium text-slate-700">Dirección</label>
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Colonia, calle, referencia, ciudad"
+                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
+          <p className="text-sm font-semibold text-slate-900">Especialidades</p>
+          <p className="mt-1 text-sm text-slate-700">Marca todas las que aplica.</p>
+
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            {SPECIALTIES.map((s) => {
+              const checked = specialties.includes(s.value);
+              return (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => toggleSpecialty(s.value)}
+                  className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm transition ${
+                    checked
+                      ? "border-[#E5E7EB] bg-[#F4F5F7] text-slate-900"
+                      : "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700 hover:bg-[#F4F5F7] hover:text-slate-900"
+                  }`}
+                >
+                  <span>{s.label}</span>
+                  <span
+                    className={`h-5 w-5 rounded-full border flex items-center justify-center ${
+                      checked ? "border-[#E5E7EB] bg-[#F4F5F7]" : "border-[#E5E7EB] bg-transparent"
+                    }`}
+                  >
+                    {checked ? "✓" : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Usar plantillas</p>
+              <p className="text-xs text-slate-700">Servicios + FAQs precargadas (editable).</p>
+            </div>
+            <Toggle
+              enabled={useTemplate}
+              onChange={(v) => {
+                setUseTemplate(v);
+                if (v) {
+                  const merged = mergeTemplates(specialties);
+                  setServices(merged.services);
+                  setFaqs(merged.faqs);
+                  setEmergency(merged.emergency);
+                  setPoliciesCancel(merged.policies.cancelacion ?? "");
+                  setPoliciesDeposit(merged.policies.deposito ?? "");
+                }
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderHorario = () => (
+    <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">Horario</p>
+          <p className="mt-1 text-sm text-slate-700">Configura por día.</p>
+        </div>
+
+        <div className="flex items-center gap-3 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Modo avanzado</p>
+            <p className="text-xs text-slate-700">Diferente por día.</p>
+          </div>
+          <Toggle enabled={advancedPerDay} onChange={setAdvancedPerDay} />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {Object.entries(dayLabels).map(([k, label]) => {
+          const d = hours[k] ?? { closed: true };
+          return (
+            <div key={k} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center justify-between md:justify-start md:gap-6">
+                  <p className="text-sm font-semibold text-slate-900">{label}</p>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-700">Cerrado</span>
+                    <Toggle
+                      enabled={!d.closed}
+                      onChange={(open) =>
+                        setHours((prev) => ({
+                          ...prev,
+                          [k]: open
+                            ? { closed: false, open: d.open ?? "08:00", close: d.close ?? "17:00" }
+                            : { closed: true },
+                        }))
+                      }
+                    />
+                    <span className="text-xs text-slate-700">Abierto</span>
+                  </div>
+                </div>
+
+                {!d.closed ? (
+                  <div className="grid grid-cols-2 gap-3 md:flex md:items-center">
+                    <div>
+                      <label className="text-xs text-slate-700">Abre</label>
+                      <input
+                        type="time"
+                        value={d.open ?? "08:00"}
+                        onChange={(e) =>
+                          setHours((prev) => ({
+                            ...prev,
+                            [k]: { ...d, closed: false, open: e.target.value },
+                          }))
+                        }
+                        className="mt-1 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-700">Cierra</label>
+                      <input
+                        type="time"
+                        value={d.close ?? "17:00"}
+                        onChange={(e) =>
+                          setHours((prev) => ({
+                            ...prev,
+                            [k]: { ...d, closed: false, close: e.target.value },
+                          }))
+                        }
+                        className="mt-1 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-700">Cerrado</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderServicios = () => (
+    <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-4">
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">Servicios y precios</p>
+          <p className="mt-1 text-sm text-slate-700">Editable por clínica.</p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() =>
+            setServices((prev) => [
+              ...(prev ?? []),
+              {
+                name: "Nuevo servicio",
+                price_from: null,
+                price_to: null,
+                currency: currencyDefault,
+                duration_min: 30,
+                notes: "",
+              },
+            ])
+          }
+          className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
+        >
+          + Agregar servicio
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {services.map((s, idx) => (
+          <div key={idx} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4 space-y-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium text-slate-700">Nombre</label>
+                <input
+                  value={s.name}
+                  onChange={(e) =>
+                    setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))
+                  }
+                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => setServices((prev) => prev.filter((_, i) => i !== idx))}
+                  className="h-11 w-full rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-3 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                >
+                  Quitar
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700">Desde</label>
+                <input
+                  type="number"
+                  value={s.price_from ?? ""}
+                  onChange={(e) =>
+                    setServices((prev) =>
+                      prev.map((x, i) =>
+                        i === idx ? { ...x, price_from: e.target.value ? Number(e.target.value) : null } : x
+                      )
+                    )
+                  }
+                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-700">Hasta</label>
+                <input
+                  type="number"
+                  value={s.price_to ?? ""}
+                  onChange={(e) =>
+                    setServices((prev) =>
+                      prev.map((x, i) =>
+                        i === idx ? { ...x, price_to: e.target.value ? Number(e.target.value) : null } : x
+                      )
+                    )
+                  }
+                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-700">Moneda</label>
+                <input
+                  value={s.currency ?? currencyDefault}
+                  onChange={(e) =>
+                    setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, currency: e.target.value } : x)))
+                  }
+                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  placeholder="HNL"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-700">Duración (min)</label>
+                <input
+                  type="number"
+                  value={s.duration_min ?? 30}
+                  onChange={(e) =>
+                    setServices((prev) =>
+                      prev.map((x, i) =>
+                        i === idx ? { ...x, duration_min: e.target.value ? Number(e.target.value) : 30 } : x
+                      )
+                    )
+                  }
+                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  placeholder="30"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-700">Descripción</label>
+              <input
+                value={s.notes ?? ""}
+                onChange={(e) =>
+                  setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)))
+                }
+                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                placeholder="Ej: depende del caso, incluye evaluación…"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderFaqs = () => (
+    <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-6">
+      <div>
+        <p className="text-sm font-semibold text-slate-900">Respuestas rápidas (FAQs)</p>
+        <p className="mt-1 text-sm text-slate-700">Respuestas consistentes sin improvisar.</p>
+
+        <div className="mt-4 space-y-3">
+          {faqs.map((f, idx) => (
+            <div key={idx} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
+              <label className="text-xs font-medium text-slate-700">Pregunta</label>
+              <input
+                value={f.q}
+                onChange={(e) => setFaqs((prev) => prev.map((x, i) => (i === idx ? { ...x, q: e.target.value } : x)))}
+                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+              />
+
+              <label className="mt-3 block text-xs font-medium text-slate-700">Respuesta</label>
+              <input
+                value={f.a}
+                onChange={(e) => setFaqs((prev) => prev.map((x, i) => (i === idx ? { ...x, a: e.target.value } : x)))}
+                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+              />
+
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setFaqs((prev) => prev.filter((_, i) => i !== idx))}
+                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                >
+                  Quitar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setFaqs((prev) => [...prev, { q: "Nueva pregunta", a: "Nueva respuesta" }])}
+          className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
+        >
+          + Agregar FAQ
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
+          <label className="text-xs font-medium text-slate-700">Urgencias</label>
+          <input
+            value={emergency}
+            onChange={(e) => setEmergency(e.target.value)}
+            className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+          />
+        </div>
+
+        <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
+          <label className="text-xs font-medium text-slate-700">Política de cancelación</label>
+          <input
+            value={policiesCancel}
+            onChange={(e) => setPoliciesCancel(e.target.value)}
+            className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+          />
+        </div>
+
+        <div className="md:col-span-2 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
+          <label className="text-xs font-medium text-slate-700">Depósitos (si aplica)</label>
+          <input
+            value={policiesDeposit}
+            onChange={(e) => setPoliciesDeposit(e.target.value)}
+            className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+          />
+        </div>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -834,7 +1338,34 @@ export default function Settings() {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2 rounded-3xl border border-[#E5E7EB] bg-[#F4F5F7] p-2">
+      <div className="space-y-3 lg:hidden">
+        {tabs.map((t) => {
+          const open = openSection === t.key;
+          return (
+            <div key={t.key} className="rounded-3xl border border-[#E5E7EB] bg-white">
+              <button
+                type="button"
+                onClick={() => setOpenSection(open ? null : t.key)}
+                className="flex w-full items-center justify-between px-5 py-4 text-sm font-semibold text-slate-900"
+              >
+                {t.label}
+                <span className="text-slate-500">{open ? "−" : "+"}</span>
+              </button>
+              {open ? (
+                <div className="border-t border-[#E5E7EB] p-4">
+                  {t.key === "integraciones" && renderIntegrations()}
+                  {t.key === "clinica" && renderClinica()}
+                  {t.key === "horario" && renderHorario()}
+                  {t.key === "servicios" && renderServicios()}
+                  {t.key === "faqs" && renderFaqs()}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hidden lg:flex flex-wrap gap-2 rounded-3xl border border-[#E5E7EB] bg-[#F4F5F7] p-2">
         {tabs.map((t) => {
           const active = tab === t.key;
           return (
@@ -852,508 +1383,13 @@ export default function Settings() {
         })}
       </div>
 
-      {tab === "integraciones" ? (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {INTEGRATIONS.map((integration) => {
-            const status = statusFor(integration.key);
-            const Icon = integration.icon;
-            const isDisabled = integration.key === "google_calendar";
-
-            return (
-              <div key={integration.key} className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7]">
-                      <Icon className="h-5 w-5 text-slate-700" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">{integration.name}</div>
-                      <div className="mt-1 text-sm text-slate-700">{integration.description}</div>
-                    </div>
-                  </div>
-
-                  <StatusBadge label={status.label} tone={status.tone} />
-                </div>
-
-                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <button
-                    type="button"
-                    disabled={status.disabled}
-                    onClick={() => {
-                      if (integration.key === "messenger") {
-                        connectMeta();
-                        return;
-                      }
-                      if (integration.key === "google_calendar") {
-                        return;
-                      }
-                      setRequestOpen(integration.key);
-                    }}
-                    className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                      status.disabled
-                        ? "border border-[#E5E7EB] bg-white text-slate-500"
-                        : "bg-white text-black hover:opacity-95"
-                    }`}
-                  >
-                    {isDisabled ? "Conectar" : status.primary}
-                  </button>
-
-                  {isDisabled ? (
-                    <button
-                      type="button"
-                      onClick={() => setWaitlistOpen(true)}
-                      className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                    >
-                      Unirme a lista de espera
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setGuideOpen(integration.key)}
-                      className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                    >
-                      Ver guía
-                    </button>
-                  )}
-                </div>
-
-                {isDisabled ? (
-                  <button
-                    type="button"
-                    onClick={() => setGuideOpen(integration.key)}
-                    className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-slate-700 hover:text-slate-900"
-                  >
-                    Ver guía
-                  </button>
-                ) : null}
-
-                {isDisabled ? (
-                  <div className="mt-3 flex items-center gap-2 text-xs text-slate-700">
-                    <BadgeCheck className="h-4 w-4 text-slate-500" />
-                    Inscribite para recibir acceso prioritario cuando esté disponible.
-                  </div>
-                ) : null}
-
-                {showTechnicalDetails ? (
-                  <details className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4 text-xs text-slate-700">
-                    <summary className="cursor-pointer text-sm text-slate-700">Detalles técnicos</summary>
-                    <div className="mt-3 space-y-2">
-                      <div>Identificador de conexión:</div>
-                      <div className="break-all text-slate-500">{META_REDIRECT_URI || "(faltante)"}</div>
-                    </div>
-                  </details>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {tab === "clinica" ? (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-1 rounded-3xl border border-[#E5E7EB] bg-white p-6">
-            <p className="text-[10px] tracking-[0.22em] uppercase text-slate-500">Clínica</p>
-
-            <label className="mt-4 block text-xs font-medium text-slate-700">Nombre de la clínica</label>
-            <input
-              value={clinicName}
-              onChange={(e) => setClinicName(e.target.value)}
-              className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-              placeholder="Ej: Clínica Sonrisas"
-            />
-          </div>
-
-          <div className="lg:col-span-2 space-y-6">
-            <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
-              <p className="text-sm font-semibold text-slate-900">Datos de la clínica</p>
-              <p className="mt-1 text-sm text-slate-700">
-                Lo más preguntado: teléfono, ubicación, dirección, horarios.
-              </p>
-
-              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <label className="text-xs font-medium text-slate-700">Teléfono</label>
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="Ej: +504 9999-9999"
-                    className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-slate-700">Ubicación (Google Maps)</label>
-                  <input
-                    value={mapsUrl}
-                    onChange={(e) => setMapsUrl(e.target.value)}
-                    placeholder="Pega el link de Maps"
-                    className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-slate-700">Dirección</label>
-                  <input
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Colonia, calle, referencia, ciudad"
-                    className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
-              <p className="text-sm font-semibold text-slate-900">Especialidades</p>
-              <p className="mt-1 text-sm text-slate-700">Marca todas las que aplica.</p>
-
-              <div className="mt-4 grid gap-2 md:grid-cols-2">
-                {SPECIALTIES.map((s) => {
-                  const checked = specialties.includes(s.value);
-                  return (
-                    <button
-                      key={s.value}
-                      type="button"
-                      onClick={() => toggleSpecialty(s.value)}
-                      className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm transition ${
-                        checked
-                          ? "border-[#E5E7EB] bg-[#F4F5F7] text-slate-900"
-                          : "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700 hover:bg-[#F4F5F7] hover:text-slate-900"
-                      }`}
-                    >
-                      <span>{s.label}</span>
-                      <span
-                        className={`h-5 w-5 rounded-full border flex items-center justify-center ${
-                          checked ? "border-[#E5E7EB] bg-[#F4F5F7]" : "border-[#E5E7EB] bg-transparent"
-                        }`}
-                      >
-                        {checked ? "✓" : ""}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Usar plantillas</p>
-                  <p className="text-xs text-slate-700">Servicios + FAQs precargadas (editable).</p>
-                </div>
-                <Toggle
-                  enabled={useTemplate}
-                  onChange={(v) => {
-                    setUseTemplate(v);
-                    if (v) {
-                      const merged = mergeTemplates(specialties);
-                      setServices(merged.services);
-                      setFaqs(merged.faqs);
-                      setEmergency(merged.emergency);
-                      setPoliciesCancel(merged.policies.cancelacion ?? "");
-                      setPoliciesDeposit(merged.policies.deposito ?? "");
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {tab === "horario" ? (
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Horario</p>
-              <p className="mt-1 text-sm text-slate-700">Configura por día.</p>
-            </div>
-
-            <div className="flex items-center gap-3 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Modo avanzado</p>
-                <p className="text-xs text-slate-700">Diferente por día.</p>
-              </div>
-              <Toggle enabled={advancedPerDay} onChange={setAdvancedPerDay} />
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {Object.entries(dayLabels).map(([k, label]) => {
-              const d = hours[k] ?? { closed: true };
-              return (
-                <div key={k} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div className="flex items-center justify-between md:justify-start md:gap-6">
-                      <p className="text-sm font-semibold text-slate-900">{label}</p>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-slate-700">Cerrado</span>
-                        <Toggle
-                          enabled={!d.closed}
-                          onChange={(open) =>
-                            setHours((prev) => ({
-                              ...prev,
-                              [k]: open
-                                ? { closed: false, open: d.open ?? "08:00", close: d.close ?? "17:00" }
-                                : { closed: true },
-                            }))
-                          }
-                        />
-                        <span className="text-xs text-slate-700">Abierto</span>
-                      </div>
-                    </div>
-
-                    {!d.closed ? (
-                      <div className="grid grid-cols-2 gap-3 md:flex md:items-center">
-                        <div>
-                          <label className="text-xs text-slate-700">Abre</label>
-                          <input
-                            type="time"
-                            value={d.open ?? "08:00"}
-                            onChange={(e) =>
-                              setHours((prev) => ({
-                                ...prev,
-                                [k]: { ...d, closed: false, open: e.target.value },
-                              }))
-                            }
-                            className="mt-1 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-700">Cierra</label>
-                          <input
-                            type="time"
-                            value={d.close ?? "17:00"}
-                            onChange={(e) =>
-                              setHours((prev) => ({
-                                ...prev,
-                                [k]: { ...d, closed: false, close: e.target.value },
-                              }))
-                            }
-                            className="mt-1 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-700">Cerrado</p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-
-      {tab === "servicios" ? (
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-4">
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Servicios y precios</p>
-              <p className="mt-1 text-sm text-slate-700">Editable por clínica.</p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                setServices((prev) => [
-                  ...(prev ?? []),
-                  {
-                    name: "Nuevo servicio",
-                    price_from: null,
-                    price_to: null,
-                    currency: currencyDefault,
-                    duration_min: 30,
-                    notes: "",
-                  },
-                ])
-              }
-              className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
-            >
-              + Agregar servicio
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {services.map((s, idx) => (
-              <div key={idx} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4 space-y-3">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <div className="md:col-span-2">
-                    <label className="text-xs font-medium text-slate-700">Nombre</label>
-                    <input
-                      value={s.name}
-                      onChange={(e) =>
-                        setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))
-                      }
-                      className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      type="button"
-                      onClick={() => setServices((prev) => prev.filter((_, i) => i !== idx))}
-                      className="h-11 w-full rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-3 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                    >
-                      Quitar
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                  <div>
-                    <label className="text-xs font-medium text-slate-700">Desde</label>
-                    <input
-                      type="number"
-                      value={s.price_from ?? ""}
-                      onChange={(e) =>
-                        setServices((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, price_from: e.target.value ? Number(e.target.value) : null } : x
-                          )
-                        )
-                      }
-                      className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-slate-700">Hasta</label>
-                    <input
-                      type="number"
-                      value={s.price_to ?? ""}
-                      onChange={(e) =>
-                        setServices((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, price_to: e.target.value ? Number(e.target.value) : null } : x
-                          )
-                        )
-                      }
-                      className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-slate-700">Moneda</label>
-                    <input
-                      value={s.currency ?? currencyDefault}
-                      onChange={(e) =>
-                        setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, currency: e.target.value } : x)))
-                      }
-                      className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                      placeholder="HNL"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-slate-700">Duración (min)</label>
-                    <input
-                      type="number"
-                      value={s.duration_min ?? 30}
-                      onChange={(e) =>
-                        setServices((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, duration_min: e.target.value ? Number(e.target.value) : 30 } : x
-                          )
-                        )
-                      }
-                      className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                      placeholder="30"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-slate-700">Descripción</label>
-                  <input
-                    value={s.notes ?? ""}
-                    onChange={(e) =>
-                      setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)))
-                    }
-                    className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                    placeholder="Ej: depende del caso, incluye evaluación…"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {tab === "faqs" ? (
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-6">
-          <div>
-            <p className="text-sm font-semibold text-slate-900">Respuestas rápidas (FAQs)</p>
-            <p className="mt-1 text-sm text-slate-700">Respuestas consistentes sin improvisar.</p>
-
-            <div className="mt-4 space-y-3">
-              {faqs.map((f, idx) => (
-                <div key={idx} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-                  <label className="text-xs font-medium text-slate-700">Pregunta</label>
-                  <input
-                    value={f.q}
-                    onChange={(e) => setFaqs((prev) => prev.map((x, i) => (i === idx ? { ...x, q: e.target.value } : x)))}
-                    className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                  />
-
-                  <label className="mt-3 block text-xs font-medium text-slate-700">Respuesta</label>
-                  <input
-                    value={f.a}
-                    onChange={(e) => setFaqs((prev) => prev.map((x, i) => (i === idx ? { ...x, a: e.target.value } : x)))}
-                    className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                  />
-
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setFaqs((prev) => prev.filter((_, i) => i !== idx))}
-                      className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                    >
-                      Quitar
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setFaqs((prev) => [...prev, { q: "Nueva pregunta", a: "Nueva respuesta" }])}
-              className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
-            >
-              + Agregar FAQ
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-              <label className="text-xs font-medium text-slate-700">Urgencias</label>
-              <input
-                value={emergency}
-                onChange={(e) => setEmergency(e.target.value)}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-              />
-            </div>
-
-            <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-              <label className="text-xs font-medium text-slate-700">Política de cancelación</label>
-              <input
-                value={policiesCancel}
-                onChange={(e) => setPoliciesCancel(e.target.value)}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-              />
-            </div>
-
-            <div className="md:col-span-2 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-              <label className="text-xs font-medium text-slate-700">Depósitos (si aplica)</label>
-              <input
-                value={policiesDeposit}
-                onChange={(e) => setPoliciesDeposit(e.target.value)}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <div className="hidden lg:block">
+        {tab === "integraciones" && renderIntegrations()}
+        {tab === "clinica" && renderClinica()}
+        {tab === "horario" && renderHorario()}
+        {tab === "servicios" && renderServicios()}
+        {tab === "faqs" && renderFaqs()}
+      </div>
 
       <Modal
         open={guideOpen !== null}

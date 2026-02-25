@@ -134,6 +134,8 @@ export default function Overview() {
 
   const ORG = clinic?.organization_id ?? DEFAULT_ORG;
 
+  const [showAllMobile, setShowAllMobile] = useState(false);
+
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [appts, setAppts] = useState<ApptRow[]>([]);
   const [marketingItems, setMarketingItems] = useState<PostItemRow[]>([]);
@@ -290,6 +292,18 @@ export default function Overview() {
       .slice(0, 3);
   }, [apptsToday]);
 
+  const nextAppointment = useMemo(() => {
+    if (apptsToday.length === 0) return null;
+    const sorted = apptsToday
+      .slice()
+      .sort((a, b) => {
+        const ai = normalizedStartISO(a);
+        const bi = normalizedStartISO(b);
+        return (ai ? new Date(ai).getTime() : 0) - (bi ? new Date(bi).getTime() : 0);
+      });
+    return sorted[0] ?? null;
+  }, [apptsToday]);
+
   const marketingThisWeek = useMemo(() => {
     const start = weekStart.getTime();
     const end = weekEnd.getTime();
@@ -322,7 +336,7 @@ export default function Overview() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={["grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4", showAllMobile ? "grid" : "hidden lg:grid"].join(" ")}>
         {loading ? (
           [1, 2, 3, 4].map((i) => (
             <div key={i} className="h-20 rounded-2xl border border-[#E5E7EB] bg-white animate-pulse" />
@@ -337,7 +351,91 @@ export default function Overview() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:hidden">
+        <SectionCard title="Hoy" description="Resumen del día.">
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+              <div className="text-xs text-slate-500 uppercase tracking-[0.2em]">Citas hoy</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">{apptsToday.length}</div>
+            </div>
+            <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+              <div className="text-xs text-slate-500 uppercase tracking-[0.2em]">Leads pendientes</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">{pendingReplies}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate("/calendar?date=today")}
+            className="mt-5 inline-flex items-center text-sm font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Ver agenda →
+          </button>
+        </SectionCard>
+
+        <SectionCard title="Próxima cita" description="La siguiente cita confirmada.">
+          {nextAppointment ? (
+            <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-4">
+              <div className="text-sm font-semibold text-slate-900 truncate">
+                {nextAppointment.title?.trim() || nextAppointment.reason?.trim() || "Cita"}
+              </div>
+              <div className="mt-1 text-xs text-slate-700 truncate">
+                {nextAppointment.patient_name ?? "Paciente"}
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                {normalizedStartISO(nextAppointment)
+                  ? new Date(normalizedStartISO(nextAppointment) as string).toLocaleTimeString("es", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "—"}
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="Sin próximas citas" message="Las próximas citas aparecerán aquí." />
+          )}
+          <button
+            type="button"
+            onClick={() => navigate("/calendar")}
+            className="mt-5 inline-flex items-center text-sm font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Ver agenda →
+          </button>
+        </SectionCard>
+
+        <SectionCard title="Actividad reciente" description="Últimos mensajes.">
+          {recentLeads.length === 0 ? (
+            <EmptyState title="Sin actividad" message="Cuando haya mensajes, aparecerán aquí." />
+          ) : (
+            <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+              <div className="text-sm font-semibold text-slate-900 truncate">
+                {recentLeads[0]?.full_name ?? "Sin nombre"}
+              </div>
+              <div className="mt-1 text-xs text-slate-700 truncate">
+                {recentLeads[0]?.last_message_preview ?? "—"}
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate("/inbox")}
+            className="mt-5 inline-flex items-center text-sm font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Ver mensajes →
+          </button>
+        </SectionCard>
+
+        {!showAllMobile ? (
+          <button
+            type="button"
+            onClick={() => setShowAllMobile(true)}
+            className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm font-semibold text-slate-900"
+          >
+            Ver más
+          </button>
+        ) : null}
+      </div>
+
+      <div className={["grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3", showAllMobile ? "block" : "hidden lg:grid"].join(" ")}>
         <SectionCard
           title="Estado de citas"
           description="Resumen semanal por estado."
@@ -427,7 +525,7 @@ export default function Overview() {
           title="Actividad de leads"
           description="Últimos mensajes registrados."
           onClick={() => navigate("/inbox")}
-          className="min-h-[240px]"
+          className="min-h-[240px] flex flex-col"
         >
           {loading ? (
             <div className="space-y-2">
@@ -438,7 +536,7 @@ export default function Overview() {
           ) : recentLeads.length === 0 ? (
             <EmptyState title="Sin actividad" message="Cuando haya mensajes, aparecerán aquí." />
           ) : (
-            <div className="grid gap-2 pb-1">
+            <div className="grid gap-2 max-h-[190px] overflow-y-auto pr-1 pb-2">
               {recentLeads.map((l) => (
                 <div key={l.id} className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
@@ -454,17 +552,19 @@ export default function Overview() {
               ))}
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => navigate("/inbox")}
-            className="mt-5 inline-flex items-center text-sm font-semibold text-blue-600 hover:text-blue-700"
-          >
-            Ver todo →
-          </button>
+          <div className="mt-auto pt-3">
+            <button
+              type="button"
+              onClick={() => navigate("/inbox")}
+              className="inline-flex items-center text-sm font-semibold text-blue-600 hover:text-blue-700"
+            >
+              Ver todo →
+            </button>
+          </div>
         </SectionCard>
       </div>
 
-      <div className="grid grid-cols-1">
+      <div className={["grid grid-cols-1", showAllMobile ? "block" : "hidden lg:grid"].join(" ")}>
         <SectionCard title="Marketing IA" description="Resumen semanal de publicaciones." onClick={() => navigate("/marketing")}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-slate-700">
