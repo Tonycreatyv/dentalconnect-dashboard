@@ -1,7 +1,7 @@
 // src/components/CalendarBoard.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { CalendarDays, ChevronDown, Clock, PencilLine, Plus, Trash2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { CalendarDays, ChevronDown, ChevronLeft, Clock, PencilLine, Plus, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { dedupeByKey } from "../lib/dedupe";
@@ -9,6 +9,7 @@ import { appointmentKey, normalizedStartISO } from "../lib/appointments";
 import { addDays, buildLocalISO, startOfWeekSunday, toEndOfDay, toStartOfDay } from "../lib/time";
 import { defaultHours, generateTimeSlots, getDayKey, HoursMap, minutesToSlot, slotToMinutes } from "../lib/availability";
 import { Toast, type ToastKind } from "./ui/Toast";
+import PageHeader from "./PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -159,6 +160,7 @@ function AppointmentModal({
   onClose,
   onSave,
   onDelete,
+  onBack,
   saving,
 }: {
   open: boolean;
@@ -173,6 +175,7 @@ function AppointmentModal({
   onClose: () => void;
   onSave: () => void;
   onDelete: () => void;
+  onBack: () => void;
   saving: boolean;
 }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -184,9 +187,32 @@ function AppointmentModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xl px-4">
-      <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-        <div className="flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-xl sm:items-center sm:px-4">
+      <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/10 bg-white/10 shadow-[0_24px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:h-auto sm:max-h-[92vh] sm:max-w-xl sm:rounded-3xl">
+        <div className="sticky top-0 z-20 border-b border-white/10 bg-black/25 px-4 py-3 backdrop-blur-lg sm:px-6 sm:pt-6 sm:pb-4 sm:border-b-0 sm:bg-transparent sm:backdrop-blur-0">
+          <div className="flex items-center justify-between gap-2 md:hidden">
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex items-center gap-1 rounded-xl border border-white/20 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white/90 hover:bg-white/15"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Volver
+            </button>
+            <div className="truncate text-sm font-semibold text-white/95">
+              {mode === "create" ? "Nueva cita" : "Editar cita"}
+            </div>
+            <button
+              type="button"
+              onClick={onSave}
+              className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              disabled={saving}
+            >
+              {saving ? "Guardando..." : "Guardar"}
+            </button>
+          </div>
+
+          <div className="hidden items-center justify-between md:flex">
           <div>
             <div className="text-lg font-semibold text-slate-900">
               {mode === "create" ? "Nueva cita" : "Editar cita"}
@@ -200,9 +226,11 @@ function AppointmentModal({
           >
             Cerrar
           </button>
+          </div>
         </div>
 
-        <div className="mt-5 grid gap-4">
+        <div className="min-h-0 overflow-y-auto px-4 pb-28 pt-3 sm:px-6 sm:pb-24">
+          <div className="grid gap-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="text-xs font-medium text-slate-700">Paciente</label>
@@ -329,15 +357,16 @@ function AppointmentModal({
               placeholder="Detalles clínicos o preferencias del paciente"
             />
           </div>
+          {error ? (
+            <div className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {error}
+            </div>
+          ) : null}
+          </div>
         </div>
 
-        {error ? (
-          <div className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="mt-6 flex items-center justify-between gap-2">
+        <div className="border-t border-white/10 bg-black/20 px-4 pt-3 pb-[calc(16px+env(safe-area-inset-bottom))] backdrop-blur-lg md:px-6">
+          <div className="flex items-center justify-between gap-2">
           {mode === "edit" ? (
             <button
               type="button"
@@ -367,6 +396,7 @@ function AppointmentModal({
           >
             {saving ? "Guardando..." : "Guardar"}
           </button>
+          </div>
         </div>
       </div>
     </div>
@@ -374,6 +404,7 @@ function AppointmentModal({
 }
 
 export default function CalendarBoard() {
+  const navigate = useNavigate();
   const { clinic } = useClinic();
   const [searchParams] = useSearchParams();
 
@@ -411,6 +442,14 @@ export default function CalendarBoard() {
   const touchStartX = useRef<number | null>(null);
   const patientFilter = searchParams.get("patient")?.trim() ?? "";
   const createForPatient = searchParams.get("createFor")?.trim() ?? "";
+
+  function goBack() {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/agenda");
+  }
 
   useEffect(() => {
     const viewParam = searchParams.get("view") as ViewMode | null;
@@ -874,12 +913,12 @@ export default function CalendarBoard() {
 
   return (
     <div className="space-y-4 min-w-0 overflow-x-hidden">
-      <div>
-        <h2 className="text-3xl font-semibold text-slate-900">Agenda</h2>
-        <p className="text-sm text-slate-700">
-          Vista por Mes / Semana / Día con estados claros y edición rápida.
-        </p>
-      </div>
+      <PageHeader
+        title="Agenda"
+        subtitle="Vista por Mes / Semana / Día con estados claros y edición rápida."
+        showBackOnMobile
+        backTo="/agenda"
+      />
 
       {error ? (
         <div className="rounded-3xl border border-[#E5E7EB] bg-white p-4 text-sm text-slate-700">
@@ -1294,6 +1333,7 @@ export default function CalendarBoard() {
         onClose={() => setModalOpen(false)}
         onSave={saveAppointment}
         onDelete={deleteAppointment}
+        onBack={() => setModalOpen(false)}
         saving={saving || deleting}
       />
 

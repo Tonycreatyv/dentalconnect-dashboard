@@ -14,6 +14,7 @@ import { useClinic } from "../context/ClinicContext";
 import { Toggle } from "../components/Toggle";
 import { Modal } from "../components/ui/Modal";
 import { Toast, type ToastKind } from "../components/ui/Toast";
+import PageHeader from "../components/PageHeader";
 
 const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
 const GOOGLE_CAL_CONNECT_URL = "";
@@ -1320,7 +1321,7 @@ export default function Settings() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <h2 className="text-2xl font-semibold text-slate-900">Configuración</h2>
+        <PageHeader title="Configuración" showBackOnMobile backTo="/overview" />
         <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 text-slate-700">
           Cargando...
         </div>
@@ -1330,23 +1331,22 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">Configuración</h2>
-          <p className="mt-1 text-sm text-slate-700">
-            Gestioná tu clínica, horarios, servicios e integraciones en un solo lugar.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving || !isDirty}
-          className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7] disabled:opacity-50"
-        >
-          {saving ? "Guardando..." : "Guardar cambios"}
-        </button>
-      </div>
+      <PageHeader
+        title="Configuración"
+        subtitle="Gestioná tu clínica, horarios, servicios e integraciones en un solo lugar."
+        showBackOnMobile
+        backTo="/overview"
+        action={
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving || !isDirty}
+            className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7] disabled:opacity-50"
+          >
+            {saving ? "Guardando..." : "Guardar cambios"}
+          </button>
+        }
+      />
 
       {notice ? (
         <div className="rounded-3xl border border-[#E5E7EB] bg-white p-4 text-sm text-slate-700">

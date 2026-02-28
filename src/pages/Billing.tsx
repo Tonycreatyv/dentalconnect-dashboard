@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { CheckCircle2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
+import PageHeader from "../components/PageHeader";
 
 type Plan = "starter" | "growth" | "pro";
 type BillingStatus = "trialing" | "active" | "past_due" | "canceled";
@@ -105,10 +106,12 @@ export default function Billing() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold text-white/95">Billing</h1>
-        <p className="text-sm text-white/70">Elegí tu plan y continuá al checkout con prueba gratis de 14 días.</p>
-      </div>
+      <PageHeader
+        title="Billing"
+        subtitle="Elegí tu plan y continuá al checkout con prueba gratis de 14 días."
+        showBackOnMobile
+        backTo="/overview"
+      />
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/85">
         <div className="mb-1 text-xs uppercase tracking-[0.16em] text-white/60">Plan actual</div>

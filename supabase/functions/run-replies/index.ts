@@ -39,6 +39,10 @@ function clampText(s: string, max = 900) {
   return t.slice(0, max - 1) + "…";
 }
 
+function stripUrls(input: string) {
+  return safeStr(input, "").replace(/https?:\/\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
 function normalizeChannel(ch: string) {
   const c = (ch ?? "").toLowerCase();
   if (c.includes("messenger")) return "messenger";
@@ -119,20 +123,26 @@ async function sendToMeta(args: {
 
 function defaultSystemPrompt() {
   return `
-Eres una recepcionista HUMANA de una clínica dental en Honduras. Hablas español hondureño natural.
-Objetivo: ayudar rápido y cerrar cita cuando aplica.
+Eres una recepcionista humana de una clínica dental en Honduras. Hablas español natural.
+Objetivo: ayudar rápido, sonar cálida y cerrar cita cuando aplica.
 
 Reglas:
-- 1 a 3 oraciones, claras.
-- NO repitas la misma pregunta dos veces seguidas.
-- NO inventes datos de clínica.
-- Si no hay respuesta clara, ofrece CTA de continuación.
+- Respuestas cortas (1 a 3 oraciones).
+- Máximo 1 pregunta por respuesta.
+- Saluda solo si el lead no ha sido saludado (slots.greeted=false).
+- Nunca repitas la misma pregunta dos veces seguidas.
+- Nunca inventes datos ni números.
+- Solo menciona números si vienen del inbound actual o de state.slots del mismo lead.
+- Si detectas intención de recordatorios/citas/agendar, usa CTA suave al Trial.
+- No incluyas links/URLs en tu reply.
 
 Devuelve SOLO JSON:
 {
   "intent": "appointment|pricing|faq|handoff|other",
   "reply": "texto",
   "question_tag": "ask_owner|ask_volume|ask_goal|cta_connect|none",
+  "recommended_plan": "starter|growth|pro|null",
+  "action": "cta_trial|continue",
   "slots_patch": {},
   "state_patch": {}
 }
@@ -161,6 +171,9 @@ ${args.inboundText}
 }
 
 const YES_WORDS = ["si", "sí", "yo", "ambos", "recepcionista", "asistente", "dueño", "owner"];
+const RECEPTION_WORDS = ["recepcion", "recepción", "recepcionista", "secretaria", "secretaría"];
+const OWNER_WORDS = ["yo", "dueño", "dueno", "owner", "encargado"];
+const BOTH_WORDS = ["ambos", "los dos", "yo y recepcion", "yo y la recepcion"];
 
 function norm(s: string) {
   return safeStr(s)
@@ -172,7 +185,52 @@ function norm(s: string) {
 
 function looksLikePositiveAnswer(input: string) {
   const t = norm(input);
-  return YES_WORDS.some((w) => t.includes(norm(w)));
+  return YES_WORDS.some((w) => t.includes(norm(w))) || /(^|[\s.,;:!?])(si|sí)([\s.,;:!?]|$)/.test(t);
+}
+
+function extractNumber(input: string): number | null {
+  const m = norm(input).match(/\b(\d{1,5})\b/);
+  if (!m?.[1]) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+function normalizePlan(input: unknown): "starter" | "growth" | "pro" | null {
+  const p = safeStr(input, "").trim().toLowerCase();
+  if (p === "starter" || p === "growth" || p === "pro") return p;
+  return null;
+}
+
+function normalizeAction(input: unknown): "cta_trial" | "continue" {
+  const a = safeStr(input, "").trim().toLowerCase();
+  if (a === "cta_trial") return "cta_trial";
+  return "continue";
+}
+
+function buildTrialUrl(base: string, path: string, plan: string, trialDays: number) {
+  const normalizedBase = safeStr(base, "").replace(/\/+$/, "");
+  const normalizedPath = safeStr(path, "").startsWith("/") ? safeStr(path, "") : `/${safeStr(path, "")}`;
+  return `${normalizedBase}${normalizedPath}?plan=${encodeURIComponent(plan)}&trial=${encodeURIComponent(String(trialDays))}`;
+}
+
+function resolveWhoResponds(input: string): string | null {
+  const t = norm(input);
+  if (RECEPTION_WORDS.some((w) => t.includes(norm(w)))) return "recepcionista";
+  if (BOTH_WORDS.some((w) => t.includes(norm(w)))) return "ambos";
+  if (OWNER_WORDS.some((w) => t.includes(norm(w)))) return "dueño";
+  return null;
+}
+
+function deterministicTrialCTA() {
+  return "Perfecto. Para activarlo: te paso el link del Trial y luego conectás Messenger en Settings. ¿Seguimos?";
+}
+
+function nextStageFromTag(current: string) {
+  if (current === "ask_owner") return "qualifying";
+  if (current === "ask_volume") return "qualifying";
+  if (current === "ask_goal") return "cta";
+  return "cta";
 }
 
 function nextQuestionTag(current: string) {
@@ -187,89 +245,152 @@ function questionGuard(leadState: Json, inboundText: string) {
   if (!lastTag) return null;
 
   const slots: Json = leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
-  const lastAskedAt = safeStr(leadState?.last_bot_question_at, "");
-  const lastAskedAtMs = lastAskedAt ? new Date(lastAskedAt).getTime() : 0;
-  const recentlyAsked = lastAskedAtMs > 0 && Date.now() - lastAskedAtMs < 2 * 60 * 1000;
+  const inboundNorm = norm(inboundText);
+  const alreadyHasWho = typeof slots?.who_responds === "string" && slots.who_responds.trim().length > 0;
+  const hasMessagesPerDay = Number(slots?.messages_per_day ?? 0) > 0;
 
-  if (lastTag === "ask_owner" && looksLikePositiveAnswer(inboundText)) {
-    const inboundNorm = norm(inboundText);
-    const who =
-      inboundNorm.includes("recepcion") || inboundNorm.includes("asistente")
-        ? "recepcionista"
-        : inboundNorm.includes("amb")
-        ? "ambos"
-        : "dueño";
-    return {
-      reply:
-        "Perfecto, gracias. Para calibrar bien el flujo: ¿cuántos mensajes nuevos reciben por semana?",
-      question_tag: "ask_volume",
-      slots_patch: { ...slots, who_responds: who, process_owner: who },
-      state_patch: { stage: "discovering" },
-      intent: "appointment",
-    };
+  if (lastTag === "ask_owner") {
+    const who = resolveWhoResponds(inboundText);
+    const isPositive = looksLikePositiveAnswer(inboundText);
+
+    if ((isPositive && alreadyHasWho) || who) {
+      const nextWho = who || safeStr(slots.who_responds, "");
+      return {
+        reply: deterministicTrialCTA(),
+        question_tag: "cta_trial",
+        slots_patch: {
+          ...(nextWho ? { who_responds: nextWho, process_owner: nextWho } : {}),
+          owner_confirmed: true,
+          greeted: true,
+        },
+        state_patch: { stage: nextStageFromTag(lastTag) },
+        intent: "appointment",
+        action: "cta_trial",
+        recommended_plan: "growth",
+        debug: "question_guard:advance_from_ask_owner",
+      };
+    }
   }
 
-  if (lastTag === "ask_volume" && inboundText.trim()) {
-    return {
-      reply:
-        "Excelente. ¿Cuál es el objetivo principal ahora: más citas, resolver preguntas más rápido o seguimiento?",
-      question_tag: "ask_goal",
-      slots_patch: { ...slots, weekly_message_volume: clampText(inboundText, 80) },
-      state_patch: { stage: "discovering" },
-      intent: "appointment",
-    };
-  }
+  if (lastTag === "ask_volume") {
+    if (hasMessagesPerDay) {
+      return {
+        reply:
+          "Perfecto. Ya con eso te dejo listo el Trial y conectamos Messenger en Settings. ¿Seguimos?",
+        question_tag: "cta_trial",
+        slots_patch: { greeted: true },
+        state_patch: { stage: nextStageFromTag(lastTag) },
+        intent: "appointment",
+        action: "cta_trial",
+        recommended_plan: "growth",
+        debug: "question_guard:skip_ask_volume_already_known",
+      };
+    }
 
-  if (lastTag === "ask_goal" && inboundText.trim()) {
-    return {
-      reply:
-        "Perfecto. Con eso te puedo dejar el embudo listo hoy. Si querés, activo la configuración y empezamos.",
-      question_tag: "cta_connect",
-      slots_patch: { ...slots, main_goal: clampText(inboundText, 120) },
-      state_patch: { stage: "qualifying" },
-      intent: "appointment",
-    };
-  }
+    const n = extractNumber(inboundText);
+    if (n !== null) {
+      return {
+        reply:
+          "Excelente. Con eso te puedo dejar el flujo listo hoy. ¿Querés que activemos el Trial ahora?",
+        question_tag: "cta_trial",
+        slots_patch: { messages_per_day: n, greeted: true },
+        state_patch: { stage: nextStageFromTag(lastTag) },
+        intent: "appointment",
+        action: "cta_trial",
+        recommended_plan: "growth",
+        debug: "question_guard:captured_messages_per_day",
+      };
+    }
 
-  if (recentlyAsked) {
-    return {
-      reply:
-        "Avancemos para no repetirnos. Te propongo continuar con la configuración y dejarlo activo hoy.",
-      question_tag: nextQuestionTag(lastTag),
-      slots_patch: slots,
-      state_patch: { stage: "qualifying" },
-      intent: "other",
-    };
+    if (inboundNorm) {
+      return {
+        reply:
+          "Genial. Para calibrarlo bien, decime un aproximado de mensajes por día y lo activo.",
+        question_tag: "ask_volume",
+        slots_patch: { greeted: true },
+        state_patch: { stage: "discovering" },
+        intent: "appointment",
+        debug: "question_guard:ask_volume_needs_number",
+      };
+    }
   }
 
   return null;
+}
+
+function normalizeQuestionTag(tag: string) {
+  const t = safeStr(tag, "").trim().toLowerCase();
+  if (!t) return "none";
+  return t;
+}
+
+function enforceNoRepeatTag(prevTag: string, nextTag: string) {
+  const p = normalizeQuestionTag(prevTag);
+  const n = normalizeQuestionTag(nextTag);
+  if (!n || n === "none") return n;
+  if (p && p === n) {
+    if (n === "cta_trial" || n === "cta_connect") return "cta_trial";
+    return nextQuestionTag(n);
+  }
+  return n;
 }
 
 function mergeState(prev: Json, args: {
   inboundMessageId: string;
   statePatch: Json;
   slotsPatch: Json;
-  intent: string;
   questionTag: string;
 }) {
-  const next: Json = { ...(prev ?? {}) };
-  const currentSlots = next?.slots && typeof next.slots === "object" ? next.slots : {};
+  const next: Json = {};
+  const prevSlots = prev?.slots && typeof prev.slots === "object" ? prev.slots : {};
+  const incomingStage = safeStr(args.statePatch?.stage, safeStr(prev?.stage, ""));
 
-  for (const [k, v] of Object.entries(args.statePatch ?? {})) next[k] = v;
-
-  next.slots = { ...currentSlots, ...(args.slotsPatch ?? {}) };
-  next.intent = args.intent;
-  next.updated_at = nowIso();
-  next.last_seen_inbound_mid = args.inboundMessageId || safeStr(next.last_seen_inbound_mid, "");
-  next.last_inbound_message_id = args.inboundMessageId || safeStr(next.last_inbound_message_id, "");
-  next.last_bot_question = args.questionTag || safeStr(next.last_bot_question, "");
-  next.last_bot_question_at = nowIso();
-
-  if (!next.asked || typeof next.asked !== "object") {
-    next.asked = { full_name: false, phone: false, availability: false, service: false };
-  }
+  next.stage = incomingStage || "discovering";
+  next.slots = { ...prevSlots, ...(args.slotsPatch ?? {}) };
+  next.last_bot_question = normalizeQuestionTag(args.questionTag || safeStr(prev?.last_bot_question, ""));
+  next.last_seen_inbound_mid = args.inboundMessageId || safeStr(prev?.last_seen_inbound_mid, "");
 
   return next;
+}
+
+function guardGreeting(slots: Json, reply: string) {
+  const greeted = Boolean(slots?.greeted);
+  if (!greeted) return reply;
+  return reply.replace(/^(hola|buenas|buen día|buen dia|qué tal|que tal)[,!\s]*/i, "").trim() || reply;
+}
+
+function capOneQuestion(text: string) {
+  const t = safeStr(text, "").trim();
+  if (!t) return t;
+  const firstQ = t.indexOf("?");
+  if (firstQ < 0) return t;
+  const rest = t.slice(firstQ + 1).replace(/\?/g, ".").trim();
+  return `${t.slice(0, firstQ + 1)}${rest ? ` ${rest}` : ""}`.trim();
+}
+
+function ensureSlotTypes(slotsPatch: Json, currentSlots: Json, inboundText: string) {
+  const next = { ...(slotsPatch ?? {}) };
+  if ("messages_per_day" in next) {
+    const n = Number(next.messages_per_day);
+    if (!Number.isFinite(n) || n <= 0) {
+      const extracted = extractNumber(inboundText);
+      if (extracted !== null) next.messages_per_day = extracted;
+      else if (Number(currentSlots?.messages_per_day ?? 0) > 0) delete next.messages_per_day;
+      else delete next.messages_per_day;
+    }
+  }
+  return next;
+}
+
+function ctaFromIntent(intent: string) {
+  const i = safeStr(intent, "").toLowerCase();
+  if (i.includes("appointment") || i.includes("pricing") || i.includes("other")) {
+    return {
+      tag: "cta_trial",
+      text: "Si querés, te paso el link del Trial y lo activamos ahora mismo.",
+    };
+  }
+  return { tag: "none", text: "" };
 }
 
 Deno.serve(async (req) => {
@@ -328,6 +449,9 @@ Deno.serve(async (req) => {
       policies: {},
       emergency: "",
     };
+    let appBaseUrl = Deno.env.get("PUBLIC_APP_URL") ?? "https://dental.creatyv.io";
+    let signupPath = "/signup";
+    let trialDays = 14;
     const os = await supabase
       .from("org_settings")
       .select(
@@ -342,6 +466,17 @@ Deno.serve(async (req) => {
       if (system_prompt && typeof system_prompt === "string" && system_prompt.trim()) {
         systemPrompt = system_prompt.trim();
       }
+    }
+    const osCfg = await supabase
+      .from("org_settings")
+      .select("app_base_url, signup_path, trial_days")
+      .eq("organization_id", organization_id)
+      .maybeSingle();
+    if (!osCfg.error && osCfg.data) {
+      appBaseUrl = safeStr((osCfg.data as any).app_base_url, appBaseUrl) || appBaseUrl;
+      signupPath = safeStr((osCfg.data as any).signup_path, signupPath) || signupPath;
+      const td = Number((osCfg.data as any).trial_days ?? trialDays);
+      if (Number.isFinite(td) && td > 0 && td <= 365) trialDays = td;
     }
 
     const { data: jobs, error: qErr } = await supabase
@@ -436,12 +571,17 @@ Deno.serve(async (req) => {
         }
 
         const guard = questionGuard(leadState, inboundText);
+        const currentSlots: Json =
+          leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
+        let debugNote: string | null = null;
 
         let reply = "";
         let intent = "other";
         let questionTag = "";
         let statePatch: Json = {};
         let slotsPatch: Json = {};
+        let recommendedPlan: "starter" | "growth" | "pro" | null = null;
+        let action: "cta_trial" | "continue" = "continue";
 
         if (guard) {
           reply = guard.reply;
@@ -449,6 +589,9 @@ Deno.serve(async (req) => {
           questionTag = guard.question_tag;
           statePatch = guard.state_patch;
           slotsPatch = guard.slots_patch;
+          recommendedPlan = normalizePlan(guard.recommended_plan);
+          action = normalizeAction(guard.action);
+          debugNote = safeStr(guard.debug, "question_guard_applied");
         } else {
           const userPrompt = buildUserPrompt({
             clinic: clinicCtx,
@@ -469,28 +612,53 @@ Deno.serve(async (req) => {
           reply = clampText(safeStr(parsed?.reply, ""), 950);
           intent = safeStr(parsed?.intent, "other");
           questionTag = safeStr(parsed?.question_tag, "");
+          recommendedPlan = normalizePlan(parsed?.recommended_plan);
+          action = normalizeAction(parsed?.action);
           statePatch = parsed?.state_patch && typeof parsed.state_patch === "object" ? parsed.state_patch : {};
           slotsPatch = parsed?.slots_patch && typeof parsed.slots_patch === "object" ? parsed.slots_patch : {};
           if (!reply) throw new Error(`LLM missing reply. raw=${raw.slice(0, 160)}...`);
         }
 
         const prevTag = safeStr(leadState?.last_bot_question, "");
-        const prevAskedAt = safeStr(leadState?.last_bot_question_at, "");
-        const repeatTooSoon =
-          questionTag &&
-          prevTag === questionTag &&
-          prevAskedAt &&
-          Date.now() - new Date(prevAskedAt).getTime() < 2 * 60 * 1000;
-        if (repeatTooSoon) {
-          questionTag = nextQuestionTag(questionTag);
-          reply = "Sigamos para no repetirnos. Te propongo avanzar con la configuración y activarlo hoy.";
+        const rawTag = normalizeQuestionTag(questionTag);
+        questionTag = enforceNoRepeatTag(prevTag, questionTag);
+        if (rawTag && rawTag === normalizeQuestionTag(prevTag) && questionTag !== rawTag) {
+          debugNote = "question_guard:anti_repeat_advanced";
+        }
+
+        slotsPatch = ensureSlotTypes(slotsPatch, currentSlots, inboundText);
+        slotsPatch.greeted = true;
+        reply = capOneQuestion(
+          guardGreeting({ ...currentSlots, ...slotsPatch }, clampText(stripUrls(reply), 950))
+        );
+
+        if (!guard && prevTag && normalizeQuestionTag(questionTag) === normalizeQuestionTag(prevTag)) {
+          const fallback = ctaFromIntent(intent);
+          if (fallback.text) {
+            reply = fallback.text;
+            questionTag = fallback.tag;
+            action = "cta_trial";
+            recommendedPlan = recommendedPlan ?? "growth";
+            debugNote = "question_guard:forced_cta_on_repeat_tag";
+          }
+        }
+
+        if (action === "cta_trial") {
+          const plan = recommendedPlan ?? normalizePlan(currentSlots?.recommended_plan) ?? "growth";
+          const ctaUrl = buildTrialUrl(appBaseUrl, signupPath, plan, trialDays);
+          reply = `Perfecto. Aquí tenés tu prueba gratis de ${trialDays} días: ${ctaUrl}`;
+          slotsPatch.recommended_plan = plan;
+          slotsPatch.last_cta_url = ctaUrl;
+          debugNote = debugNote ?? "cta_trial_url_injected";
+        }
+        if (!reply) {
+          reply = "Perfecto, seguimos. Contame y te ayudo con el siguiente paso.";
         }
 
         const nextState = mergeState(leadState, {
           inboundMessageId,
           statePatch,
           slotsPatch,
-          intent,
           questionTag,
         });
 
@@ -527,7 +695,7 @@ Deno.serve(async (req) => {
             sent_at: nowIso(),
             outbound_message_id,
             meta_message_id: metaResp?.message_id ?? null,
-            last_error: null,
+            last_error: debugNote ? `debug:${debugNote}` : null,
           })
           .eq("id", jobId);
         sent++;

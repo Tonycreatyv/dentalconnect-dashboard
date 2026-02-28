@@ -7,6 +7,7 @@ import { dedupeByKey } from "../lib/dedupe";
 import { messageKey } from "../lib/messages";
 import { getLeadDisplayName } from "../lib/leads";
 import { useClinic } from "../context/ClinicContext";
+import PageHeader from "../components/PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -221,7 +222,14 @@ export default function Inbox() {
   }
 
   return (
-    <div className="grid grid-cols-12 gap-4 min-w-0 overflow-x-hidden">
+    <div className="space-y-4 min-w-0 overflow-x-hidden">
+      <PageHeader
+        title="Inbox"
+        subtitle="Conversaciones y respuestas rápidas."
+        showBackOnMobile
+        backTo="/overview"
+      />
+      <div className="grid grid-cols-12 gap-4 min-w-0 overflow-x-hidden">
       <div className={["col-span-12 lg:col-span-5 min-w-0", leadId ? "hidden lg:block" : "block"].join(" ")}>
         <SectionCard title="Leads" description="Conversaciones activas." className="lg:min-h-[calc(100vh-190px)]">
           <div className="max-h-[calc(100vh-240px)] overflow-y-auto pr-1 sm:max-h-[calc(100vh-220px)]">
@@ -392,6 +400,7 @@ export default function Inbox() {
             </div>
           ) : null}
         </SectionCard>
+      </div>
       </div>
     </div>
   );
