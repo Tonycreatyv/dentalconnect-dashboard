@@ -1,6 +1,5 @@
 // src/pages/Settings.tsx
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
 import {
   BadgeCheck,
   CalendarDays,
@@ -17,8 +16,6 @@ import { Modal } from "../components/ui/Modal";
 import { Toast, type ToastKind } from "../components/ui/Toast";
 
 const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
-const META_OAUTH_FUNCTION = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1/meta-oauth";
-const META_REDIRECT_URI = (import.meta.env.VITE_META_REDIRECT_URI as string | undefined) ?? "";
 const GOOGLE_CAL_CONNECT_URL = "";
 
 const DEFAULT_ORG = "clinic-demo";
@@ -57,6 +54,13 @@ type IntegrationRequestRow = {
   status: string | null;
   payload: any | null;
   created_at: string | null;
+};
+
+type OrgIntegrationState = {
+  meta_page_id: string | null;
+  messenger_enabled: boolean | null;
+  meta_connected_at: string | null;
+  meta_last_error: string | null;
 };
 
 const SPECIALTIES = [
@@ -402,12 +406,12 @@ const INTEGRATIONS = [
 function StatusBadge({ label, tone }: { label: string; tone: "success" | "warning" | "muted" | "info" }) {
   const styles =
     tone === "success"
-      ? "border-[#E5E7EB] bg-[#F4F5F7] text-blue-700"
+      ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
       : tone === "warning"
-      ? "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700"
+      ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
       : tone === "info"
-      ? "border-[#E5E7EB] bg-[#F4F5F7] text-blue-700"
-      : "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700";
+      ? "border-cyan-400/40 bg-cyan-500/10 text-cyan-300"
+      : "border-white/20 bg-white/5 text-white/90";
 
   return (
     <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${styles}`}>
@@ -417,7 +421,6 @@ function StatusBadge({ label, tone }: { label: string; tone: "success" | "warnin
 }
 
 export default function Settings() {
-  const location = useLocation();
   const { clinic, clinicId } = useClinic();
 
   const ORG = clinic?.organization_id ?? DEFAULT_ORG;
@@ -453,6 +456,12 @@ export default function Settings() {
   const [policiesDeposit, setPoliciesDeposit] = useState(mergeTemplates(["general"]).policies.deposito ?? "");
 
   const [integrationRequests, setIntegrationRequests] = useState<IntegrationRequestRow[]>([]);
+  const [orgIntegration, setOrgIntegration] = useState<OrgIntegrationState>({
+    meta_page_id: null,
+    messenger_enabled: false,
+    meta_connected_at: null,
+    meta_last_error: null,
+  });
 
   const [guideOpen, setGuideOpen] = useState<IntegrationChannel | null>(null);
   const [requestOpen, setRequestOpen] = useState<IntegrationChannel | null>(null);
@@ -467,29 +476,6 @@ export default function Settings() {
   const [waitlistEmail, setWaitlistEmail] = useState("");
 
   const showTechnicalDetails = false;
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const code = params.get("code");
-    if (!code) return;
-
-    setNotice("Conectando Messenger...");
-    fetch(META_OAUTH_FUNCTION, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data?.ok) throw new Error("oauth_failed");
-        setNotice("Messenger conectado.");
-        setToast({ kind: "success", message: "Messenger conectado correctamente." });
-      })
-      .catch(() => {
-        setError("No se pudo completar la conexión. Intenta nuevamente.");
-        setToast({ kind: "error", message: "No se pudo completar la conexión." });
-      });
-  }, [location.search]);
 
   function toggleSpecialty(value: string) {
     setSpecialties((prev) => {
@@ -513,17 +499,20 @@ export default function Settings() {
     setError(null);
     setNotice(null);
 
-    if (!META_APP_ID || !META_REDIRECT_URI) {
+    if (!META_APP_ID) {
       setError("Conexión no disponible. Revisa la configuración de la integración.");
       return;
     }
 
+    const redirectUri = `${window.location.origin}/auth/meta/callback`;
+
     const authUrl =
       "https://www.facebook.com/v19.0/dialog/oauth" +
       `?client_id=${META_APP_ID}` +
-      `&redirect_uri=${encodeURIComponent(META_REDIRECT_URI)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&response_type=code` +
-      `&scope=pages_show_list,pages_read_engagement,pages_messaging`;
+      `&scope=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging` +
+      `&state=${encodeURIComponent(`org:${ORG}`)}`;
 
     window.location.href = authUrl;
   }
@@ -634,6 +623,21 @@ export default function Settings() {
 
       await loadIntegrationRequests();
 
+      const orgRes = await supabase
+        .from("org_settings")
+        .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
+        .eq("organization_id", ORG)
+        .maybeSingle();
+
+      if (orgRes.data) {
+        setOrgIntegration({
+          meta_page_id: (orgRes.data as any).meta_page_id ?? null,
+          messenger_enabled: (orgRes.data as any).messenger_enabled ?? false,
+          meta_connected_at: (orgRes.data as any).meta_connected_at ?? null,
+          meta_last_error: (orgRes.data as any).meta_last_error ?? null,
+        });
+      }
+
       setLoading(false);
     }
 
@@ -722,6 +726,15 @@ export default function Settings() {
   function statusFor(channel: IntegrationChannel) {
     if (channel === "google_calendar") {
       return { label: "Deshabilitado", tone: "muted" as const, primary: "Unirme a lista de espera", disabled: true };
+    }
+
+    if (channel === "messenger") {
+      if (orgIntegration.messenger_enabled && orgIntegration.meta_page_id) {
+        return { label: "Conectado", tone: "success" as const, primary: "Reconfigurar", disabled: false };
+      }
+      if (orgIntegration.meta_last_error) {
+        return { label: "Requiere acción", tone: "warning" as const, primary: "Revisar", disabled: false };
+      }
     }
 
     const latest = integrationRequests.find((req) => req.channel === channel);
@@ -833,7 +846,9 @@ export default function Settings() {
                 className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
                   status.disabled
                     ? "border border-[#E5E7EB] bg-white text-slate-500"
-                    : "bg-white text-black hover:opacity-95"
+                    : status.label === "Conectado"
+                    ? "border border-emerald-400/40 bg-transparent text-emerald-300/90 hover:border-emerald-300/60"
+                    : "border border-white/25 bg-white/5 text-white/90 hover:bg-white/10"
                 }`}
               >
                 {isDisabled ? "Conectar" : status.primary}
@@ -880,9 +895,15 @@ export default function Settings() {
                 <summary className="cursor-pointer text-sm text-slate-700">Detalles técnicos</summary>
                 <div className="mt-3 space-y-2">
                   <div>Identificador de conexión:</div>
-                  <div className="break-all text-slate-500">{META_REDIRECT_URI || "(faltante)"}</div>
+                  <div className="break-all text-slate-500">{`${window.location.origin}/auth/meta/callback`}</div>
                 </div>
               </details>
+            ) : null}
+
+            {integration.key === "messenger" && orgIntegration.meta_last_error ? (
+              <div className="mt-3 text-xs text-rose-200">
+                {orgIntegration.meta_last_error}
+              </div>
             ) : null}
           </div>
         );

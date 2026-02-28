@@ -1,0 +1,176 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "content-type": "application/json" },
+  });
+}
+
+function env(name: string) {
+  const value = Deno.env.get(name);
+  if (!value) throw new Error(`Missing env ${name}`);
+  return value;
+}
+
+type MetaPage = {
+  id: string;
+  name: string;
+  access_token: string;
+};
+
+async function exchangeCodeForUserToken(args: {
+  appId: string;
+  appSecret: string;
+  redirectUri: string;
+  code: string;
+}) {
+  const url = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
+  url.searchParams.set("client_id", args.appId);
+  url.searchParams.set("client_secret", args.appSecret);
+  url.searchParams.set("redirect_uri", args.redirectUri);
+  url.searchParams.set("code", args.code);
+
+  const response = await fetch(url.toString());
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? "meta_exchange_failed");
+  }
+  return String(data.access_token ?? "");
+}
+
+async function fetchPages(userToken: string): Promise<MetaPage[]> {
+  const url = new URL("https://graph.facebook.com/v19.0/me/accounts");
+  url.searchParams.set("fields", "id,name,access_token");
+  url.searchParams.set("access_token", userToken);
+
+  const response = await fetch(url.toString());
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? "meta_pages_failed");
+  }
+
+  const pages = Array.isArray(data?.data) ? data.data : [];
+  return pages
+    .filter((p: any) => p?.id && p?.access_token)
+    .map((p: any) => ({
+      id: String(p.id),
+      name: String(p.name ?? "Página"),
+      access_token: String(p.access_token),
+    }));
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
+
+  try {
+    const SUPABASE_URL = env("SUPABASE_URL");
+    const SERVICE_ROLE = env("SUPABASE_SERVICE_ROLE_KEY");
+    const META_APP_ID = env("META_APP_ID");
+    const META_APP_SECRET = env("META_APP_SECRET");
+
+    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
+      auth: { persistSession: false },
+    });
+
+    const body = await req.json().catch(() => ({}));
+    const action = String(body?.action ?? "exchange");
+
+    if (action === "exchange") {
+      const code = String(body?.code ?? "");
+      const redirectUri = String(body?.redirect_uri ?? "");
+      const organizationId = String(body?.organization_id ?? "");
+      if (!code || !redirectUri || !organizationId) {
+        return json(400, { ok: false, error: "missing_code_or_redirect_or_org" });
+      }
+
+      const userToken = await exchangeCodeForUserToken({
+        appId: META_APP_ID,
+        appSecret: META_APP_SECRET,
+        redirectUri,
+        code,
+      });
+      const pages = await fetchPages(userToken);
+
+      if (!pages.length) {
+        await supabase.from("org_settings").upsert(
+          {
+            organization_id: organizationId,
+            messenger_enabled: false,
+            meta_last_error: "No se encontraron páginas disponibles en Meta.",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "organization_id" }
+        );
+      }
+
+      return json(200, {
+        ok: true,
+        pages: pages.map((p) => ({ id: p.id, name: p.name, access_token: p.access_token })),
+      });
+    }
+
+    if (action === "save_page") {
+      const organizationId = String(body?.organization_id ?? "");
+      const pageId = String(body?.page_id ?? "");
+      const pageName = String(body?.page_name ?? "");
+      const pageAccessToken = String(body?.page_access_token ?? "");
+
+      if (!organizationId || !pageId || !pageAccessToken) {
+        return json(400, { ok: false, error: "missing_page_selection" });
+      }
+
+      const now = new Date().toISOString();
+
+      const settingsRes = await supabase.from("org_settings").upsert(
+        {
+          organization_id: organizationId,
+          meta_page_id: pageId,
+          messenger_enabled: true,
+          meta_connected_at: now,
+          meta_last_error: null,
+          updated_at: now,
+          name: pageName || null,
+        },
+        { onConflict: "organization_id" }
+      );
+      if (settingsRes.error) {
+        return json(500, { ok: false, error: settingsRes.error.message });
+      }
+
+      const secretRes = await supabase.from("org_secrets").upsert(
+        {
+          organization_id: organizationId,
+          meta_page_id: pageId,
+          meta_page_access_token: pageAccessToken,
+          updated_at: now,
+        },
+        { onConflict: "organization_id" }
+      );
+      if (secretRes.error) {
+        await supabase.from("org_settings").upsert(
+          {
+            organization_id: organizationId,
+            messenger_enabled: false,
+            meta_last_error: secretRes.error.message,
+            updated_at: now,
+          },
+          { onConflict: "organization_id" }
+        );
+        return json(500, { ok: false, error: secretRes.error.message });
+      }
+
+      return json(200, { ok: true, page_id: pageId });
+    }
+
+    return json(400, { ok: false, error: "unknown_action" });
+  } catch (error: any) {
+    return json(500, { ok: false, error: String(error?.message ?? error) });
+  }
+});

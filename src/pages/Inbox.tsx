@@ -5,12 +5,16 @@ import { supabase } from "../lib/supabaseClient";
 import { SectionCard } from "../components/SectionCard";
 import { dedupeByKey } from "../lib/dedupe";
 import { messageKey } from "../lib/messages";
+import { getLeadDisplayName } from "../lib/leads";
+import { useClinic } from "../context/ClinicContext";
 
-const ORG = "clinic-demo";
+const DEFAULT_ORG = "clinic-demo";
 
 type LeadRow = {
   id: string;
   organization_id: string;
+  channel_user_id: string | null;
+  state: Record<string, any> | null;
   full_name: string | null;
   phone: string | null;
   status: string | null;
@@ -32,6 +36,8 @@ type MsgRow = {
 export default function Inbox() {
   const { leadId } = useParams();
   const navigate = useNavigate();
+  const { clinic } = useClinic();
+  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
 
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [thread, setThread] = useState<MsgRow[]>([]);
@@ -44,6 +50,13 @@ export default function Inbox() {
     () => leads.find((l) => l.id === leadId) ?? null,
     [leads, leadId]
   );
+  const resolvedLeadId = useMemo(() => {
+    if (!leadId) return "";
+    const byUuid = leads.find((l) => l.id === leadId);
+    if (byUuid) return byUuid.id;
+    const byChannelUser = leads.find((l) => l.channel_user_id === leadId);
+    return byChannelUser?.id ?? leadId;
+  }, [leadId, leads]);
 
   const quickReplies = [
     {
@@ -73,7 +86,7 @@ export default function Inbox() {
 
     const { data, error } = await supabase
       .from("leads")
-      .select("id, organization_id, full_name, phone, status, channel, last_message_at, last_message_preview")
+      .select("id, organization_id, full_name, phone, status, channel, channel_user_id, state, last_message_at, last_message_preview")
       .eq("organization_id", ORG)
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
@@ -89,16 +102,26 @@ export default function Inbox() {
 
   async function loadThread(targetLeadId: string) {
     setLoadingThread(true);
+    // eslint-disable-next-line no-console
+    console.debug("[Inbox] loadThread", { leadIdParam: leadId, resolvedLeadId: targetLeadId, organization_id: ORG });
 
     const { data, error } = await supabase
       .from("messages")
-      .select("id, organization_id, lead_id, actor, role, content, created_at")
+      .select("id, organization_id, lead_id, actor, role, content, text, body, created_at")
       .eq("organization_id", ORG)
       .eq("lead_id", targetLeadId)
       .order("created_at", { ascending: true })
       .limit(300);
 
-    if (!error && data) setThread(dedupeByKey(data as any, messageKey));
+    if (!error && data) {
+      const normalized = (data as any[]).map((m) => ({
+        ...m,
+        content: m.content ?? m.text ?? m.body ?? "",
+      }));
+      // eslint-disable-next-line no-console
+      console.debug("[Inbox] messages fetched", { count: normalized.length, organization_id: ORG, lead_id: targetLeadId });
+      setThread(dedupeByKey(normalized as any, messageKey));
+    }
     setLoadingThread(false);
   }
 
@@ -108,13 +131,13 @@ export default function Inbox() {
   }, []);
 
   useEffect(() => {
-    if (!leadId) {
+    if (!resolvedLeadId) {
       setThread([]);
       return;
     }
-    loadThread(leadId);
+    loadThread(resolvedLeadId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId]);
+  }, [resolvedLeadId]);
 
   useEffect(() => {
     const ch = supabase
@@ -130,7 +153,7 @@ export default function Inbox() {
         async (payload) => {
           await loadLeads();
           const newMsg = payload.new as { lead_id?: string | null };
-          if (leadId && newMsg?.lead_id === leadId) await loadThread(leadId);
+          if (resolvedLeadId && newMsg?.lead_id === resolvedLeadId) await loadThread(resolvedLeadId);
         }
       )
       .subscribe();
@@ -139,7 +162,7 @@ export default function Inbox() {
       supabase.removeChannel(ch);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId]);
+  }, [resolvedLeadId, ORG]);
 
   async function markAsHandled() {
     if (!leadId) return;
@@ -227,7 +250,7 @@ export default function Inbox() {
                       <div className="flex items-center justify-between gap-3 min-w-0">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold text-slate-900">
-                            {l.full_name || "Sin nombre"}
+                            {getLeadDisplayName(l)}
                           </div>
                           <div className="truncate text-xs text-slate-500">
                             {l.last_message_preview || "—"}
@@ -250,7 +273,7 @@ export default function Inbox() {
         <SectionCard
           title="Conversación"
           description={
-            selectedLead ? `Lead: ${selectedLead.full_name ?? selectedLead.id}` : "Seleccioná un lead"
+            selectedLead ? `Lead: ${getLeadDisplayName(selectedLead)}` : "Seleccioná un lead"
           }
           action={
             selectedLead ? (
@@ -294,7 +317,7 @@ export default function Inbox() {
                 Volver
               </button>
               <div className="text-xs text-slate-500 truncate">
-                {selectedLead?.full_name ?? "Conversación"}
+                {selectedLead ? getLeadDisplayName(selectedLead) : "Conversación"}
               </div>
             </div>
           ) : null}

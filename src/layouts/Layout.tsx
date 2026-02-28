@@ -1,6 +1,6 @@
 // src/layouts/Layout.tsx
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import { Topbar } from "../components/Topbar";
 import { supabase } from "../lib/supabaseClient";
@@ -15,6 +15,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/calendar": "Agenda",
   "/marketing": "Marketing IA",
   "/patients": "Patients",
+  "/billing": "Billing",
   "/settings": "Settings",
 };
 
@@ -23,7 +24,9 @@ export default function Layout() {
   const location = useLocation();
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
-  const { setClinic, setClinicId } = useClinic();
+  const { clinic, setClinic, setClinicId } = useClinic();
+  const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null);
+  const [trialExpired, setTrialExpired] = useState(false);
 
   const pageTitle = useMemo(() => {
     const key = Object.keys(PAGE_TITLES).find((path) => location.pathname.startsWith(path));
@@ -68,6 +71,80 @@ export default function Layout() {
     }
   }
 
+  useEffect(() => {
+    let mounted = true;
+    const orgId = clinic?.organization_id ?? "clinic-demo";
+
+    async function checkTrial() {
+      const sub = await supabase
+        .from("subscriptions")
+        .select("status, trial_ends_at")
+        .eq("organization_id", orgId)
+        .maybeSingle();
+
+      if (mounted && !sub.error && sub.data) {
+        const status = String((sub.data as any).status ?? "");
+        const trialEndsAt = (sub.data as any).trial_ends_at as string | null;
+        if (status === "active") {
+          setTrialDaysLeft(null);
+          setTrialExpired(false);
+          return;
+        }
+        if (status === "trialing" && trialEndsAt) {
+          const diffMs = new Date(trialEndsAt).getTime() - Date.now();
+          const days = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          setTrialDaysLeft(days);
+          if (diffMs <= 0) {
+            setTrialExpired(true);
+            navigate("/billing", { replace: true });
+          } else {
+            setTrialExpired(false);
+          }
+          return;
+        }
+      }
+
+      const res = await supabase
+        .from("org_settings")
+        .select("plan, trial_ends_at, is_trial_active, messenger_enabled")
+        .eq("organization_id", orgId)
+        .maybeSingle();
+      if (!mounted || res.error || !res.data) return;
+
+      const plan = String((res.data as any).plan ?? "trial");
+      const trialEndsAt = (res.data as any).trial_ends_at as string | null;
+      if (plan === "pro" || !trialEndsAt) {
+        setTrialDaysLeft(null);
+        setTrialExpired(false);
+        return;
+      }
+
+      const diffMs = new Date(trialEndsAt).getTime() - Date.now();
+      const days = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      setTrialDaysLeft(days);
+
+      if (diffMs <= 0) {
+        setTrialExpired(true);
+        await supabase
+          .from("org_settings")
+          .update({
+            is_trial_active: false,
+            messenger_enabled: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("organization_id", orgId);
+        navigate("/billing", { replace: true });
+      } else {
+        setTrialExpired(false);
+      }
+    }
+
+    checkTrial();
+    return () => {
+      mounted = false;
+    };
+  }, [clinic?.organization_id, navigate]);
+
   return (
     <div className="relative min-h-screen overflow-x-hidden dc-bg text-white">
       <div className="pointer-events-none absolute inset-0 dc-bg-overlay" />
@@ -85,6 +162,21 @@ export default function Layout() {
                 loading={logoutLoading}
               />
             </div>
+
+            {!trialExpired && trialDaysLeft !== null ? (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#3CBDB9]/30 bg-[#0894C1]/10 px-4 py-3 text-sm text-white/90">
+                <span>
+                  Te quedan {trialDaysLeft} {trialDaysLeft === 1 ? "día" : "días"} de trial.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => navigate("/billing")}
+                  className="rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
+                >
+                  Ver planes
+                </button>
+              </div>
+            ) : null}
 
             <Outlet />
 

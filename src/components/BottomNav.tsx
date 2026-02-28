@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Settings,
   Sparkles,
+  CreditCard,
 } from "lucide-react";
 
 const items = [
@@ -13,6 +14,7 @@ const items = [
   { to: "/inbox", label: "Inbox", icon: MessageSquareText },
   { to: "/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/marketing", label: "Marketing", icon: Sparkles },
+  { to: "/billing", label: "Billing", icon: CreditCard },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

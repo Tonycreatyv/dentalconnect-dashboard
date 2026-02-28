@@ -9,6 +9,12 @@ import Patients from "./pages/Patients";
 import Settings from "./pages/Settings";
 import MarketingAI from "./pages/MarketingAI";
 import Login from "./pages/Login";
+import Register from "./pages/Register";
+import MetaCallback from "./pages/MetaCallback";
+import Upgrade from "./pages/Upgrade";
+import Billing from "./pages/Billing";
+import BillingSuccess from "./pages/BillingSuccess";
+import BillingCancel from "./pages/BillingCancel";
 
 import { AuthProvider } from "./context/AuthContext";
 import { ClinicProvider } from "./context/ClinicContext";
@@ -37,6 +43,16 @@ function AppRoutesInner() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/auth/meta/callback" element={<MetaCallback />} />
+      <Route
+        path="/upgrade"
+        element={
+          <RequireAuth>
+            <Upgrade />
+          </RequireAuth>
+        }
+      />
 
       <Route
         path="/"
@@ -60,6 +76,9 @@ function AppRoutesInner() {
 
         <Route path="patients" element={<Patients />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="billing" element={<Billing />} />
+        <Route path="billing/success" element={<BillingSuccess />} />
+        <Route path="billing/cancel" element={<BillingCancel />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/overview" replace />} />

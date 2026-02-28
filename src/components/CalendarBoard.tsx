@@ -1,12 +1,14 @@
 // src/components/CalendarBoard.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CalendarDays, Clock, PencilLine, Plus } from "lucide-react";
+import { CalendarDays, ChevronDown, Clock, PencilLine, Plus, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { dedupeByKey } from "../lib/dedupe";
 import { appointmentKey, normalizedStartISO } from "../lib/appointments";
 import { addDays, buildLocalISO, startOfWeekSunday, toEndOfDay, toStartOfDay } from "../lib/time";
+import { defaultHours, generateTimeSlots, getDayKey, HoursMap, minutesToSlot, slotToMinutes } from "../lib/availability";
+import { Toast, type ToastKind } from "./ui/Toast";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -148,24 +150,42 @@ function AppointmentModal({
   open,
   mode,
   form,
+  availableDates,
+  availableTimes,
+  loadingAvailability,
+  busyTimeSet,
+  error,
   onChange,
   onClose,
   onSave,
+  onDelete,
   saving,
 }: {
   open: boolean;
   mode: ModalMode;
   form: ApptForm;
+  availableDates: Set<string>;
+  availableTimes: string[];
+  loadingAvailability: boolean;
+  busyTimeSet: Set<string>;
+  error: string | null;
   onChange: (next: ApptForm) => void;
   onClose: () => void;
   onSave: () => void;
+  onDelete: () => void;
   saving: boolean;
 }) {
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const safeDate =
+    form.date && !Number.isNaN(new Date(form.date).getTime())
+      ? new Date(`${form.date}T00:00:00`)
+      : new Date();
+  const calendarMonth = useMemo(() => monthGrid(safeDate), [safeDate]);
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-xl rounded-3xl border border-[#E5E7EB] bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.18)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xl px-4">
+      <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-lg font-semibold text-slate-900">
@@ -217,20 +237,72 @@ function AppointmentModal({
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
               <label className="text-xs font-medium text-slate-700">Fecha</label>
-              <input
-                value={form.date}
-                readOnly
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm text-slate-700"
-              />
+              <div className="relative mt-2">
+                <button
+                  type="button"
+                  onClick={() => setCalendarOpen((v) => !v)}
+                  className="flex h-11 w-full items-center justify-between rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm text-slate-700"
+                >
+                  {form.date}
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+                {calendarOpen ? (
+                  <div className="absolute left-0 top-[48px] z-[60] w-[290px] rounded-2xl border border-white/15 bg-zinc-900/95 p-3 shadow-2xl backdrop-blur-lg">
+                    <div className="mb-2 text-xs font-semibold text-white/90">
+                      {new Date(form.date).toLocaleDateString("es", { month: "long", year: "numeric" })}
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-white/55">
+                      {["D", "L", "M", "X", "J", "V", "S"].map((d) => (
+                        <div key={d}>{d}</div>
+                      ))}
+                    </div>
+                    <div className="mt-1 grid grid-cols-7 gap-1">
+                      {calendarMonth.days.map((d) => {
+                        const key = toStartOfDay(d).toISOString().slice(0, 10);
+                        const selectedDay = key === form.date;
+                        const disabled = !availableDates.has(key);
+                        const inMonth = d.getMonth() === new Date(form.date).getMonth();
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => {
+                              onChange({ ...form, date: key, time: "" });
+                              setCalendarOpen(false);
+                            }}
+                            className={[
+                              "h-8 rounded-lg text-xs transition",
+                              selectedDay ? "bg-blue-600 text-white" : "",
+                              !selectedDay && disabled ? "bg-white/5 text-white/35" : "",
+                              !selectedDay && !disabled ? "text-white/90 hover:bg-white/10" : "",
+                              !inMonth ? "opacity-40" : "",
+                            ].join(" ")}
+                          >
+                            {d.getDate()}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div>
               <label className="text-xs font-medium text-slate-700">Hora</label>
-              <input
-                type="time"
+              <select
                 value={form.time}
                 onChange={(e) => onChange({ ...form, time: e.target.value })}
                 className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-              />
+              >
+                <option value="">{loadingAvailability ? "Cargando horarios..." : "Seleccionar hora"}</option>
+                {availableTimes.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {slot}
+                    {busyTimeSet.has(slot) ? " (ocupada)" : ""}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="text-xs font-medium text-slate-700">Estado</label>
@@ -259,7 +331,26 @@ function AppointmentModal({
           </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-2">
+        {error ? (
+          <div className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex items-center justify-between gap-2">
+          {mode === "edit" ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-2 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20"
+              disabled={saving}
+            >
+              <Trash2 className="h-4 w-4" />
+              Borrar cita
+            </button>
+          ) : (
+            <div />
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -309,7 +400,17 @@ export default function CalendarBoard() {
     reason: "",
   });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [hoursMap, setHoursMap] = useState<HoursMap>(defaultHours());
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false);
+  const [availableTimes, setAvailableTimes] = useState<string[]>([]);
+  const [busyTimes, setBusyTimes] = useState<Set<string>>(new Set());
+  const [loadingAvailability, setLoadingAvailability] = useState(false);
+  const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
   const touchStartX = useRef<number | null>(null);
+  const patientFilter = searchParams.get("patient")?.trim() ?? "";
+  const createForPatient = searchParams.get("createFor")?.trim() ?? "";
 
   useEffect(() => {
     const viewParam = searchParams.get("view") as ViewMode | null;
@@ -352,6 +453,30 @@ export default function CalendarBoard() {
   }, [selected]);
 
   const month = useMemo(() => monthGrid(selected), [selected]);
+
+  function prevPeriod() {
+    if (view === "day") {
+      setSelected((prev) => addDays(prev, -1));
+      return;
+    }
+    if (view === "week") {
+      setSelected((prev) => addDays(prev, -7));
+      return;
+    }
+    setSelected(toStartOfDay(new Date(selected.getFullYear(), selected.getMonth() - 1, 1)));
+  }
+
+  function nextPeriod() {
+    if (view === "day") {
+      setSelected((prev) => addDays(prev, 1));
+      return;
+    }
+    if (view === "week") {
+      setSelected((prev) => addDays(prev, 7));
+      return;
+    }
+    setSelected(toStartOfDay(new Date(selected.getFullYear(), selected.getMonth() + 1, 1)));
+  }
 
   const rangeStart = useMemo(() => {
     if (view === "day") return toStartOfDay(selected);
@@ -409,10 +534,140 @@ export default function CalendarBoard() {
     setBusy(false);
   }
 
+  async function loadOrgAvailabilitySettings() {
+    const orgRes = await supabase
+      .from("org_settings")
+      .select("hours, google_calendar_connected")
+      .eq("organization_id", ORG)
+      .maybeSingle();
+
+    if (!orgRes.error && orgRes.data) {
+      const dbHours = (orgRes.data as any).hours;
+      if (dbHours && typeof dbHours === "object") {
+        setHoursMap({ ...defaultHours(), ...(dbHours as HoursMap) });
+      }
+      setGoogleCalendarConnected(Boolean((orgRes.data as any).google_calendar_connected));
+    }
+  }
+
+  async function getAvailability(date: string) {
+    setLoadingAvailability(true);
+    const selectedDate = new Date(`${date}T00:00:00`);
+    const dayKey = getDayKey(selectedDate);
+    const dayHours = hoursMap[dayKey] ?? { closed: false, open: "08:00", close: "17:00" };
+
+    if (dayHours.closed) {
+      setAvailableTimes([]);
+      setBusyTimes(new Set());
+      setLoadingAvailability(false);
+      return;
+    }
+
+    const open = dayHours.open ?? "08:00";
+    const close = dayHours.close ?? "17:00";
+    const allSlots = generateTimeSlots(open, close, 15);
+    const busy = new Set<string>();
+
+    const dayStart = toStartOfDay(selectedDate).toISOString();
+    const dayEnd = toEndOfDay(selectedDate).toISOString();
+
+    const dbMain = await supabase
+      .from("appointments")
+      .select("id, start_at, starts_at, appointment_date, appointment_time")
+      .eq("organization_id", ORG)
+      .gte("start_at", dayStart)
+      .lte("start_at", dayEnd);
+
+    const dbLegacyStart = await supabase
+      .from("appointments")
+      .select("id, start_at, starts_at, appointment_date, appointment_time")
+      .eq("organization_id", ORG)
+      .gte("starts_at", dayStart)
+      .lte("starts_at", dayEnd);
+
+    const dbLegacyDate = await supabase
+      .from("appointments")
+      .select("id, start_at, starts_at, appointment_date, appointment_time")
+      .eq("organization_id", ORG)
+      .eq("appointment_date", date);
+
+    const rows = dedupeByKey(
+      [
+        ...((dbMain.data as any[]) ?? []),
+        ...((dbLegacyStart.data as any[]) ?? []),
+        ...((dbLegacyDate.data as any[]) ?? []),
+      ],
+      (row) => String(row.id ?? `${row.appointment_date}-${row.appointment_time}`)
+    );
+
+    for (const row of rows) {
+        if (modalMode === "edit" && activeAppt?.id === row.id) continue;
+        const iso =
+          row.start_at ??
+          row.starts_at ??
+          buildLocalISO(row.appointment_date ?? date, row.appointment_time ?? "09:00");
+        if (!iso) continue;
+        busy.add(toTimeInput(iso));
+    }
+
+    if (googleCalendarConnected) {
+      const gc = await supabase.functions.invoke("calendar-busy", {
+        body: { organization_id: ORG, date },
+      });
+      if (!gc.error && Array.isArray((gc.data as any)?.busy)) {
+        for (const range of (gc.data as any).busy) {
+          const start = toTimeInput(range.start);
+          const end = toTimeInput(range.end);
+          const startM = slotToMinutes(start);
+          const endM = slotToMinutes(end);
+          for (let m = startM; m < endM; m += 15) busy.add(minutesToSlot(m));
+        }
+      }
+    }
+
+    setBusyTimes(busy);
+    setAvailableTimes(allSlots.filter((s) => !busy.has(s)));
+    setLoadingAvailability(false);
+  }
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, rangeStartISO, rangeEndISO, ORG]);
+
+  useEffect(() => {
+    loadOrgAvailabilitySettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ORG]);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    if (!form.date) return;
+    getAvailability(form.date);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen, form.date, modalMode, activeAppt?.id, googleCalendarConnected, hoursMap, ORG]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+
+      if (view === "day" && !e.shiftKey) {
+        e.preventDefault();
+        if (e.key === "ArrowLeft") setSelected((prev) => addDays(prev, -1));
+        if (e.key === "ArrowRight") setSelected((prev) => addDays(prev, 1));
+      }
+      if (view === "week" && e.shiftKey) {
+        e.preventDefault();
+        if (e.key === "ArrowLeft") setSelected((prev) => addDays(prev, -7));
+        if (e.key === "ArrowRight") setSelected((prev) => addDays(prev, 7));
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [view]);
 
   function openEdit(a: ApptRow) {
     const iso = normalizedStartISO(a) ?? new Date().toISOString();
@@ -427,6 +682,7 @@ export default function CalendarBoard() {
       patient_name: a.patient_name?.trim() || "",
       reason: a.reason?.trim() || "",
     });
+    setModalError(null);
     setModalOpen(true);
   }
 
@@ -440,20 +696,31 @@ export default function CalendarBoard() {
       status: "pending",
       date: dateStr,
       time: "09:00",
-      patient_name: "",
+      patient_name: createForPatient,
       reason: "",
     });
+    setModalError(null);
     setModalOpen(true);
   }
 
   async function saveAppointment() {
+    setModalError(null);
+    if (!form.date || !form.time) {
+      setModalError("Fecha y hora son obligatorias.");
+      return;
+    }
+    if (!availableTimes.includes(form.time)) {
+      setModalError("La hora seleccionada no está disponible para esa fecha.");
+      return;
+    }
+
     const startISO = buildLocalISO(form.date, form.time);
     if (!startISO) return;
 
     setSaving(true);
 
     if (modalMode === "create") {
-      const ins = await supabase.from("appointments").upsert({
+      const payload = {
         organization_id: ORG,
         start_at: startISO,
         status: form.status,
@@ -463,12 +730,23 @@ export default function CalendarBoard() {
         appointment_time: form.time,
         patient_name: form.patient_name.trim() || null,
         reason: form.reason.trim() || null,
-      });
+      };
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log("[agenda:create] payload", payload);
+      }
+      const ins = await supabase.from("appointments").upsert(payload).select("id").maybeSingle();
 
       setSaving(false);
-      if (ins.error) return;
+      if (ins.error) {
+        const msg = `No se pudo guardar la cita: ${ins.error.message}. Hint: revisa permisos RLS o columnas requeridas.`;
+        setModalError(msg);
+        setToast({ kind: "error", message: msg });
+        return;
+      }
       setModalOpen(false);
       await load();
+      setToast({ kind: "success", message: "Cita creada correctamente." });
       return;
     }
 
@@ -490,12 +768,68 @@ export default function CalendarBoard() {
 
     if (activeAppt.starts_at) payload.starts_at = startISO;
 
-    const upd = await supabase.from("appointments").update(payload).eq("id", activeAppt.id);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[agenda:update] payload", { id: activeAppt.id, organization_id: ORG, ...payload });
+    }
+    const upd = await supabase
+      .from("appointments")
+      .update(payload)
+      .eq("id", activeAppt.id)
+      .eq("organization_id", ORG)
+      .select("id")
+      .maybeSingle();
     setSaving(false);
 
-    if (upd.error) return;
+    if (upd.error) {
+      const msg = `No se pudo actualizar la cita: ${upd.error.message}. Hint: revisa RLS de UPDATE en appointments.`;
+      setModalError(msg);
+      setToast({ kind: "error", message: msg });
+      return;
+    }
+    if (!upd.data) {
+      const msg = "No se actualizó ninguna fila. Hint: verifica id/organization_id o políticas RLS.";
+      setModalError(msg);
+      setToast({ kind: "error", message: msg });
+      return;
+    }
 
     setModalOpen(false);
+    await load();
+    setToast({ kind: "success", message: "Cita actualizada." });
+  }
+
+  async function deleteAppointment() {
+    if (!activeAppt?.id) return;
+    const confirmed = window.confirm("¿Seguro que quieres borrar esta cita?");
+    if (!confirmed) return;
+
+    setDeleting(true);
+    const del = await supabase.from("appointments").delete().eq("id", activeAppt.id).eq("organization_id", ORG);
+    setDeleting(false);
+    if (del.error) {
+      const msg = `No se pudo borrar la cita: ${del.error.message}. Hint: revisa RLS para DELETE en appointments.`;
+      setModalError(msg);
+      setToast({ kind: "error", message: msg });
+      return;
+    }
+
+    setModalOpen(false);
+    await load();
+    setToast({ kind: "success", message: "Cita eliminada." });
+  }
+
+  async function quickDeleteAppointment(appointmentId: string) {
+    const confirmed = window.confirm("¿Eliminar esta cita?");
+    if (!confirmed) return;
+
+    const del = await supabase
+      .from("appointments")
+      .delete()
+      .eq("id", appointmentId)
+      .eq("organization_id", ORG);
+
+    if (del.error) return;
     await load();
   }
 
@@ -506,9 +840,12 @@ export default function CalendarBoard() {
       const iso = normalizedStartISO(a);
       if (!iso) return false;
       const t = new Date(iso).getTime();
-      return t >= start && t < end;
+      if (t < start || t >= end) return false;
+      if (!patientFilter) return true;
+      const patient = (a.patient_name ?? "").toLowerCase();
+      return patient.includes(patientFilter.toLowerCase());
     });
-  }, [appts, selected]);
+  }, [appts, selected, patientFilter]);
 
   const countByDay = useMemo(() => {
     const map: Record<string, number> = {};
@@ -521,6 +858,19 @@ export default function CalendarBoard() {
     }
     return map;
   }, [appts]);
+
+  const modalAvailableDates = useMemo(() => {
+    const baseDate = new Date(form.date || new Date().toISOString());
+    const grid = monthGrid(baseDate).days;
+    const set = new Set<string>();
+    for (const d of grid) {
+      const key = toStartOfDay(d).toISOString().slice(0, 10);
+      const dayKey = getDayKey(d);
+      const dayCfg = hoursMap[dayKey] ?? { closed: false };
+      if (!dayCfg.closed) set.add(key);
+    }
+    return set;
+  }, [form.date, hoursMap]);
 
   return (
     <div className="space-y-4 min-w-0 overflow-x-hidden">
@@ -562,6 +912,37 @@ export default function CalendarBoard() {
                   </button>
                 );
               })}
+            </div>
+
+            <div className="flex items-center gap-1 rounded-2xl border border-white/20 bg-white/10 p-1">
+              <button
+                type="button"
+                onClick={prevPeriod}
+                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/90 hover:bg-white/15"
+                aria-label={
+                  view === "week"
+                    ? "Semana anterior"
+                    : view === "day"
+                    ? "Día anterior"
+                    : "Mes anterior"
+                }
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                onClick={nextPeriod}
+                className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/90 hover:bg-white/15"
+                aria-label={
+                  view === "week"
+                    ? "Semana siguiente"
+                    : view === "day"
+                    ? "Día siguiente"
+                    : "Mes siguiente"
+                }
+              >
+                →
+              </button>
             </div>
 
             <button
@@ -738,19 +1119,21 @@ export default function CalendarBoard() {
                             <div className="mt-1 text-xs text-slate-700 truncate">{subtitle}</div>
                           </div>
 
-                          <div className="shrink-0 text-right">
-                            <div className="inline-flex items-center gap-2 text-xs text-slate-700">
-                              <Clock className="h-3.5 w-3.5" />
-                              {time}
-                            </div>
-                            <div
-                              className={[
-                                "mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.18em] uppercase",
-                                badge.className,
-                              ].join(" ")}
-                            >
-                              <span className={["h-2 w-2 rounded-full", badge.dot].join(" ")} />
-                              {badge.label}
+                          <div className="shrink-0">
+                            <div className="flex items-center gap-3">
+                              <div className="inline-flex items-center gap-2 text-xs text-slate-700">
+                                <Clock className="h-3.5 w-3.5" />
+                                {time}
+                              </div>
+                              <div
+                                className={[
+                                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.18em] uppercase",
+                                  badge.className,
+                                ].join(" ")}
+                              >
+                                <span className={["h-2 w-2 rounded-full", badge.dot].join(" ")} />
+                                {badge.label}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -759,9 +1142,22 @@ export default function CalendarBoard() {
                           <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{a.notes}</div>
                         ) : null}
 
-                        <div className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
-                          <PencilLine className="h-4 w-4" />
-                          Editar cita
+                        <div className="mt-4 flex items-center justify-between gap-2">
+                          <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                            <PencilLine className="h-4 w-4" />
+                            Editar cita
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              quickDeleteAppointment(a.id);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Borrar
+                          </button>
                         </div>
                       </button>
                     );
@@ -781,7 +1177,25 @@ export default function CalendarBoard() {
                   {selected.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "short" })}
                 </div>
               </div>
-              <div className="text-sm text-slate-700">{dayAppts.length} cita(s)</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelected((prev) => addDays(prev, -1))}
+                  className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white/90 hover:bg-white/15"
+                  aria-label="Día anterior"
+                >
+                  ←
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelected((prev) => addDays(prev, 1))}
+                  className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white/90 hover:bg-white/15"
+                  aria-label="Día siguiente"
+                >
+                  →
+                </button>
+                <div className="text-sm text-slate-700">{dayAppts.length} cita(s)</div>
+              </div>
             </div>
 
             <div className="mt-4 space-y-3">
@@ -818,19 +1232,21 @@ export default function CalendarBoard() {
                           <div className="mt-1 text-xs text-slate-700 truncate">{subtitle}</div>
                         </div>
 
-                        <div className="shrink-0 text-right">
-                          <div className="inline-flex items-center gap-2 text-xs text-slate-700">
-                            <Clock className="h-3.5 w-3.5" />
-                            {time}
-                          </div>
-                          <div
-                            className={[
-                              "mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.18em] uppercase",
-                              badge.className,
-                            ].join(" ")}
-                          >
-                            <span className={["h-2 w-2 rounded-full", badge.dot].join(" ")} />
-                            {badge.label}
+                        <div className="shrink-0">
+                          <div className="flex items-center gap-3">
+                            <div className="inline-flex items-center gap-2 text-xs text-slate-700">
+                              <Clock className="h-3.5 w-3.5" />
+                              {time}
+                            </div>
+                            <div
+                              className={[
+                                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.18em] uppercase",
+                                badge.className,
+                              ].join(" ")}
+                            >
+                              <span className={["h-2 w-2 rounded-full", badge.dot].join(" ")} />
+                              {badge.label}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -839,9 +1255,22 @@ export default function CalendarBoard() {
                         <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{a.notes}</div>
                       ) : null}
 
-                      <div className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
-                        <PencilLine className="h-4 w-4" />
-                        Editar cita
+                      <div className="mt-4 flex items-center justify-between gap-2">
+                        <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                          <PencilLine className="h-4 w-4" />
+                          Editar cita
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            quickDeleteAppointment(a.id);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Borrar
+                        </button>
                       </div>
                     </button>
                   );
@@ -856,10 +1285,23 @@ export default function CalendarBoard() {
         open={modalOpen}
         mode={modalMode}
         form={form}
+        availableDates={modalAvailableDates}
+        availableTimes={availableTimes}
+        loadingAvailability={loadingAvailability}
+        busyTimeSet={busyTimes}
+        error={modalError}
         onChange={setForm}
         onClose={() => setModalOpen(false)}
         onSave={saveAppointment}
-        saving={saving}
+        onDelete={deleteAppointment}
+        saving={saving || deleting}
+      />
+
+      <Toast
+        open={Boolean(toast)}
+        kind={toast?.kind}
+        message={toast?.message ?? ""}
+        onClose={() => setToast(null)}
       />
     </div>
   );

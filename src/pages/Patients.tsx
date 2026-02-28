@@ -1,73 +1,104 @@
-// src/pages/Patients.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, PencilLine, User } from "lucide-react";
+import { CalendarDays, User } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { SectionCard } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
+import { normalizedStartISO } from "../lib/appointments";
+import { Toast, type ToastKind } from "../components/ui/Toast";
 
-type PatientRow = {
+const DEFAULT_ORG = "clinic-demo";
+
+type AppointmentPatientRow = {
   id: string;
-  clinic_id: string;
-  name: string | null;
-  phone: string | null;
-  email: string | null;
+  organization_id: string;
+  lead_id: string | null;
+  patient_name: string | null;
+  reason: string | null;
+  status: string | null;
   notes: string | null;
-  created_at: string;
+  created_at: string | null;
+  start_at: string | null;
+  starts_at: string | null;
+  appointment_date: string | null;
+  appointment_time: string | null;
 };
 
-type PatientForm = {
+type PatientSummary = {
+  key: string;
+  lead_id: string | null;
   name: string;
-  phone: string;
-  email: string;
-  notes: string;
+  lastVisitISO: string | null;
+  nextVisitISO: string | null;
+  topServices: string[];
+  statusLabel: "activo" | "en seguimiento" | "pendiente";
+  latestClinicalNote: string | null;
+  appointments: AppointmentPatientRow[];
 };
+
+function derivePatientKey(row: AppointmentPatientRow) {
+  const lead = row.lead_id?.trim();
+  if (lead) return `lead:${lead}`;
+  return `name:${(row.patient_name ?? "Sin nombre").trim().toLowerCase()}`;
+}
+
+function getAppointmentISO(row: AppointmentPatientRow) {
+  return normalizedStartISO(row) ?? row.created_at ?? null;
+}
+
+function formatDateTime(iso: string | null) {
+  if (!iso) return "Sin fecha";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Sin fecha";
+  return d.toLocaleString("es", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function Patients() {
-  const { clinicId } = useClinic();
   const navigate = useNavigate();
+  const { clinic } = useClinic();
+  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
 
-  const [rows, setRows] = useState<PatientRow[]>([]);
+  const [rows, setRows] = useState<AppointmentPatientRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [active, setActive] = useState<PatientRow | null>(null);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<PatientForm>({
-    name: "",
-    phone: "",
-    email: "",
-    notes: "",
-  });
+  const [activePatient, setActivePatient] = useState<PatientSummary | null>(null);
+  const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     async function load() {
-      if (!clinicId) {
-        setRows([]);
-        setLoading(false);
-        return;
-      }
-
       setLoading(true);
       setError(null);
 
-      const { data, error: qError } = await supabase
-        .from("patients")
-        .select("id, clinic_id, name, phone, email, notes, created_at")
-        .eq("clinic_id", clinicId)
-        .order("created_at", { ascending: false })
-        .limit(200);
+      const q = await supabase
+        .from("appointments")
+        .select(
+          "id, organization_id, lead_id, patient_name, reason, status, notes, created_at, start_at, starts_at, appointment_date, appointment_time"
+        )
+        .eq("organization_id", ORG)
+        .not("patient_name", "is", null)
+        .order("start_at", { ascending: false })
+        .limit(600);
 
       if (!mounted) return;
-      if (qError) {
-        setError("No se pudo cargar pacientes.");
+
+      if (q.error) {
+        const msg = `No se pudo cargar pacientes: ${q.error.message}. Hint: revisa RLS/select en appointments.`;
+        setError(msg);
+        setToast({ kind: "error", message: msg });
         setRows([]);
-      } else if (data) {
-        setRows(data as any);
+      } else {
+        setRows((q.data as AppointmentPatientRow[]) ?? []);
       }
+
       setLoading(false);
     }
 
@@ -75,195 +106,231 @@ export default function Patients() {
     return () => {
       mounted = false;
     };
-  }, [clinicId]);
+  }, [ORG]);
 
-  function openDrawer(patient: PatientRow) {
-    setActive(patient);
-    setForm({
-      name: patient.name ?? "",
-      phone: patient.phone ?? "",
-      email: patient.email ?? "",
-      notes: patient.notes ?? "",
-    });
-    setDrawerOpen(true);
-    setError(null);
-  }
+  const patients = useMemo(() => {
+    const grouped = new Map<string, PatientSummary>();
 
-  function closeDrawer() {
-    setDrawerOpen(false);
-    setActive(null);
-  }
+    for (const row of rows) {
+      const key = derivePatientKey(row);
+      const iso = getAppointmentISO(row);
+      const name = row.patient_name?.trim() || (row.lead_id ? `Paciente ${row.lead_id.slice(-4)}` : "Sin nombre");
 
-  async function savePatient() {
-    if (!active) return;
+      const prev = grouped.get(key);
+      if (!prev) {
+        grouped.set(key, {
+          key,
+          lead_id: row.lead_id,
+          name,
+          lastVisitISO: iso,
+          nextVisitISO: null,
+          topServices: [],
+          statusLabel: "pendiente",
+          latestClinicalNote: row.notes?.trim() || null,
+          appointments: [row],
+        });
+        continue;
+      }
 
-    setSaving(true);
-    setError(null);
-
-    const payload = {
-      name: form.name.trim() || null,
-      phone: form.phone.trim() || null,
-      email: form.email.trim() || null,
-      notes: form.notes.trim() || null,
-    };
-
-    const res = await supabase.from("patients").update(payload).eq("id", active.id);
-
-    setSaving(false);
-
-    if (res.error) {
-      setError("No se pudo guardar los cambios.");
-      return;
+      prev.appointments.push(row);
+      if (!prev.lastVisitISO || (iso && new Date(iso).getTime() > new Date(prev.lastVisitISO).getTime())) {
+        prev.lastVisitISO = iso;
+      }
+      if (row.notes?.trim()) prev.latestClinicalNote = row.notes.trim();
     }
 
-    setRows((prev) => prev.map((p) => (p.id === active.id ? { ...p, ...payload } : p)));
-    setDrawerOpen(false);
-  }
+    const now = Date.now();
+    for (const patient of grouped.values()) {
+      const future = patient.appointments
+        .map((a) => getAppointmentISO(a))
+        .filter((x): x is string => Boolean(x))
+        .filter((iso) => new Date(iso).getTime() > now)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      patient.nextVisitISO = future[0] ?? null;
+
+      const serviceCounts = new Map<string, number>();
+      for (const appt of patient.appointments) {
+        const service = (appt.reason?.trim() || appt.patient_name?.trim() || "Cita").toLowerCase();
+        serviceCounts.set(service, (serviceCounts.get(service) ?? 0) + 1);
+      }
+      patient.topServices = Array.from(serviceCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .map(([service]) => service.charAt(0).toUpperCase() + service.slice(1));
+
+      if (patient.nextVisitISO) {
+        patient.statusLabel = "activo";
+      } else {
+        const latest = patient.lastVisitISO ? new Date(patient.lastVisitISO).getTime() : 0;
+        const daysSince = latest ? (now - latest) / (1000 * 60 * 60 * 24) : 999;
+        patient.statusLabel = daysSince <= 45 ? "en seguimiento" : "pendiente";
+      }
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => {
+      const at = a.lastVisitISO ? new Date(a.lastVisitISO).getTime() : 0;
+      const bt = b.lastVisitISO ? new Date(b.lastVisitISO).getTime() : 0;
+      return bt - at;
+    });
+  }, [rows]);
 
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold text-slate-900">Pacientes</h2>
 
-      <SectionCard title="Pacientes" description="Lista de pacientes registrados.">
+      <SectionCard title="Pacientes" description="Listado generado desde tus citas registradas.">
         {loading ? (
           <div className="text-sm text-slate-700">Cargando…</div>
-        ) : rows.length === 0 ? (
-          <EmptyState title="Sin pacientes" message="Cuando se registren pacientes, aparecerán aquí." />
+        ) : error ? (
+          <div className="text-sm text-rose-600">{error}</div>
+        ) : patients.length === 0 ? (
+          <EmptyState title="Sin pacientes" message="Cuando registres citas con paciente, aparecerán aquí." />
         ) : (
           <div className="grid gap-2">
-            {rows.map((p) => (
-              <div
-                key={p.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => openDrawer(p)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    openDrawer(p);
-                  }
-                }}
-                className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 transition hover:bg-[#F4F5F7] focus:outline-none focus:ring-2 focus:ring-blue-200"
+            {patients.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => setActivePatient(p)}
+                className="w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-left transition hover:bg-[#F4F5F7] focus:outline-none focus:ring-2 focus:ring-blue-200"
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4 text-slate-500" />
-                      <div className="truncate text-sm font-semibold text-slate-900">{p.name || "Sin nombre"}</div>
+                      <div className="truncate text-sm font-semibold text-slate-900">{p.name}</div>
                     </div>
-                    <div className="mt-1 text-xs text-slate-700 truncate">
-                      {p.phone || "—"} · {p.email || "sin email"}
+                    <div className="mt-1 text-xs text-slate-700">
+                      Última visita: {formatDateTime(p.lastVisitISO)} · {p.appointments.length} cita(s)
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate("/calendar");
-                      }}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                    >
-                      <CalendarDays className="h-4 w-4" />
-                      Ver agenda
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDrawer(p);
-                      }}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
-                    >
-                      <PencilLine className="h-4 w-4" />
-                      Editar
-                    </button>
+                    {p.nextVisitISO ? (
+                      <span className="rounded-full border border-emerald-300/50 bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                        Próxima cita
+                      </span>
+                    ) : null}
+                    <div className="inline-flex items-center gap-2 rounded-xl border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-2 text-xs font-semibold text-slate-700">
+                      Ver historial
+                    </div>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </SectionCard>
 
-      {drawerOpen ? (
-        <div className="fixed inset-0 z-40 flex justify-end bg-black/30">
-          <div className="h-full w-full max-w-md border-l border-[#E5E7EB] bg-white p-6">
+      {activePatient ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 backdrop-blur-xl p-4">
+          <div className="h-[min(90vh,760px)] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-white/6 p-6 text-white shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-lg font-semibold text-slate-900">Editar paciente</div>
-                <div className="text-sm text-slate-700">Actualiza datos de contacto.</div>
+                <div className="text-lg font-semibold text-white/95">{activePatient.name}</div>
+                <div className="text-sm text-white/72">Historial y contexto del paciente</div>
               </div>
               <button
                 type="button"
-                onClick={closeDrawer}
-                className="rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-slate-700 hover:bg-[#F4F5F7]"
+                onClick={() => setActivePatient(null)}
+                className="rounded-2xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/90 hover:bg-white/15"
               >
                 Cerrar
               </button>
             </div>
 
-            <div className="mt-6 grid gap-4">
-              <div>
-                <label className="text-xs font-medium text-slate-700">Nombre</label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-                />
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                <div className="text-xs text-white/65">Última visita</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">{formatDateTime(activePatient.lastVisitISO)}</div>
               </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-700">Teléfono</label>
-                <input
-                  value={form.phone}
-                  onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-                />
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                <div className="text-xs text-white/65">Próxima cita</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">{formatDateTime(activePatient.nextVisitISO)}</div>
               </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-700">Email</label>
-                <input
-                  value={form.email}
-                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-                />
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                <div className="text-xs text-white/65">Total de citas</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">{activePatient.appointments.length}</div>
               </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-700">Notas</label>
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  className="mt-2 min-h-[120px] w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                />
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                <div className="text-xs text-white/65">Estado</div>
+                <div className="mt-1 text-sm font-semibold text-white/95 capitalize">{activePatient.statusLabel}</div>
               </div>
+            </div>
 
-              {error ? <div className="text-sm text-red-600">{error}</div> : null}
+            <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+              <div className="text-xs text-white/65">Servicios más comunes</div>
+              <div className="mt-1 text-sm text-white/90">
+                {activePatient.topServices.length ? activePatient.topServices.join(" · ") : "Sin datos"}
+              </div>
+            </div>
+
+            {activePatient.latestClinicalNote ? (
+              <div className="mt-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+                <div className="text-xs text-white/65">Notas clínicas / internas</div>
+                <div className="mt-1 whitespace-pre-wrap text-sm text-white/90">{activePatient.latestClinicalNote}</div>
+              </div>
+            ) : null}
+
+            <div className="mt-5 space-y-2">
+              {activePatient.appointments
+                .slice()
+                .sort((a, b) => {
+                  const at = getAppointmentISO(a);
+                  const bt = getAppointmentISO(b);
+                  return (bt ? new Date(bt).getTime() : 0) - (at ? new Date(at).getTime() : 0);
+                })
+                .map((appt) => {
+                  const when = formatDateTime(getAppointmentISO(appt));
+                  return (
+                    <div key={appt.id} className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                      <div className="text-sm font-semibold text-white/95">{appt.reason?.trim() || "Cita"}</div>
+                      <div className="mt-1 text-xs text-white/70">
+                        {when} · {appt.status ?? "pending"}
+                      </div>
+                      {appt.notes?.trim() ? (
+                        <div className="mt-2 text-xs text-white/80 whitespace-pre-wrap">{appt.notes}</div>
+                      ) : null}
+                    </div>
+                  );
+                })}
             </div>
 
             <div className="mt-6 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => navigate("/calendar")}
-                className="inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                onClick={() => setActivePatient(null)}
+                className="rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-white/15"
               >
-                <CalendarDays className="h-4 w-4" />
-                Ver agenda
+                Cerrar
               </button>
-              <button
-                type="button"
-                onClick={savePatient}
-                disabled={saving}
-                className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-              >
-                {saving ? "Guardando..." : "Guardar"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/agenda?patient=${encodeURIComponent(activePatient.name)}`)}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-white/15"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  Ver agenda
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/agenda?createFor=${encodeURIComponent(activePatient.name)}`)}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-[#0894C1] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3CBDB9]"
+                >
+                  Crear cita
+                </button>
+              </div>
             </div>
           </div>
         </div>
       ) : null}
+
+      <Toast
+        open={Boolean(toast)}
+        kind={toast?.kind}
+        message={toast?.message ?? ""}
+        onClose={() => setToast(null)}
+      />
     </div>
   );
 }

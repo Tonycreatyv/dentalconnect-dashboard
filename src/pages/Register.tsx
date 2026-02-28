@@ -2,19 +2,75 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Stethoscope } from "lucide-react";
+import { supabase } from "../lib/supabaseClient";
+
+const DEFAULT_ORG = "clinic-demo";
+
+type PrimaryGoal = "citas" | "preguntas" | "seguimiento";
 
 export default function Register() {
-  const { signUp } = useAuth();
+  const { signUp, signIn } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [brandName, setBrandName] = useState("");
+  const [businessType, setBusinessType] = useState("dental");
+  const [primaryGoal, setPrimaryGoal] = useState<PrimaryGoal>("citas");
+  const [branches, setBranches] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const canSubmit = useMemo(() => {
-    return email.trim().length > 3 && password.length >= 6 && !busy;
-  }, [email, password, busy]);
+    return email.trim().length > 3 && password.length >= 6 && brandName.trim().length > 1 && !busy;
+  }, [email, password, brandName, busy]);
+
+  async function persistOnboarding() {
+    const now = new Date().toISOString();
+    const trialEnds = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    const parsedBranches = branches
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    await supabase.from("org_settings").upsert(
+      {
+        organization_id: DEFAULT_ORG,
+        name: brandName.trim(),
+        business_type: businessType || "dental",
+        primary_goal: primaryGoal,
+        branches: parsedBranches.length ? parsedBranches : null,
+        plan: "trial",
+        trial_started_at: now,
+        trial_ends_at: trialEnds,
+        is_trial_active: true,
+        updated_at: now,
+      },
+      { onConflict: "organization_id" }
+    );
+
+    await supabase.from("lead_defaults").upsert(
+      {
+        organization_id: DEFAULT_ORG,
+        business_type: businessType || "dental",
+        primary_goal: primaryGoal,
+        updated_at: now,
+      },
+      { onConflict: "organization_id" }
+    );
+
+    await supabase.from("subscriptions").upsert(
+      {
+        organization_id: DEFAULT_ORG,
+        plan: "starter",
+        status: "trialing",
+        trial_started_at: now,
+        trial_ends_at: trialEnds,
+        updated_at: now,
+      },
+      { onConflict: "organization_id" }
+    );
+  }
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,7 +85,16 @@ export default function Register() {
       return;
     }
 
-    navigate("/", { replace: true });
+    const signInErr = await signIn(email.trim(), password);
+    if (signInErr) {
+      setBusy(false);
+      setError(signInErr);
+      return;
+    }
+
+    await persistOnboarding();
+    setBusy(false);
+    navigate("/overview", { replace: true });
   };
 
   return (
@@ -87,6 +152,53 @@ export default function Register() {
               </div>
 
               <form className="grid gap-3" onSubmit={onSubmit}>
+                <label className="grid gap-2">
+                  <span className="text-[10px] tracking-[0.22em] uppercase text-white/60">Nombre de marca</span>
+                  <input
+                    value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                    required
+                    className="h-12 rounded-2xl border border-white/10 bg-slate-950/40 px-4 text-sm text-white placeholder:text-white/35 outline-none focus:border-white/25"
+                    placeholder="Ej: Clínica Sonrisa"
+                    autoComplete="organization"
+                  />
+                </label>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-2">
+                    <span className="text-[10px] tracking-[0.22em] uppercase text-white/60">Tipo de negocio</span>
+                    <input
+                      value={businessType}
+                      onChange={(e) => setBusinessType(e.target.value)}
+                      className="h-12 rounded-2xl border border-white/10 bg-slate-950/40 px-4 text-sm text-white placeholder:text-white/35 outline-none focus:border-white/25"
+                      placeholder="dental"
+                    />
+                  </label>
+
+                  <label className="grid gap-2">
+                    <span className="text-[10px] tracking-[0.22em] uppercase text-white/60">Objetivo principal</span>
+                    <select
+                      value={primaryGoal}
+                      onChange={(e) => setPrimaryGoal(e.target.value as PrimaryGoal)}
+                      className="h-12 rounded-2xl border border-white/10 bg-slate-950/40 px-4 text-sm text-white outline-none focus:border-white/25"
+                    >
+                      <option value="citas">Citas</option>
+                      <option value="preguntas">Preguntas</option>
+                      <option value="seguimiento">Seguimiento</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label className="grid gap-2">
+                  <span className="text-[10px] tracking-[0.22em] uppercase text-white/60">Sucursales (opcional)</span>
+                  <input
+                    value={branches}
+                    onChange={(e) => setBranches(e.target.value)}
+                    className="h-12 rounded-2xl border border-white/10 bg-slate-950/40 px-4 text-sm text-white placeholder:text-white/35 outline-none focus:border-white/25"
+                    placeholder="Centro, Norte"
+                  />
+                </label>
+
                 <label className="grid gap-2">
                   <span className="text-[10px] tracking-[0.22em] uppercase text-white/60">Email</span>
                   <input
