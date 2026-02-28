@@ -7,6 +7,7 @@ import { SectionCard } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
 import { normalizedStartISO } from "../lib/appointments";
 import { Toast, type ToastKind } from "../components/ui/Toast";
+import PageHeader from "../components/PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -176,7 +177,7 @@ export default function Patients() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-semibold text-slate-900">Pacientes</h2>
+      <PageHeader title="Pacientes" showBackOnMobile backTo="/overview" />
 
       <SectionCard title="Pacientes" description="Listado generado desde tus citas registradas.">
         {loading ? (

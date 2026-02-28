@@ -366,36 +366,38 @@ function AppointmentModal({
         </div>
 
         <div className="border-t border-white/10 bg-black/20 px-4 pt-3 pb-[calc(16px+env(safe-area-inset-bottom))] backdrop-blur-lg md:px-6">
-          <div className="flex items-center justify-between gap-2">
-          {mode === "edit" ? (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="inline-flex items-center gap-2 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20"
-              disabled={saving}
-            >
-              <Trash2 className="h-4 w-4" />
-              Borrar cita
-            </button>
-          ) : (
-            <div />
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-            disabled={saving}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-            disabled={saving}
-          >
-            {saving ? "Guardando..." : "Guardar"}
-          </button>
+          <div className="grid gap-2 md:flex md:items-center md:justify-between">
+            {mode === "edit" ? (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20 md:justify-start"
+                disabled={saving}
+              >
+                <Trash2 className="h-4 w-4" />
+                Borrar cita
+              </button>
+            ) : (
+              <div className="hidden md:block" />
+            )}
+            <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                disabled={saving}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={onSave}
+                className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                disabled={saving}
+              >
+                {saving ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

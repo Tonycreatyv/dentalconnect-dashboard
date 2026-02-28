@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { SectionCard } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -257,12 +258,12 @@ export default function MarketingAI() {
 
   return (
     <div className="space-y-6 min-w-0 overflow-x-hidden">
-      <div>
-        <h2 className="text-2xl font-semibold text-slate-900">Marketing IA</h2>
-        <p className="text-sm text-slate-700">
-          Planificá tu semana con un flujo simple y activá publicaciones consistentes.
-        </p>
-      </div>
+      <PageHeader
+        title="Marketing IA"
+        subtitle="Planificá tu semana con un flujo simple y activá publicaciones consistentes."
+        showBackOnMobile
+        backTo="/overview"
+      />
 
       <div className="space-y-4">
         <SectionCard title="1. Objetivo" description="Definí qué querés lograr esta semana.">
