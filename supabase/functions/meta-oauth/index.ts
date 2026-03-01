@@ -1,8 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const ALLOWED_ORIGIN = "https://dental.creatyv.io";
-const APP_URL = "https://dental.creatyv.io";
-const EXPECTED_REDIRECT_URI = `${APP_URL}/auth/meta/callback`;
 const DEV_ORIGINS = new Set(["http://localhost:5173"]);
 
 function resolveOrigin(req: Request) {
@@ -163,14 +161,15 @@ Deno.serve(async (req) => {
 
     const code = String(body?.code ?? "");
     const redirectUriRaw = String(body?.redirect_uri ?? body?.redirectUri ?? "");
+    const redirectUri = normalizeBaseUrl(redirectUriRaw);
     const stateRaw = String(body?.state ?? "");
     let organizationId = "";
 
-    const redirectUri = normalizeBaseUrl(redirectUriRaw);
-    if (redirectUri && redirectUri !== EXPECTED_REDIRECT_URI) {
+    const actionNeedsRedirectUri = action === "exchange" || action === "exchange_and_save";
+    if (actionNeedsRedirectUri && !redirectUri) {
       return json(req, 400, {
-        error: "redirect_uri_mismatch",
-        details: `Expected ${EXPECTED_REDIRECT_URI}`,
+        error: "missing_redirect_uri",
+        details: "redirectUri (or redirect_uri) es requerido.",
       });
     }
 
@@ -189,7 +188,7 @@ Deno.serve(async (req) => {
       const userToken = await exchangeCodeForUserToken({
         appId: META_APP_ID,
         appSecret: META_APP_SECRET,
-        redirectUri: EXPECTED_REDIRECT_URI,
+        redirectUri,
         code,
       });
       const pages = await fetchPages(userToken);
@@ -223,7 +222,7 @@ Deno.serve(async (req) => {
       const userToken = await exchangeCodeForUserToken({
         appId: META_APP_ID,
         appSecret: META_APP_SECRET,
-        redirectUri: EXPECTED_REDIRECT_URI,
+        redirectUri,
         code,
       });
       const pages = await fetchPages(userToken);
