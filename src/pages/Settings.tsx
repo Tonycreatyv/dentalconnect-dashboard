@@ -753,7 +753,7 @@ export default function Settings() {
     }
 
     if (channel === "messenger") {
-      const isConnected = Boolean(orgIntegration.messenger_enabled) && Boolean(orgIntegration.meta_page_id);
+      const isConnected = Boolean(orgIntegration.meta_page_id) && orgIntegration.messenger_enabled === true;
       return {
         label: isConnected ? "CONECTADO" : "NO CONECTADO",
         tone: isConnected ? ("success" as const) : ("muted" as const),
