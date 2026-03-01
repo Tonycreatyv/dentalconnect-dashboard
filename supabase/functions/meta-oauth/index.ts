@@ -311,12 +311,13 @@ Deno.serve(async (req) => {
       });
       if (!secretRes.ok) {
         if (secretRes.isSchemaCache) {
+          const warningCode = "org_secrets_schema_mismatch";
           await supabase.from("org_settings").upsert(
             {
               organization_id: organizationId,
               business_type: "dental",
               messenger_enabled: true,
-              meta_last_error: `org_secrets_warning: ${secretRes.error}`,
+              meta_last_error: warningCode,
               updated_at: now,
             },
             { onConflict: "organization_id" }
@@ -327,7 +328,7 @@ Deno.serve(async (req) => {
             page_id: page.id,
             page_name: displayName,
             token_saved: false,
-            warning: secretRes.error,
+            warning: warningCode,
           });
         }
         await supabase.from("org_settings").upsert(
@@ -392,17 +393,18 @@ Deno.serve(async (req) => {
       });
       if (!secretRes.ok) {
         if (secretRes.isSchemaCache) {
+          const warningCode = "org_secrets_schema_mismatch";
           await supabase.from("org_settings").upsert(
             {
               organization_id: organizationId,
               business_type: "dental",
               messenger_enabled: true,
-              meta_last_error: `org_secrets_warning: ${secretRes.error}`,
+              meta_last_error: warningCode,
               updated_at: now,
             },
             { onConflict: "organization_id" }
           );
-          return json(req, 200, { ok: true, page_id: pageId, token_saved: false, warning: secretRes.error });
+          return json(req, 200, { ok: true, page_id: pageId, token_saved: false, warning: warningCode });
         }
         await supabase.from("org_settings").upsert(
           {
