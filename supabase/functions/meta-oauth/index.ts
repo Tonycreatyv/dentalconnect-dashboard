@@ -44,11 +44,60 @@ type MetaPage = {
   access_token: string;
 };
 
-function orgFromState(raw: string) {
-  const state = String(raw ?? "").trim();
-  if (!state) return "";
-  if (state.startsWith("org:")) return state.slice(4);
-  return "";
+function toBase64Url(input: Uint8Array) {
+  const str = btoa(String.fromCharCode(...input));
+  return str.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(input: string) {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+  const bin = atob(padded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function hmacSha256Base64Url(secret: string, message: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return toBase64Url(new Uint8Array(sig));
+}
+
+function timingSafeEqual(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i += 1) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+
+async function verifySignedState(state: string, secret: string): Promise<{ org: string; ts: number; nonce: string }> {
+  const parts = String(state ?? "").split(".");
+  if (parts.length !== 2) throw new Error("invalid_state");
+  const [payloadB64, sig] = parts;
+  if (!payloadB64 || !sig) throw new Error("invalid_state");
+
+  const expected = await hmacSha256Base64Url(secret, payloadB64);
+  if (!timingSafeEqual(expected, sig)) throw new Error("invalid_state");
+
+  const payloadRaw = new TextDecoder().decode(fromBase64Url(payloadB64));
+  const payload = JSON.parse(payloadRaw ?? "{}") as { org?: string; ts?: number; nonce?: string };
+
+  const org = String(payload.org ?? "").trim();
+  const ts = Number(payload.ts ?? 0);
+  const nonce = String(payload.nonce ?? "").trim();
+
+  if (!org || !nonce || !Number.isFinite(ts) || ts <= 0) throw new Error("invalid_state");
+  const ageMs = Date.now() - ts;
+  if (ageMs < -2 * 60 * 1000 || ageMs > 30 * 60 * 1000) throw new Error("invalid_state");
+
+  return { org, ts, nonce };
 }
 
 async function exchangeCodeForUserToken(args: {
@@ -101,6 +150,7 @@ Deno.serve(async (req) => {
     const SERVICE_ROLE = env("SUPABASE_SERVICE_ROLE_KEY");
     const META_APP_ID = env("META_APP_ID");
     const META_APP_SECRET = env("META_APP_SECRET");
+    const META_STATE_SECRET = env("META_STATE_SECRET");
     const PUBLIC_APP_URL = normalizeBaseUrl(env("PUBLIC_APP_URL"));
     const EXPECTED_REDIRECT_URI = `${PUBLIC_APP_URL}/auth/meta/callback`;
 
@@ -114,8 +164,7 @@ Deno.serve(async (req) => {
     const code = String(body?.code ?? "");
     const redirectUriRaw = String(body?.redirect_uri ?? body?.redirectUri ?? "");
     const stateRaw = String(body?.state ?? "");
-    const organizationId =
-      String(body?.organization_id ?? "").trim() || orgFromState(stateRaw);
+    let organizationId = "";
 
     const redirectUri = normalizeBaseUrl(redirectUriRaw);
     if (redirectUri && redirectUri !== EXPECTED_REDIRECT_URI) {
@@ -125,9 +174,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    try {
+      const parsedState = await verifySignedState(stateRaw, META_STATE_SECRET);
+      organizationId = parsedState.org;
+    } catch {
+      return json(req, 400, { error: "invalid_state", details: "State inválido o expirado." });
+    }
+
     if (action === "exchange") {
       if (!code || !organizationId) {
-        return json(req, 400, { error: "missing_code_or_org", details: "code and organization_id are required." });
+        return json(req, 400, { error: "missing_code_or_org", details: "code y state son requeridos." });
       }
 
       const userToken = await exchangeCodeForUserToken({
@@ -160,7 +216,7 @@ Deno.serve(async (req) => {
       if (!code || !organizationId || !stateRaw) {
         return json(req, 400, {
           error: "missing_code_state_or_org",
-          details: "code, state and organization_id (or org in state) are required.",
+          details: "code y state son requeridos.",
         });
       }
 
@@ -203,6 +259,7 @@ Deno.serve(async (req) => {
           organization_id: organizationId,
           meta_page_id: page.id,
           meta_page_access_token: page.access_token,
+          META_PAGE_ACCESS_TOKEN: page.access_token,
           updated_at: now,
         },
         { onConflict: "organization_id" }
@@ -224,7 +281,6 @@ Deno.serve(async (req) => {
     }
 
     if (action === "save_page") {
-      const organizationId = String(body?.organization_id ?? "");
       const pageId = String(body?.page_id ?? "");
       const pageName = String(body?.page_name ?? "");
       const pageAccessToken = String(body?.page_access_token ?? "");
@@ -259,6 +315,7 @@ Deno.serve(async (req) => {
           organization_id: organizationId,
           meta_page_id: pageId,
           meta_page_access_token: pageAccessToken,
+          META_PAGE_ACCESS_TOKEN: pageAccessToken,
           updated_at: now,
         },
         { onConflict: "organization_id" }

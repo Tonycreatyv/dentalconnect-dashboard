@@ -16,6 +16,9 @@ verify_jwt = false
 [functions.meta-oauth]
 verify_jwt = false
 
+[functions.meta-oauth-state]
+verify_jwt = false
+
 [functions.stripe-checkout]
 verify_jwt = false
 

@@ -430,11 +430,12 @@ Deno.serve(async (req) => {
 
     const sec = await supabase
       .from("org_secrets")
-      .select("meta_page_id, meta_page_access_token")
+      .select('meta_page_id, meta_page_access_token, "META_PAGE_ACCESS_TOKEN"')
       .eq("organization_id", organization_id)
       .maybeSingle();
-    if (!sec.error && sec.data?.meta_page_access_token) {
-      pageAccessToken = safeStr(sec.data.meta_page_access_token, pageAccessToken);
+    if (!sec.error && sec.data) {
+      const token = safeStr((sec.data as any).meta_page_access_token, "") || safeStr((sec.data as any).META_PAGE_ACCESS_TOKEN, "");
+      if (token) pageAccessToken = safeStr(token, pageAccessToken);
       metaPageId = safeStr(sec.data.meta_page_id, "");
     }
 

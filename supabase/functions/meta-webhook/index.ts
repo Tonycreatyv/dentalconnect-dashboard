@@ -166,10 +166,10 @@ serve(async (req) => {
       if (!alreadyHasName) {
         const tokenRes = await supabase
           .from("org_secrets")
-          .select("meta_page_access_token")
+          .select('meta_page_access_token, "META_PAGE_ACCESS_TOKEN"')
           .eq("organization_id", organization_id)
           .maybeSingle();
-        const token = String((tokenRes.data as any)?.meta_page_access_token ?? "");
+        const token = String((tokenRes.data as any)?.meta_page_access_token ?? (tokenRes.data as any)?.META_PAGE_ACCESS_TOKEN ?? "");
         const profileName = await fetchMetaProfileName({ pageAccessToken: token, psid });
         if (profileName) resolvedName = profileName;
       }

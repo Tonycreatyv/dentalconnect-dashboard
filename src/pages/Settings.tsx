@@ -515,12 +515,21 @@ export default function Settings() {
     });
   }
 
-  function connectMeta() {
+  async function connectMeta() {
     setError(null);
     setNotice(null);
 
     if (!META_APP_ID) {
       setError("Conexión no disponible. Revisa la configuración de la integración.");
+      return;
+    }
+
+    const signedStateRes = await supabase.functions.invoke("meta-oauth-state", {
+      body: { organization_id: ORG },
+    });
+    const signedState = String(signedStateRes.data?.state ?? "");
+    if (signedStateRes.error || !signedState) {
+      setError("No se pudo iniciar la conexión segura con Meta.");
       return;
     }
 
@@ -530,7 +539,7 @@ export default function Settings() {
       `&redirect_uri=${encodeURIComponent(META_REDIRECT_URI)}` +
       `&response_type=code` +
       `&scope=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging` +
-      `&state=${encodeURIComponent(`org:${ORG}`)}`;
+      `&state=${encodeURIComponent(signedState)}`;
 
     window.location.href = authUrl;
   }
