@@ -1,6 +1,6 @@
 // src/pages/Settings.tsx
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   BadgeCheck,
   CalendarDays,
@@ -410,12 +410,12 @@ const INTEGRATIONS = [
 function StatusBadge({ label, tone }: { label: string; tone: "success" | "warning" | "muted" | "info" }) {
   const styles =
     tone === "success"
-      ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+      ? "border-emerald-300/80 bg-emerald-50 text-emerald-700"
       : tone === "warning"
-      ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
+      ? "border-amber-300/80 bg-amber-50 text-amber-700"
       : tone === "info"
-      ? "border-cyan-400/40 bg-cyan-500/10 text-cyan-300"
-      : "border-white/20 bg-white/5 text-white/90";
+      ? "border-cyan-300/80 bg-cyan-50 text-cyan-700"
+      : "border-[#D1D5DB] bg-white text-slate-700";
 
   return (
     <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${styles}`}>
@@ -426,6 +426,7 @@ function StatusBadge({ label, tone }: { label: string; tone: "success" | "warnin
 
 export default function Settings() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { clinic, clinicId } = useClinic();
 
   const ORG = clinic?.organization_id ?? DEFAULT_ORG;
@@ -472,16 +473,40 @@ export default function Settings() {
   const [requestOpen, setRequestOpen] = useState<IntegrationChannel | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
 
+  async function loadOrgIntegration() {
+    const orgRes = await supabase
+      .from("org_settings")
+      .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
+      .eq("organization_id", ORG)
+      .maybeSingle();
+
+    if (orgRes.error) return;
+
+    setOrgIntegration({
+      meta_page_id: (orgRes.data as any)?.meta_page_id ?? null,
+      messenger_enabled: (orgRes.data as any)?.messenger_enabled ?? false,
+      meta_connected_at: (orgRes.data as any)?.meta_connected_at ?? null,
+      meta_last_error: (orgRes.data as any)?.meta_last_error ?? null,
+    });
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const connected = params.get("connected");
-    const tab = params.get("tab");
-    if (tab === "integraciones") setOpenSection("integraciones");
+    const tabParam = params.get("tab");
+    if (tabParam === "integraciones") {
+      setOpenSection("integraciones");
+      setTab("integraciones");
+    }
     if (connected === "1") {
       setOpenSection("integraciones");
       setNotice("Messenger se conectó correctamente.");
+      void loadOrgIntegration().finally(() => {
+        params.delete("connected");
+        navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
+      });
     }
-  }, [location.search]);
+  }, [location.pathname, location.search, navigate, ORG]);
 
   const [requestForm, setRequestForm] = useState({
     business: "",
@@ -629,20 +654,7 @@ export default function Settings() {
 
       await loadIntegrationRequests();
 
-      const orgRes = await supabase
-        .from("org_settings")
-        .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
-        .eq("organization_id", ORG)
-        .maybeSingle();
-
-      if (orgRes.data) {
-        setOrgIntegration({
-          meta_page_id: (orgRes.data as any).meta_page_id ?? null,
-          messenger_enabled: (orgRes.data as any).messenger_enabled ?? false,
-          meta_connected_at: (orgRes.data as any).meta_connected_at ?? null,
-          meta_last_error: (orgRes.data as any).meta_last_error ?? null,
-        });
-      }
+      await loadOrgIntegration();
 
       setLoading(false);
     }
@@ -735,12 +747,13 @@ export default function Settings() {
     }
 
     if (channel === "messenger") {
-      if (orgIntegration.messenger_enabled && orgIntegration.meta_page_id) {
-        return { label: "Conectado", tone: "success" as const, primary: "Reconfigurar", disabled: false };
-      }
-      if (orgIntegration.meta_last_error) {
-        return { label: "Requiere acción", tone: "warning" as const, primary: "Revisar", disabled: false };
-      }
+      const isConnected = !!orgIntegration.meta_page_id && orgIntegration.messenger_enabled === true;
+      return {
+        label: isConnected ? "CONECTADO" : "NO CONECTADO",
+        tone: isConnected ? ("success" as const) : ("muted" as const),
+        primary: isConnected ? "Reconfigurar" : "Conectar",
+        disabled: false,
+      };
     }
 
     const latest = integrationRequests.find((req) => req.channel === channel);
@@ -852,9 +865,9 @@ export default function Settings() {
                 className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
                   status.disabled
                     ? "border border-[#E5E7EB] bg-white text-slate-500"
-                    : status.label === "Conectado"
-                    ? "border border-emerald-400/40 bg-transparent text-emerald-300/90 hover:border-emerald-300/60"
-                    : "border border-white/25 bg-white/5 text-white/90 hover:bg-white/10"
+                    : status.label === "CONECTADO"
+                    ? "border border-emerald-300/70 bg-transparent text-emerald-700 hover:border-emerald-400 hover:text-emerald-800"
+                    : "border border-[#D1D5DB] bg-white text-slate-700 hover:border-slate-400 hover:text-slate-900"
                 }`}
               >
                 {isDisabled ? "Conectar" : status.primary}

@@ -37,6 +37,7 @@ export default function MetaCallback() {
         }
 
         if (!mounted) return;
+        sessionStorage.setItem("meta_oauth_connected", String(Date.now()));
         window.location.href = "/settings?tab=integraciones&connected=1";
       } catch (e: any) {
         if (!mounted) return;
