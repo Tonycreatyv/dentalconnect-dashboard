@@ -168,6 +168,13 @@ serve(async (req) => {
         }
       }
       orgIds.add(organization_id);
+      console.log("[meta-webhook] inbound", {
+        organization_id,
+        page_id: pageId,
+        psid,
+        provider_message_id: providerMid,
+        override_testdental: canUseTestdentalOverride,
+      });
 
       const { data: existingLead, error: selErr } = await supabase
         .from("leads")
@@ -229,37 +236,12 @@ serve(async (req) => {
         const m = String(msgErr.message ?? "");
         if (!m.toLowerCase().includes("duplicate")) throw msgErr;
       }
-
-      const payload = {
+      created_jobs++; // Enqueue is handled by DB trigger after insert on messages.
+      console.log("[meta-webhook] enqueue:triggered", {
         organization_id,
-        lead_id: lead.id,
-        channel,
-        channel_user_id: psid,
-        inbound_provider_message_id: providerMid,
-        inbound_text: text,
-      };
-
-      const existingOutbox = await supabase
-        .from("reply_outbox")
-        .select("id")
-        .eq("organization_id", organization_id)
-        .eq("inbound_provider_message_id", providerMid)
-        .limit(1)
-        .maybeSingle();
-      if (!existingOutbox.error && existingOutbox.data?.id) {
-        continue;
-      }
-
-      const { error: outErr } = await supabase.rpc("enqueue_reply_job", {
-        p_organization_id: organization_id,
-        p_lead_id: lead.id,
-        p_channel: channel,
-        p_channel_user_id: psid,
-        p_inbound_provider_message_id: providerMid,
-        p_payload: payload,
+        provider_message_id: providerMid,
+        source: "messages_after_insert_trigger",
       });
-      if (outErr) throw outErr;
-      created_jobs++;
 
       if (RUN_REPLIES_SECRET) {
         const RUN_REPLIES_URL = `${SUPABASE_URL}/functions/v1/run-replies`;

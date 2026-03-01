@@ -511,6 +511,7 @@ Deno.serve(async (req) => {
       .limit(10);
 
     if (qErr) return j(500, { ok: false, error: qErr.message });
+    console.log("[run-replies] poll", { organization_id, pending: jobs?.length ?? 0 });
     if (!jobs?.length) return j(200, { ok: true, claimed: 0, sent: 0, skipped: 0, failures: [] });
 
     let claimed = 0;
@@ -520,6 +521,13 @@ Deno.serve(async (req) => {
 
     for (const job of jobs) {
       const jobId = safeStr(job.id);
+      console.log("[run-replies] job:start", {
+        organization_id,
+        job_id: jobId,
+        inbound_provider_message_id: safeStr(job.inbound_provider_message_id, ""),
+        inbound_message_id: safeStr(job.inbound_message_id, ""),
+        status: safeStr(job.status, ""),
+      });
       const claim = await supabase
         .from("reply_outbox")
         .update({
@@ -533,6 +541,11 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (claim.error || !claim.data?.id) {
+        console.log("[run-replies] job:claim_skipped", {
+          organization_id,
+          job_id: jobId,
+          error: claim.error?.message ?? null,
+        });
         skipped++;
         continue;
       }
@@ -721,6 +734,12 @@ Deno.serve(async (req) => {
             last_error: debugNote ? `debug:${debugNote}` : null,
           })
           .eq("id", jobId);
+        console.log("[run-replies] job:sent", {
+          organization_id,
+          job_id: jobId,
+          outbound_message_id,
+          meta_message_id: metaResp?.message_id ?? null,
+        });
         sent++;
       } catch (e: any) {
         const msg = safeStr(e?.message, String(e));
@@ -728,15 +747,20 @@ Deno.serve(async (req) => {
         await supabase
           .from("reply_outbox")
           .update({
-            status: "error",
+            status: "failed",
             last_error: msg,
             updated_at: nowIso(),
           })
           .eq("id", safeStr(job.id));
+        console.log("[run-replies] job:failed", {
+          organization_id,
+          job_id: safeStr(job.id),
+          error: msg,
+        });
       }
     }
 
-    return j(200, { ok: true, claimed, sent, skipped, failures });
+    return j(200, { ok: true, claimed, sent, skipped, processed: sent, failures });
   } catch (e: any) {
     return j(500, { ok: false, error: safeStr(e?.message, String(e)) });
   }
