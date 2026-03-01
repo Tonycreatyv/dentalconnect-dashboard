@@ -189,12 +189,12 @@ function AppointmentModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-xl sm:items-center sm:px-4">
       <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/10 bg-white/10 shadow-[0_24px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:h-auto sm:max-h-[92vh] sm:max-w-xl sm:rounded-3xl">
-        <div className="sticky top-0 z-20 border-b border-white/10 bg-black/25 px-4 py-3 backdrop-blur-lg sm:px-6 sm:pt-6 sm:pb-4 sm:border-b-0 sm:bg-transparent sm:backdrop-blur-0">
+        <div className="sticky top-0 z-20 border-b border-white/10 bg-black/25 px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 backdrop-blur-lg sm:px-6 sm:pt-6 sm:pb-4 sm:border-b-0 sm:bg-transparent sm:backdrop-blur-0">
           <div className="flex items-center justify-between gap-2 md:hidden">
             <button
               type="button"
               onClick={onBack}
-              className="inline-flex items-center gap-1 rounded-xl border border-white/20 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-white/90 hover:bg-white/15"
+              className="inline-flex h-11 items-center gap-1 rounded-xl border border-white/20 bg-white/10 px-3 text-xs font-semibold text-white/90 hover:bg-white/15"
             >
               <ChevronLeft className="h-4 w-4" />
               Volver
@@ -205,7 +205,7 @@ function AppointmentModal({
             <button
               type="button"
               onClick={onSave}
-              className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              className="h-11 rounded-xl bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
               disabled={saving}
             >
               {saving ? "Guardando..." : "Guardar"}

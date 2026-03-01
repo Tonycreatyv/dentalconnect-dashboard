@@ -393,6 +393,32 @@ function ctaFromIntent(intent: string) {
   return { tag: "none", text: "" };
 }
 
+async function loadOrgSecretWithFallback(
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string
+) {
+  const selects = [
+    'meta_page_id, meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
+    'meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
+    '"META_PAGE_ACCESS_TOKEN"',
+  ];
+
+  for (const sel of selects) {
+    const r = await supabase
+      .from("org_secrets")
+      .select(sel)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+
+    if (!r.error) return r.data as Json | null;
+
+    const isSchemaCache = r.error.message.includes("schema cache") && r.error.message.includes("Could not find");
+    if (!isSchemaCache) break;
+  }
+
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -428,15 +454,11 @@ Deno.serve(async (req) => {
     let metaPageId = "";
     let systemPrompt = defaultSystemPrompt();
 
-    const sec = await supabase
-      .from("org_secrets")
-      .select('meta_page_id, meta_page_access_token, "META_PAGE_ACCESS_TOKEN"')
-      .eq("organization_id", organization_id)
-      .maybeSingle();
-    if (!sec.error && sec.data) {
-      const token = safeStr((sec.data as any).meta_page_access_token, "") || safeStr((sec.data as any).META_PAGE_ACCESS_TOKEN, "");
+    const sec = await loadOrgSecretWithFallback(supabase, organization_id);
+    if (sec) {
+      const token = safeStr((sec as any).meta_page_access_token, "") || safeStr((sec as any).META_PAGE_ACCESS_TOKEN, "");
       if (token) pageAccessToken = safeStr(token, pageAccessToken);
-      metaPageId = safeStr(sec.data.meta_page_id, "");
+      metaPageId = safeStr((sec as any).meta_page_id, "");
     }
 
     let clinicCtx: Json = {

@@ -17,6 +17,7 @@ import { Modal } from "../components/ui/Modal";
 import { Toast, type ToastKind } from "../components/ui/Toast";
 import PageHeader from "../components/PageHeader";
 import { startMetaOAuth } from "../components/integrations/ConnectMessengerButton";
+import StatusChip from "../components/ui/StatusChip";
 
 const GOOGLE_CAL_CONNECT_URL = "";
 const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
@@ -407,23 +408,6 @@ const INTEGRATIONS = [
   },
 ];
 
-function StatusBadge({ label, tone }: { label: string; tone: "success" | "warning" | "muted" | "info" }) {
-  const styles =
-    tone === "success"
-      ? "border-emerald-300/80 bg-emerald-50 text-emerald-700"
-      : tone === "warning"
-      ? "border-amber-300/80 bg-amber-50 text-amber-700"
-      : tone === "info"
-      ? "border-cyan-300/80 bg-cyan-50 text-cyan-700"
-      : "border-[#D1D5DB] bg-white text-slate-700";
-
-  return (
-    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${styles}`}>
-      {label}
-    </span>
-  );
-}
-
 export default function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -472,6 +456,9 @@ export default function Settings() {
   const [guideOpen, setGuideOpen] = useState<IntegrationChannel | null>(null);
   const [requestOpen, setRequestOpen] = useState<IntegrationChannel | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [diagResult, setDiagResult] = useState<string | null>(null);
+  const [pendingOutbox, setPendingOutbox] = useState<number | null>(null);
 
   async function loadOrgIntegration(targetOrgId = ORG) {
     const orgRes = await supabase
@@ -493,6 +480,15 @@ export default function Settings() {
       meta_connected_at: s?.meta_connected_at ?? null,
       meta_last_error: s?.meta_last_error ?? null,
     });
+
+    const pendingRes = await supabase
+      .from("reply_outbox")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", targetOrgId)
+      .in("status", ["pending", "queued", "processing"]);
+    if (!pendingRes.error) {
+      setPendingOutbox(pendingRes.count ?? 0);
+    }
   }
 
   useEffect(() => {
@@ -556,6 +552,64 @@ export default function Settings() {
     } catch (e: any) {
       setError(String(e?.message ?? e) || "No se pudo iniciar la conexión segura con Meta.");
       return;
+    }
+  }
+
+  async function disconnectMessenger() {
+    const confirmed = window.confirm("¿Desconectar Messenger de esta organización?");
+    if (!confirmed) return;
+
+    setError(null);
+    const now = new Date().toISOString();
+    const res = await supabase
+      .from("org_settings")
+      .update({
+        messenger_enabled: false,
+        meta_page_id: null,
+        meta_connected_at: null,
+        meta_last_error: null,
+        updated_at: now,
+      })
+      .eq("organization_id", ORG);
+
+    if (res.error) {
+      setToast({ kind: "error", message: "No se pudo desconectar Messenger." });
+      return;
+    }
+
+    setToast({ kind: "success", message: "Messenger desconectado." });
+    await loadOrgIntegration();
+  }
+
+  async function runRepliesDiagnostic() {
+    setDiagBusy(true);
+    setDiagResult(null);
+    try {
+      const baseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+      const runRepliesSecret = import.meta.env.VITE_RUN_REPLIES_SECRET as string | undefined;
+      if (!baseUrl) throw new Error("missing_VITE_SUPABASE_URL");
+      if (!runRepliesSecret) throw new Error("missing_VITE_RUN_REPLIES_SECRET");
+      if (!import.meta.env.DEV) {
+        const ok = window.confirm("Esto ejecutará run-replies para la org activa. ¿Continuar?");
+        if (!ok) return;
+      }
+
+      const r = await fetch(`${baseUrl}/functions/v1/run-replies`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-run-replies-secret": runRepliesSecret,
+        },
+        body: JSON.stringify({ organization_id: ORG, limit: 5 }),
+      });
+
+      const j = await r.json().catch(() => ({}));
+      await loadOrgIntegration();
+      setDiagResult(r.ok ? `OK: ${JSON.stringify(j)}` : `${r.status} ${String(j?.error ?? "error")}`);
+    } catch (e: any) {
+      setDiagResult(`error: ${String(e?.message ?? e)}`);
+    } finally {
+      setDiagBusy(false);
     }
   }
 
@@ -754,7 +808,7 @@ export default function Settings() {
 
   function statusFor(channel: IntegrationChannel) {
     if (channel === "google_calendar") {
-      return { label: "Deshabilitado", tone: "muted" as const, primary: "Unirme a lista de espera", disabled: true };
+      return { label: "DESHABILITADO", status: "disconnected" as const, primary: "Unirme a lista de espera", disabled: true };
     }
 
     if (channel === "messenger") {
@@ -762,8 +816,8 @@ export default function Settings() {
       const isConnected = !!s?.meta_page_id && s?.messenger_enabled === true;
       return {
         label: isConnected ? "CONECTADO" : "NO CONECTADO",
-        tone: isConnected ? ("success" as const) : ("muted" as const),
-        primary: isConnected ? "Conectado" : "Conectar",
+        status: isConnected ? ("connected" as const) : ("disconnected" as const),
+        primary: isConnected ? "Desconectar" : "Conectar Messenger",
         disabled: false,
       };
     }
@@ -771,14 +825,14 @@ export default function Settings() {
     const latest = integrationRequests.find((req) => req.channel === channel);
 
     if (latest?.status === "connected") {
-      return { label: "Conectado", tone: "success" as const, primary: "Reconfigurar", disabled: false };
+      return { label: "CONECTADO", status: "connected" as const, primary: "Reconfigurar", disabled: false };
     }
 
     if (latest?.status === "pending") {
-      return { label: "Requiere acción", tone: "warning" as const, primary: "Revisar", disabled: false };
+      return { label: "REQUIERE ACCION", status: "warning" as const, primary: "Revisar", disabled: false };
     }
 
-    return { label: "No conectado", tone: "muted" as const, primary: "Conectar", disabled: false };
+    return { label: "NO CONECTADO", status: "disconnected" as const, primary: "Conectar", disabled: false };
   }
 
   async function submitIntegrationRequest(channel: IntegrationChannel) {
@@ -871,21 +925,40 @@ export default function Settings() {
         const status = statusFor(integration.key);
         const Icon = integration.icon;
         const isDisabled = integration.key === "google_calendar";
+        const isMessenger = integration.key === "messenger";
+        const shouldShowInternalWarning = isMessenger && orgIntegration.meta_last_error && import.meta.env.DEV;
+        const showFriendlyPendingNote =
+          isMessenger &&
+          !import.meta.env.DEV &&
+          (orgIntegration.meta_last_error ?? "").includes("org_secrets_schema_mismatch");
 
         return (
-          <div key={integration.key} className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
+          <div
+            key={integration.key}
+            className={
+              isMessenger
+                ? "rounded-3xl border border-white/10 bg-[#0B1117] p-6 shadow-[0_18px_40px_rgba(0,0,0,0.35)]"
+                : "rounded-3xl border border-[#E5E7EB] bg-white p-6"
+            }
+          >
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7]">
-                  <Icon className="h-5 w-5 text-slate-700" />
+                <div
+                  className={
+                    isMessenger
+                      ? "flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/5"
+                      : "flex h-10 w-10 items-center justify-center rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7]"
+                  }
+                >
+                  <Icon className={`h-5 w-5 ${isMessenger ? "text-white/85" : "text-slate-700"}`} />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">{integration.name}</div>
-                  <div className="mt-1 text-sm text-slate-700">{integration.description}</div>
+                  <div className={`text-sm font-semibold ${isMessenger ? "text-white/95" : "text-slate-900"}`}>{integration.name}</div>
+                  <div className={`mt-1 text-sm ${isMessenger ? "text-white/65" : "text-slate-700"}`}>{integration.description}</div>
                 </div>
               </div>
 
-              <StatusBadge label={status.label} tone={status.tone} />
+              <StatusChip status={status.status} label={status.label} />
             </div>
 
             <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -894,7 +967,11 @@ export default function Settings() {
                 disabled={status.disabled}
                 onClick={() => {
                   if (integration.key === "messenger") {
-                    connectMeta();
+                    if (status.status === "connected") {
+                      void disconnectMessenger();
+                    } else {
+                      void connectMeta();
+                    }
                     return;
                   }
                   if (integration.key === "google_calendar") {
@@ -905,7 +982,11 @@ export default function Settings() {
                 className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
                   status.disabled
                     ? "border border-[#E5E7EB] bg-white text-slate-500"
-                    : status.label === "CONECTADO"
+                    : isMessenger && status.status === "connected"
+                    ? "border border-[#1dd1a1] bg-transparent text-[#7fffd4] hover:shadow-[0_0_12px_rgba(29,209,161,0.25)]"
+                    : isMessenger
+                    ? "border border-white/25 bg-transparent text-white/85 hover:bg-white/10"
+                    : status.status === "connected"
                     ? "border border-emerald-300/70 bg-transparent text-emerald-700 hover:border-emerald-400 hover:text-emerald-800"
                     : "border border-[#D1D5DB] bg-white text-slate-700 hover:border-slate-400 hover:text-slate-900"
                 }`}
@@ -921,7 +1002,7 @@ export default function Settings() {
                 >
                   Unirme a lista de espera
                 </button>
-              ) : (
+              ) : !isMessenger ? (
                 <button
                   type="button"
                   onClick={() => setGuideOpen(integration.key)}
@@ -929,7 +1010,7 @@ export default function Settings() {
                 >
                   Ver guía
                 </button>
-              )}
+              ) : null}
             </div>
 
             {isDisabled ? (
@@ -959,15 +1040,38 @@ export default function Settings() {
               </details>
             ) : null}
 
-            {integration.key === "messenger" && orgIntegration.meta_last_error ? (
-              <div className="mt-3 text-xs text-rose-200">
+            {shouldShowInternalWarning ? (
+              <div className="mt-3 text-xs text-rose-300">
                 {orgIntegration.meta_last_error}
               </div>
+            ) : null}
+
+            {showFriendlyPendingNote ? (
+              <div className="mt-3 text-xs text-white/60">Conectado · Configuración avanzada pendiente</div>
             ) : null}
 
             {integration.key === "messenger" && import.meta.env.DEV ? (
               <div className="mt-2 text-[11px] text-slate-500">
                 {`enabled=${String(orgIntegration.messenger_enabled ?? null)} page=${orgIntegration.meta_page_id ?? "null"}`}
+              </div>
+            ) : null}
+
+            {isMessenger && (isAdmin || import.meta.env.DEV) ? (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-[#090F14] p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void runRepliesDiagnostic()}
+                    disabled={diagBusy}
+                    className="h-11 rounded-xl border border-white/20 bg-white/5 px-4 text-sm font-semibold text-white/85 hover:bg-white/10 disabled:opacity-60"
+                  >
+                    {diagBusy ? "Probando..." : "Probar envío"}
+                  </button>
+                  <span className="text-xs text-white/60">
+                    Jobs pendientes: {pendingOutbox ?? "n/a"}
+                  </span>
+                </div>
+                {diagResult ? <div className="mt-2 text-xs text-white/70">{diagResult}</div> : null}
               </div>
             ) : null}
           </div>
@@ -1406,7 +1510,7 @@ export default function Settings() {
             type="button"
             onClick={save}
             disabled={saving || !isDirty}
-            className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7] disabled:opacity-50"
+            className="h-11 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7] disabled:opacity-50"
           >
             {saving ? "Guardando..." : "Guardar cambios"}
           </button>

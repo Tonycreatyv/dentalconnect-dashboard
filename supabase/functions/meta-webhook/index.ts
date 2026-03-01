@@ -239,6 +239,17 @@ serve(async (req) => {
         inbound_text: text,
       };
 
+      const existingOutbox = await supabase
+        .from("reply_outbox")
+        .select("id")
+        .eq("organization_id", organization_id)
+        .eq("inbound_provider_message_id", providerMid)
+        .limit(1)
+        .maybeSingle();
+      if (!existingOutbox.error && existingOutbox.data?.id) {
+        continue;
+      }
+
       const { error: outErr } = await supabase.rpc("enqueue_reply_job", {
         p_organization_id: organization_id,
         p_lead_id: lead.id,
