@@ -76,6 +76,7 @@ function AppRoutesInner() {
 
         <Route path="patients" element={<Patients />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="settings/integrations" element={<Settings />} />
         <Route path="billing" element={<Billing />} />
         <Route path="billing/success" element={<BillingSuccess />} />
         <Route path="billing/cancel" element={<BillingCancel />} />

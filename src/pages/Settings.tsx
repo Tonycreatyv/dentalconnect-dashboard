@@ -1,5 +1,6 @@
 // src/pages/Settings.tsx
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   BadgeCheck,
   CalendarDays,
@@ -428,6 +429,7 @@ function StatusBadge({ label, tone }: { label: string; tone: "success" | "warnin
 }
 
 export default function Settings() {
+  const location = useLocation();
   const { clinic, clinicId } = useClinic();
 
   const ORG = clinic?.organization_id ?? DEFAULT_ORG;
@@ -473,6 +475,17 @@ export default function Settings() {
   const [guideOpen, setGuideOpen] = useState<IntegrationChannel | null>(null);
   const [requestOpen, setRequestOpen] = useState<IntegrationChannel | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const connected = params.get("connected");
+    const tab = params.get("tab");
+    if (tab === "integraciones") setOpenSection("integraciones");
+    if (connected === "1") {
+      setOpenSection("integraciones");
+      setNotice("Messenger se conectó correctamente.");
+    }
+  }, [location.search]);
 
   const [requestForm, setRequestForm] = useState({
     business: "",
