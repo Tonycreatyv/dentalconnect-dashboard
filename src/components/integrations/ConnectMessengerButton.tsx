@@ -1,57 +1,63 @@
-// src/pages/auth/MetaCallback.tsx
-import React, { useEffect, useState } from "react";
+import { useState } from "react";
 
-const SUPABASE_FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
-const PUBLIC_APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
+const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
+const PUBLIC_APP_URL =
+  ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ??
+    "https://dental.creatyv.io")
+    .replace(/\/+$/, "");
+const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
 
-export default function MetaCallback() {
-  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
-  const [message, setMessage] = useState<string>("Procesando conexión con Facebook...");
+export async function startMetaOAuth(organizationId: string) {
+  if (!META_APP_ID) throw new Error("Falta VITE_META_APP_ID.");
+  if (!organizationId) throw new Error("Falta organization_id.");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const code = params.get("code");
-        const state = params.get("state");
+  const stateRes = await fetch(`${FN_BASE}/meta-oauth-state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ organization_id: organizationId }),
+  });
+  const stateJson = await stateRes.json().catch(() => ({}));
+  if (!stateRes.ok || !stateJson?.ok || !stateJson?.state) {
+    throw new Error(String(stateJson?.error ?? "No se pudo generar state firmado."));
+  }
 
-        if (!code || !state) throw new Error("Falta code o state en el callback");
+  const redirectUri = `${PUBLIC_APP_URL}/auth/meta/callback`;
+  const authUrl =
+    "https://www.facebook.com/v19.0/dialog/oauth" +
+    `?client_id=${encodeURIComponent(META_APP_ID)}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&state=${encodeURIComponent(String(stateJson.state))}` +
+    `&response_type=code` +
+    `&scope=pages_show_list`;
 
-        const redirectUri = `${PUBLIC_APP_URL}/auth/meta/callback`;
+  window.location.href = authUrl;
+}
 
-        const r = await fetch(`${SUPABASE_FN_BASE}/meta-oauth`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code, state, redirectUri }),
-        });
+export default function ConnectMessengerButton({
+  organizationId,
+  className = "",
+  onError,
+}: {
+  organizationId: string;
+  className?: string;
+  onError?: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
 
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j?.ok) throw new Error(j?.error || "No se pudo conectar Meta");
-
-        setStatus("ok");
-        setMessage("✅ Conectado. Redirigiendo...");
-        window.location.href = "/settings?tab=integraciones&connected=1";
-      } catch (e: any) {
-        setStatus("error");
-        setMessage(String(e?.message ?? e));
-      }
-    })();
-  }, []);
+  async function onClick() {
+    try {
+      setBusy(true);
+      await startMetaOAuth(organizationId);
+    } catch (e: any) {
+      setBusy(false);
+      const msg = String(e?.message ?? e);
+      onError?.(msg);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
-        <h1 className="text-xl font-semibold">Conectar Messenger</h1>
-        <p className="mt-3 text-white/80">{message}</p>
-        {status === "error" ? (
-          <a
-            href="/settings?tab=integraciones"
-            className="mt-4 inline-flex rounded-xl border border-white/20 bg-white/5 px-4 py-2 hover:bg-white/10"
-          >
-            Volver a Integraciones
-          </a>
-        ) : null}
-      </div>
-    </div>
+    <button type="button" onClick={onClick} disabled={busy} className={className}>
+      {busy ? "Conectando..." : "Conectar"}
+    </button>
   );
 }

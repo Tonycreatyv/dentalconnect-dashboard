@@ -16,8 +16,8 @@ import { Toggle } from "../components/Toggle";
 import { Modal } from "../components/ui/Modal";
 import { Toast, type ToastKind } from "../components/ui/Toast";
 import PageHeader from "../components/PageHeader";
+import { startMetaOAuth } from "../components/integrations/ConnectMessengerButton";
 
-const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
 const GOOGLE_CAL_CONNECT_URL = "";
 const PUBLIC_APP_URL =
   ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ??
@@ -519,29 +519,12 @@ export default function Settings() {
     setError(null);
     setNotice(null);
 
-    if (!META_APP_ID) {
-      setError("Conexión no disponible. Revisa la configuración de la integración.");
+    try {
+      await startMetaOAuth(ORG);
+    } catch (e: any) {
+      setError(String(e?.message ?? e) || "No se pudo iniciar la conexión segura con Meta.");
       return;
     }
-
-    const signedStateRes = await supabase.functions.invoke("meta-oauth-state", {
-      body: { organization_id: ORG },
-    });
-    const signedState = String(signedStateRes.data?.state ?? "");
-    if (signedStateRes.error || !signedState) {
-      setError("No se pudo iniciar la conexión segura con Meta.");
-      return;
-    }
-
-    const authUrl =
-      "https://www.facebook.com/v19.0/dialog/oauth" +
-      `?client_id=${META_APP_ID}` +
-      `&redirect_uri=${encodeURIComponent(META_REDIRECT_URI)}` +
-      `&response_type=code` +
-      `&scope=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging` +
-      `&state=${encodeURIComponent(signedState)}`;
-
-    window.location.href = authUrl;
   }
 
   async function ensureClinic(): Promise<string | null> {
