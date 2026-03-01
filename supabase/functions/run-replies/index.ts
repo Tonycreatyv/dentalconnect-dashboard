@@ -419,6 +419,28 @@ async function loadOrgSecretWithFallback(
   return null;
 }
 
+async function loadOrgSecretsKV(
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string
+) {
+  const keys = ["META_PAGE_ACCESS_TOKEN", "META_PAGE_ID", "META_GRAPH_VERSION"];
+  const res = await supabase
+    .from("org_secrets")
+    .select("key, value")
+    .eq("organization_id", organizationId)
+    .in("key", keys);
+
+  const kv: Record<string, string> = {};
+  if (!res.error && Array.isArray(res.data)) {
+    for (const row of res.data as any[]) {
+      const k = safeStr(row?.key, "").trim();
+      const v = safeStr(row?.value, "");
+      if (k) kv[k] = v;
+    }
+  }
+  return kv;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -431,7 +453,7 @@ Deno.serve(async (req) => {
     const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
     const OPENAI_API_KEY = env("OPENAI_API_KEY");
     const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
-    const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
+    const DEFAULT_META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
     const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ?? "clinic-demo";
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
@@ -452,13 +474,19 @@ Deno.serve(async (req) => {
 
     let pageAccessToken = Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "";
     let metaPageId = "";
+    let metaGraphVersion = DEFAULT_META_GRAPH_VERSION;
     let systemPrompt = defaultSystemPrompt();
+
+    const kvSecrets = await loadOrgSecretsKV(supabase, organization_id);
+    pageAccessToken = safeStr(kvSecrets.META_PAGE_ACCESS_TOKEN, pageAccessToken) || pageAccessToken;
+    metaPageId = safeStr(kvSecrets.META_PAGE_ID, metaPageId) || metaPageId;
+    metaGraphVersion = safeStr(kvSecrets.META_GRAPH_VERSION, metaGraphVersion) || metaGraphVersion;
 
     const sec = await loadOrgSecretWithFallback(supabase, organization_id);
     if (sec) {
       const token = safeStr((sec as any).meta_page_access_token, "") || safeStr((sec as any).META_PAGE_ACCESS_TOKEN, "");
       if (token) pageAccessToken = safeStr(token, pageAccessToken);
-      metaPageId = safeStr((sec as any).meta_page_id, "");
+      metaPageId = safeStr((sec as any).meta_page_id, metaPageId);
     }
 
     let clinicCtx: Json = {
@@ -502,22 +530,27 @@ Deno.serve(async (req) => {
       if (Number.isFinite(td) && td > 0 && td <= 365) trialDays = td;
     }
 
+    const runNow = nowIso();
     const { data: jobs, error: qErr } = await supabase
       .from("reply_outbox")
       .select("*")
       .eq("organization_id", organization_id)
       .in("status", ["pending", "queued"])
+      .or(`scheduled_for.lte.${runNow},scheduled_for.is.null`)
+      .is("claimed_at", null)
+      .is("locked_at", null)
       .order("created_at", { ascending: true })
       .limit(10);
 
     if (qErr) return j(500, { ok: false, error: qErr.message });
     console.log("[run-replies] poll", { organization_id, pending: jobs?.length ?? 0 });
-    if (!jobs?.length) return j(200, { ok: true, claimed: 0, sent: 0, skipped: 0, failures: [] });
+    if (!jobs?.length) return j(200, { ok: true, claimed: 0, sent: 0, skipped: 0, failures: [], skipped_reasons: [] });
 
     let claimed = 0;
     let sent = 0;
     let skipped = 0;
     const failures: Array<{ id: string; error: string }> = [];
+    const skipped_reasons: Array<{ id: string; reason: string; details?: string }> = [];
 
     for (const job of jobs) {
       const jobId = safeStr(job.id);
@@ -533,19 +566,28 @@ Deno.serve(async (req) => {
         .update({
           status: "processing",
           processing_started_at: nowIso(),
+          claimed_at: nowIso(),
+          locked_at: nowIso(),
           attempts: (job.attempts ?? 0) + 1,
         })
         .eq("id", jobId)
         .in("status", ["pending", "queued"])
+        .or(`scheduled_for.lte.${nowIso()},scheduled_for.is.null`)
+        .is("claimed_at", null)
+        .is("locked_at", null)
         .select("id")
         .maybeSingle();
 
       if (claim.error || !claim.data?.id) {
+        const reason = claim.error ? "claim_update_error" : "claim_guardrail_not_met";
+        const details = claim.error?.message ?? "status/scheduled_for/claimed_at/locked_at";
         console.log("[run-replies] job:claim_skipped", {
           organization_id,
           job_id: jobId,
-          error: claim.error?.message ?? null,
+          reason,
+          details,
         });
+        skipped_reasons.push({ id: jobId, reason, details });
         skipped++;
         continue;
       }
@@ -567,7 +609,10 @@ Deno.serve(async (req) => {
         const inboundMessageId =
           safeStr(job.inbound_provider_message_id, "") || safeStr(job.inbound_message_id, "");
 
-        if (!recipientId) throw new Error("Missing recipient id (channel_user_id/psid).");
+        if (!recipientId) throw new Error("missing_recipient_id: channel_user_id/psid");
+        if (!inboundText) throw new Error("missing_inbound_text: inbound_text/text/message_text");
+        if (!pageAccessToken) throw new Error("missing_token: META_PAGE_ACCESS_TOKEN (org_secrets/env)");
+        if (!metaPageId) throw new Error("missing_page_id: META_PAGE_ID/meta_page_id (org_secrets/org_settings)");
 
         let leadState: Json = {};
         if (leadId) {
@@ -576,10 +621,12 @@ Deno.serve(async (req) => {
         }
 
         if (inboundMessageId && safeStr(leadState?.last_seen_inbound_mid, "") === inboundMessageId) {
+          const reason = "deduped_inbound_mid";
           skipped++;
+          skipped_reasons.push({ id: jobId, reason });
           await supabase
             .from("reply_outbox")
-            .update({ status: "sent", sent_at: nowIso(), last_error: "deduped_inbound_mid" })
+            .update({ status: "sent", sent_at: nowIso(), claimed_at: nowIso(), locked_at: null, last_error: reason })
             .eq("id", jobId);
           continue;
         }
@@ -714,11 +761,8 @@ Deno.serve(async (req) => {
           .maybeSingle();
         const outbound_message_id = outMsgInsert.data?.id ?? null;
 
-        if (!pageAccessToken) throw new Error("No Meta page access token configured.");
-        if (!metaPageId) throw new Error("No Meta page configured in org_settings.");
-
         const metaResp = await sendToMeta({
-          graphVersion: META_GRAPH_VERSION,
+          graphVersion: metaGraphVersion,
           pageAccessToken,
           recipientId,
           text: reply,
@@ -731,6 +775,8 @@ Deno.serve(async (req) => {
             sent_at: nowIso(),
             outbound_message_id,
             meta_message_id: metaResp?.message_id ?? null,
+            claimed_at: nowIso(),
+            locked_at: null,
             last_error: debugNote ? `debug:${debugNote}` : null,
           })
           .eq("id", jobId);
@@ -749,6 +795,8 @@ Deno.serve(async (req) => {
           .update({
             status: "failed",
             last_error: msg,
+            claimed_at: nowIso(),
+            locked_at: null,
             updated_at: nowIso(),
           })
           .eq("id", safeStr(job.id));
@@ -760,7 +808,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return j(200, { ok: true, claimed, sent, skipped, processed: sent, failures });
+    return j(200, { ok: true, claimed, sent, skipped, processed: sent, failures, skipped_reasons });
   } catch (e: any) {
     return j(500, { ok: false, error: safeStr(e?.message, String(e)) });
   }
