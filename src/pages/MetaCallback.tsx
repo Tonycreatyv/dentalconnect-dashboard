@@ -3,6 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 const DEFAULT_ORG = "clinic-demo";
+const PUBLIC_APP_URL =
+  ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ??
+    (import.meta.env.PUBLIC_APP_URL as string | undefined) ??
+    "https://dental.creatyv.io")
+    .replace(/\/+$/, "");
+const META_REDIRECT_URI = `${PUBLIC_APP_URL}/auth/meta/callback`;
 
 type MetaPageOption = {
   id: string;
@@ -33,12 +39,11 @@ export default function MetaCallback() {
         return;
       }
 
-      const redirectUri = `${window.location.origin}/auth/meta/callback`;
       const res = await supabase.functions.invoke("meta-oauth", {
         body: {
           action: "exchange",
           code,
-          redirect_uri: redirectUri,
+          redirect_uri: META_REDIRECT_URI,
           organization_id: stateOrg,
         },
       });

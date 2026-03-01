@@ -18,6 +18,12 @@ import PageHeader from "../components/PageHeader";
 
 const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
 const GOOGLE_CAL_CONNECT_URL = "";
+const PUBLIC_APP_URL =
+  ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ??
+    (import.meta.env.PUBLIC_APP_URL as string | undefined) ??
+    "https://dental.creatyv.io")
+    .replace(/\/+$/, "");
+const META_REDIRECT_URI = `${PUBLIC_APP_URL}/auth/meta/callback`;
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -505,12 +511,10 @@ export default function Settings() {
       return;
     }
 
-    const redirectUri = `${window.location.origin}/auth/meta/callback`;
-
     const authUrl =
       "https://www.facebook.com/v19.0/dialog/oauth" +
       `?client_id=${META_APP_ID}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&redirect_uri=${encodeURIComponent(META_REDIRECT_URI)}` +
       `&response_type=code` +
       `&scope=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging` +
       `&state=${encodeURIComponent(`org:${ORG}`)}`;
@@ -896,7 +900,7 @@ export default function Settings() {
                 <summary className="cursor-pointer text-sm text-slate-700">Detalles técnicos</summary>
                 <div className="mt-3 space-y-2">
                   <div>Identificador de conexión:</div>
-                  <div className="break-all text-slate-500">{`${window.location.origin}/auth/meta/callback`}</div>
+                  <div className="break-all text-slate-500">{META_REDIRECT_URI}</div>
                 </div>
               </details>
             ) : null}
