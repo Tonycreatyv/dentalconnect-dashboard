@@ -478,15 +478,20 @@ export default function Settings() {
       .from("org_settings")
       .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
       .eq("organization_id", targetOrgId)
-      .maybeSingle();
+      .limit(1);
 
     if (orgRes.error) return;
 
+    const orgSettingsData = orgRes.data as any;
+    // TEMP debug to verify which shape arrives from Supabase.
+    console.log("org_settings raw", orgSettingsData);
+    const s = Array.isArray(orgSettingsData) ? orgSettingsData[0] : orgSettingsData;
+
     setOrgIntegration({
-      meta_page_id: (orgRes.data as any)?.meta_page_id ?? null,
-      messenger_enabled: (orgRes.data as any)?.messenger_enabled ?? false,
-      meta_connected_at: (orgRes.data as any)?.meta_connected_at ?? null,
-      meta_last_error: (orgRes.data as any)?.meta_last_error ?? null,
+      meta_page_id: s?.meta_page_id ?? null,
+      messenger_enabled: s?.messenger_enabled ?? false,
+      meta_connected_at: s?.meta_connected_at ?? null,
+      meta_last_error: s?.meta_last_error ?? null,
     });
   }
 
@@ -753,7 +758,8 @@ export default function Settings() {
     }
 
     if (channel === "messenger") {
-      const isConnected = Boolean(orgIntegration.meta_page_id) && orgIntegration.messenger_enabled === true;
+      const s = orgIntegration;
+      const isConnected = !!s?.meta_page_id && s?.messenger_enabled === true;
       return {
         label: isConnected ? "CONECTADO" : "NO CONECTADO",
         tone: isConnected ? ("success" as const) : ("muted" as const),
@@ -961,7 +967,7 @@ export default function Settings() {
 
             {integration.key === "messenger" && import.meta.env.DEV ? (
               <div className="mt-2 text-[11px] text-slate-500">
-                {`debug: enabled=${String(orgIntegration.messenger_enabled ?? null)} page=${orgIntegration.meta_page_id ?? "null"} err=${orgIntegration.meta_last_error ?? "null"}`}
+                {`enabled=${String(orgIntegration.messenger_enabled ?? null)} page=${orgIntegration.meta_page_id ?? "null"}`}
               </div>
             ) : null}
           </div>
