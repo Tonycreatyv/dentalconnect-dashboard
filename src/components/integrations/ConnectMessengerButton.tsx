@@ -18,7 +18,16 @@ export async function startMetaOAuth(organizationId: string) {
   });
   const stateJson = await stateRes.json().catch(() => ({}));
   if (!stateRes.ok || !stateJson?.ok || !stateJson?.state) {
-    throw new Error(String(stateJson?.error ?? "No se pudo generar state firmado."));
+    const errCode = String(stateJson?.error ?? "");
+    if (errCode === "missing_META_STATE_SECRET") {
+      throw new Error("Configura META_STATE_SECRET en Supabase Secrets");
+    }
+    throw new Error(String(stateJson?.details ?? stateJson?.error ?? "No se pudo generar state firmado."));
+  }
+
+  const signedState = String(stateJson.state);
+  if (!signedState.includes(".")) {
+    throw new Error("State inválido: firma no encontrada.");
   }
 
   const redirectUri = `${PUBLIC_APP_URL}/auth/meta/callback`;
@@ -26,7 +35,7 @@ export async function startMetaOAuth(organizationId: string) {
     "https://www.facebook.com/v19.0/dialog/oauth" +
     `?client_id=${encodeURIComponent(META_APP_ID)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&state=${encodeURIComponent(String(stateJson.state))}` +
+    `&state=${encodeURIComponent(signedState)}` +
     `&response_type=code` +
     `&scope=pages_show_list`;
 

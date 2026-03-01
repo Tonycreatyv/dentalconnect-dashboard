@@ -96,9 +96,16 @@ Deno.serve(async (req) => {
 
     return json(req, 200, { ok: true, state });
   } catch (error: any) {
+    const details = String(error?.message ?? error);
+    if (details.includes("META_STATE_SECRET")) {
+      return json(req, 500, {
+        error: "missing_META_STATE_SECRET",
+        details: "Configura META_STATE_SECRET en Supabase Secrets",
+      });
+    }
     return json(req, 500, {
       error: "meta_oauth_state_unhandled_error",
-      details: String(error?.message ?? error),
+      details,
     });
   }
 });

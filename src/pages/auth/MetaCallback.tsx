@@ -23,6 +23,9 @@ export default function MetaCallback() {
         if (!code || !state) {
           throw new Error("Falta code o state en el callback");
         }
+        if (!state.includes(".")) {
+          throw new Error("State inválido: firma ausente.");
+        }
 
         const redirectUri = `${PUBLIC_APP_URL}/auth/meta/callback`;
         const r = await fetch(`${FN_BASE}/meta-oauth`, {
