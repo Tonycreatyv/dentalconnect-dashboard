@@ -536,7 +536,7 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("organization_id", organization_id)
       .in("status", ["pending", "queued"])
-      .or(`scheduled_for.lte.${runNow},scheduled_for.is.null`)
+      .lte("scheduled_for", runNow)
       .is("claimed_at", null)
       .is("locked_at", null)
       .order("created_at", { ascending: true })
@@ -572,7 +572,7 @@ Deno.serve(async (req) => {
         })
         .eq("id", jobId)
         .in("status", ["pending", "queued"])
-        .or(`scheduled_for.lte.${nowIso()},scheduled_for.is.null`)
+        .lte("scheduled_for", nowIso())
         .is("claimed_at", null)
         .is("locked_at", null)
         .select("id")
@@ -587,6 +587,10 @@ Deno.serve(async (req) => {
           reason,
           details,
         });
+        await supabase
+          .from("reply_outbox")
+          .update({ last_error: `skipped:${reason}${details ? `:${details}` : ""}`, updated_at: nowIso() })
+          .eq("id", jobId);
         skipped_reasons.push({ id: jobId, reason, details });
         skipped++;
         continue;
@@ -606,8 +610,7 @@ Deno.serve(async (req) => {
             safeStr(job.message_text, "") ||
             ""
         );
-        const inboundMessageId =
-          safeStr(job.inbound_provider_message_id, "") || safeStr(job.inbound_message_id, "");
+        const inboundProviderMessageId = safeStr(job.inbound_provider_message_id, "");
 
         if (!recipientId) throw new Error("missing_recipient_id: channel_user_id/psid");
         if (!inboundText) throw new Error("missing_inbound_text: inbound_text/text/message_text");
@@ -620,13 +623,20 @@ Deno.serve(async (req) => {
           if (!ld.error && ld.data?.state) leadState = (ld.data.state as Json) ?? {};
         }
 
-        if (inboundMessageId && safeStr(leadState?.last_seen_inbound_mid, "") === inboundMessageId) {
+        if (inboundProviderMessageId && safeStr(leadState?.last_seen_inbound_mid, "") === inboundProviderMessageId) {
           const reason = "deduped_inbound_mid";
           skipped++;
           skipped_reasons.push({ id: jobId, reason });
+          console.log("[run-replies] job:skipped", { organization_id, job_id: jobId, reason });
           await supabase
             .from("reply_outbox")
-            .update({ status: "sent", sent_at: nowIso(), claimed_at: nowIso(), locked_at: null, last_error: reason })
+            .update({
+              status: "sent",
+              sent_at: nowIso(),
+              claimed_at: nowIso(),
+              locked_at: null,
+              last_error: `skipped:${reason}`,
+            })
             .eq("id", jobId);
           continue;
         }
@@ -635,17 +645,20 @@ Deno.serve(async (req) => {
         if (leadId) {
           const ms = await supabase
             .from("messages")
-            .select("direction, text, body, created_at")
+            .select("role, content, direction, text, body, created_at")
             .eq("lead_id", leadId)
             .order("created_at", { ascending: false })
             .limit(12);
           if (!ms.error && Array.isArray(ms.data)) {
             recent = ms.data
               .map((r: any) => {
-                const dir = safeStr(r.direction, "");
-                const content = clampText(safeStr(r.text, "") || safeStr(r.body, ""));
+                const role = safeStr(r.role, "").toLowerCase();
+                const dir = safeStr(r.direction, "").toLowerCase();
+                const content = clampText(safeStr(r.content, "") || safeStr(r.text, "") || safeStr(r.body, ""));
                 if (!content) return null;
-                return { role: dir === "outbound" ? ("assistant" as const) : ("user" as const), content };
+                const normalizedRole =
+                  role === "assistant" || role === "bot" || dir === "outbound" ? ("assistant" as const) : ("user" as const);
+                return { role: normalizedRole, content };
               })
               .filter(Boolean)
               .reverse() as Array<{ role: "user" | "assistant"; content: string }>;
@@ -739,7 +752,7 @@ Deno.serve(async (req) => {
         }
 
         const nextState = mergeState(leadState, {
-          inboundMessageId,
+          inboundMessageId: inboundProviderMessageId,
           statePatch,
           slotsPatch,
           questionTag,
@@ -753,8 +766,11 @@ Deno.serve(async (req) => {
             organization_id,
             lead_id: leadId || null,
             channel,
-            direction: "outbound",
-            text: reply,
+            role: "assistant",
+            actor: "bot",
+            content: reply,
+            provider_message_id: null,
+            inbound_message_id: null,
             created_at: nowIso(),
           })
           .select("id")
