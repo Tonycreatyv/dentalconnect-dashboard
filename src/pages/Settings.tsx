@@ -427,9 +427,9 @@ function StatusBadge({ label, tone }: { label: string; tone: "success" | "warnin
 export default function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { clinic, clinicId } = useClinic();
+  const { clinic, clinicId, activeOrgId, isAdmin, availableOrgs, setActiveOrgId } = useClinic();
 
-  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
+  const ORG = activeOrgId ?? clinic?.organization_id ?? DEFAULT_ORG;
 
   const [tab, setTab] = useState<TabKey>("integraciones");
   const [openSection, setOpenSection] = useState<TabKey | null>("integraciones");
@@ -555,7 +555,7 @@ export default function Settings() {
     const find = await supabase
       .from("clinics")
       .select("id, name, domain, organization_id")
-      .eq("organization_id", DEFAULT_ORG)
+      .eq("organization_id", ORG)
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
@@ -568,7 +568,7 @@ export default function Settings() {
 
     const created = await supabase
       .from("clinics")
-      .insert({ name: clinicName.trim() || "Clínica", domain: null, organization_id: DEFAULT_ORG })
+      .insert({ name: clinicName.trim() || "Clínica", domain: null, organization_id: ORG })
       .select("id, name, domain, organization_id")
       .maybeSingle();
 
@@ -826,7 +826,35 @@ export default function Settings() {
   );
 
   const renderIntegrations = () => (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6">
+      <div className="rounded-3xl border border-[#E5E7EB] bg-white p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Org activa</span>
+            <span className="inline-flex items-center rounded-full border border-[#D1D5DB] bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+              {ORG}
+            </span>
+          </div>
+          {isAdmin ? (
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <span className="font-semibold uppercase tracking-[0.16em]">Cambiar org</span>
+              <select
+                value={ORG}
+                onChange={(e) => void setActiveOrgId(e.target.value)}
+                className="h-9 rounded-xl border border-[#D1D5DB] bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#0894C1]"
+              >
+                {availableOrgs.map((org) => (
+                  <option key={org.organization_id} value={org.organization_id}>
+                    {org.organization_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       {INTEGRATIONS.map((integration) => {
         const status = statusFor(integration.key);
         const Icon = integration.icon;
@@ -927,6 +955,7 @@ export default function Settings() {
           </div>
         );
       })}
+      </div>
     </div>
   );
 

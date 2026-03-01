@@ -4,6 +4,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 type Json = Record<string, unknown>;
 
+const TESTDENTAL_TAG = "#testdental";
+const TESTDENTAL_ORG = "clinic-demo";
+
 function json(status: number, body: Json) {
   return new Response(JSON.stringify(body), {
     status,
@@ -69,6 +72,15 @@ function extractMessengerTextEvents(body: any): MessengerEvent[] {
   return events;
 }
 
+function parseCsvSet(input: string) {
+  const out = new Set<string>();
+  for (const raw of String(input ?? "").split(",")) {
+    const value = raw.trim();
+    if (value) out.add(value);
+  }
+  return out;
+}
+
 async function fetchMetaProfileName(args: { pageAccessToken: string; psid: string }) {
   if (!args.pageAccessToken || !args.psid) return null;
   try {
@@ -93,6 +105,7 @@ serve(async (req) => {
   const META_VERIFY_TOKEN = Deno.env.get("META_VERIFY_TOKEN") ?? "";
   const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ?? "clinic-demo";
   const RUN_REPLIES_SECRET = Deno.env.get("RUN_REPLIES_SECRET") ?? "";
+  const TESTDENTAL_ALLOWED_PSIDS = parseCsvSet(Deno.env.get("TESTDENTAL_ALLOWED_PSIDS") ?? "");
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !META_VERIFY_TOKEN) {
     return json(200, { ok: false, error: "missing_env" });
@@ -133,11 +146,17 @@ serve(async (req) => {
       const pageId = ev.page_id;
       const psid = ev.psid;
       const providerMid = ev.mid;
-      const text = ev.text;
+      const rawText = ev.text;
+      const hasTestdentalTag = rawText.toLowerCase().includes(TESTDENTAL_TAG);
+      const text = rawText.replace(/#testdental/gi, "").trim() || rawText;
       const isoTime = new Date(ev.timestamp).toISOString();
 
       let organization_id = DEFAULT_ORG;
-      if (pageId) {
+      const canUseTestdentalOverride = hasTestdentalTag && TESTDENTAL_ALLOWED_PSIDS.has(psid);
+
+      if (canUseTestdentalOverride) {
+        organization_id = TESTDENTAL_ORG;
+      } else if (pageId) {
         const orgLookup = await supabase
           .from("org_settings")
           .select("organization_id")
