@@ -188,6 +188,43 @@ async function upsertOrgSecretsWithFallback(
   };
 }
 
+async function transferMetaPageLinkIfNeeded(
+  supabase: ReturnType<typeof createClient>,
+  args: { organizationId: string; pageId: string; now: string }
+) {
+  const linkedRes = await supabase
+    .from("org_settings")
+    .select("organization_id")
+    .eq("meta_page_id", args.pageId)
+    .neq("organization_id", args.organizationId);
+
+  if (linkedRes.error) {
+    return { ok: false as const, error: linkedRes.error.message };
+  }
+
+  const linkedOrgIds = (Array.isArray(linkedRes.data) ? linkedRes.data : [])
+    .map((row: any) => String(row?.organization_id ?? "").trim())
+    .filter(Boolean);
+
+  for (const linkedOrgId of linkedOrgIds) {
+    const releaseRes = await supabase
+      .from("org_settings")
+      .update({
+        meta_page_id: null,
+        messenger_enabled: false,
+        meta_connected_at: null,
+        updated_at: args.now,
+      })
+      .eq("organization_id", linkedOrgId);
+
+    if (releaseRes.error) {
+      return { ok: false as const, error: releaseRes.error.message };
+    }
+  }
+
+  return { ok: true as const, transferredFrom: linkedOrgIds };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   if (req.method !== "POST") return json(req, 405, { error: "method_not_allowed", details: "Only POST is supported." });
@@ -286,19 +323,41 @@ Deno.serve(async (req) => {
       const now = new Date().toISOString();
       const displayName = page.name || organizationId;
 
-      const settingsRes = await supabase.from("org_settings").upsert(
-        {
-          organization_id: organizationId,
-          business_type: "dental",
-          meta_page_id: page.id,
-          messenger_enabled: true,
-          meta_connected_at: now,
-          meta_last_error: null,
-          updated_at: now,
-          brand_name: displayName,
-        },
-        { onConflict: "organization_id" }
-      );
+      const transferRes = await transferMetaPageLinkIfNeeded(supabase, {
+        organizationId,
+        pageId: page.id,
+        now,
+      });
+      if (!transferRes.ok) {
+        return json(req, 500, { error: "meta_page_transfer_failed", details: transferRes.error });
+      }
+
+      const settingsPayload = {
+        organization_id: organizationId,
+        business_type: "dental",
+        meta_page_id: page.id,
+        messenger_enabled: true,
+        meta_connected_at: now,
+        meta_last_error: null,
+        updated_at: now,
+        brand_name: displayName,
+      };
+
+      let settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
+      const isUniqueConflict =
+        settingsRes.error &&
+        ((settingsRes.error as any)?.code === "23505" || settingsRes.error.message.includes("org_settings_meta_page_id_unique"));
+      if (isUniqueConflict) {
+        const retryTransferRes = await transferMetaPageLinkIfNeeded(supabase, {
+          organizationId,
+          pageId: page.id,
+          now,
+        });
+        if (!retryTransferRes.ok) {
+          return json(req, 500, { error: "meta_page_transfer_failed", details: retryTransferRes.error });
+        }
+        settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
+      }
       if (settingsRes.error) {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
@@ -368,19 +427,41 @@ Deno.serve(async (req) => {
       const now = new Date().toISOString();
       const displayName = pageName || organizationId;
 
-      const settingsRes = await supabase.from("org_settings").upsert(
-        {
-          organization_id: organizationId,
-          business_type: "dental",
-          meta_page_id: pageId,
-          messenger_enabled: true,
-          meta_connected_at: now,
-          meta_last_error: null,
-          updated_at: now,
-          brand_name: displayName,
-        },
-        { onConflict: "organization_id" }
-      );
+      const transferRes = await transferMetaPageLinkIfNeeded(supabase, {
+        organizationId,
+        pageId,
+        now,
+      });
+      if (!transferRes.ok) {
+        return json(req, 500, { error: "meta_page_transfer_failed", details: transferRes.error });
+      }
+
+      const settingsPayload = {
+        organization_id: organizationId,
+        business_type: "dental",
+        meta_page_id: pageId,
+        messenger_enabled: true,
+        meta_connected_at: now,
+        meta_last_error: null,
+        updated_at: now,
+        brand_name: displayName,
+      };
+
+      let settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
+      const isUniqueConflict =
+        settingsRes.error &&
+        ((settingsRes.error as any)?.code === "23505" || settingsRes.error.message.includes("org_settings_meta_page_id_unique"));
+      if (isUniqueConflict) {
+        const retryTransferRes = await transferMetaPageLinkIfNeeded(supabase, {
+          organizationId,
+          pageId,
+          now,
+        });
+        if (!retryTransferRes.ok) {
+          return json(req, 500, { error: "meta_page_transfer_failed", details: retryTransferRes.error });
+        }
+        settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
+      }
       if (settingsRes.error) {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
