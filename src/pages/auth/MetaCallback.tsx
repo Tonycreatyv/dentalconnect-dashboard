@@ -4,6 +4,19 @@ import { useNavigate } from "react-router-dom";
 const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
 const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
 
+function decodeOrgFromSignedState(state: string | null) {
+  try {
+    const payloadB64 = String(state ?? "").split(".")[0] ?? "";
+    if (!payloadB64) return "";
+    const normalized = payloadB64.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { org?: string };
+    return String(payload?.org ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export default function MetaCallback() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<"loading" | "error">("loading");
@@ -37,8 +50,13 @@ export default function MetaCallback() {
         }
 
         if (!mounted) return;
-        sessionStorage.setItem("meta_oauth_connected", String(Date.now()));
-        window.location.href = "/settings?tab=integraciones&connected=1";
+        const orgFromState = decodeOrgFromSignedState(state);
+        const redirectParams = new URLSearchParams({
+          tab: "integraciones",
+          connected: "1",
+        });
+        if (orgFromState) redirectParams.set("org", orgFromState);
+        window.location.href = `/settings?${redirectParams.toString()}`;
       } catch (e: any) {
         if (!mounted) return;
         setStatus("error");

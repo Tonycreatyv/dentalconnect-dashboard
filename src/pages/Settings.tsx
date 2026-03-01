@@ -473,11 +473,11 @@ export default function Settings() {
   const [requestOpen, setRequestOpen] = useState<IntegrationChannel | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
 
-  async function loadOrgIntegration() {
+  async function loadOrgIntegration(targetOrgId = ORG) {
     const orgRes = await supabase
       .from("org_settings")
       .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
-      .eq("organization_id", ORG)
+      .eq("organization_id", targetOrgId)
       .maybeSingle();
 
     if (orgRes.error) return;
@@ -493,20 +493,26 @@ export default function Settings() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const connected = params.get("connected");
+    const orgParam = String(params.get("org") ?? "").trim();
     const tabParam = params.get("tab");
     if (tabParam === "integraciones") {
       setOpenSection("integraciones");
       setTab("integraciones");
     }
     if (connected === "1") {
-      setOpenSection("integraciones");
-      setNotice("Messenger se conectó correctamente.");
-      void loadOrgIntegration().finally(() => {
+      void (async () => {
+        if (orgParam && isAdmin && orgParam !== ORG) {
+          await setActiveOrgId(orgParam);
+        }
+        setOpenSection("integraciones");
+        setNotice("Messenger se conectó correctamente.");
+        await loadOrgIntegration(orgParam || ORG);
         params.delete("connected");
+        params.delete("org");
         navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
-      });
+      })();
     }
-  }, [location.pathname, location.search, navigate, ORG]);
+  }, [location.pathname, location.search, navigate, ORG, isAdmin, setActiveOrgId]);
 
   const [requestForm, setRequestForm] = useState({
     business: "",
@@ -747,11 +753,11 @@ export default function Settings() {
     }
 
     if (channel === "messenger") {
-      const isConnected = !!orgIntegration.meta_page_id && orgIntegration.messenger_enabled === true;
+      const isConnected = Boolean(orgIntegration.messenger_enabled) && Boolean(orgIntegration.meta_page_id);
       return {
         label: isConnected ? "CONECTADO" : "NO CONECTADO",
         tone: isConnected ? ("success" as const) : ("muted" as const),
-        primary: isConnected ? "Reconfigurar" : "Conectar",
+        primary: isConnected ? "Conectado" : "Conectar",
         disabled: false,
       };
     }
@@ -950,6 +956,12 @@ export default function Settings() {
             {integration.key === "messenger" && orgIntegration.meta_last_error ? (
               <div className="mt-3 text-xs text-rose-200">
                 {orgIntegration.meta_last_error}
+              </div>
+            ) : null}
+
+            {integration.key === "messenger" && import.meta.env.DEV ? (
+              <div className="mt-2 text-[11px] text-slate-500">
+                {`meta_page_id: ${orgIntegration.meta_page_id ?? "null"} | messenger_enabled: ${String(orgIntegration.messenger_enabled ?? null)}`}
               </div>
             ) : null}
           </div>
