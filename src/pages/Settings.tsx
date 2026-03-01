@@ -961,7 +961,7 @@ export default function Settings() {
 
             {integration.key === "messenger" && import.meta.env.DEV ? (
               <div className="mt-2 text-[11px] text-slate-500">
-                {`meta_page_id: ${orgIntegration.meta_page_id ?? "null"} | messenger_enabled: ${String(orgIntegration.messenger_enabled ?? null)}`}
+                {`debug: enabled=${String(orgIntegration.messenger_enabled ?? null)} page=${orgIntegration.meta_page_id ?? "null"} err=${orgIntegration.meta_last_error ?? "null"}`}
               </div>
             ) : null}
           </div>
