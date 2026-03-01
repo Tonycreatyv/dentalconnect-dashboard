@@ -141,6 +141,53 @@ async function fetchPages(userToken: string): Promise<MetaPage[]> {
     }));
 }
 
+async function upsertOrgSecretsWithFallback(
+  supabase: ReturnType<typeof createClient>,
+  args: { organizationId: string; pageId: string; pageAccessToken: string; now: string }
+) {
+  const candidates: Record<string, string>[] = [
+    {
+      organization_id: args.organizationId,
+      meta_page_id: args.pageId,
+      meta_page_access_token: args.pageAccessToken,
+      updated_at: args.now,
+    },
+    {
+      organization_id: args.organizationId,
+      meta_page_id: args.pageId,
+      META_PAGE_ACCESS_TOKEN: args.pageAccessToken,
+      updated_at: args.now,
+    },
+    {
+      organization_id: args.organizationId,
+      meta_page_id: args.pageId,
+      updated_at: args.now,
+    },
+  ];
+
+  let lastError: { message: string; isSchemaCache: boolean } | null = null;
+
+  for (const payload of candidates) {
+    const res = await supabase.from("org_secrets").upsert(payload as any, { onConflict: "organization_id" });
+    if (!res.error) {
+      const tokenStored = "meta_page_access_token" in payload || "META_PAGE_ACCESS_TOKEN" in payload;
+      return { ok: true as const, tokenStored };
+    }
+    const isMissingColumn =
+      res.error.message.includes("Could not find the") && res.error.message.includes("column") && res.error.message.includes("schema cache");
+    lastError = { message: res.error.message, isSchemaCache: isMissingColumn };
+    if (!isMissingColumn) {
+      break;
+    }
+  }
+
+  return {
+    ok: false as const,
+    error: lastError?.message ?? "org_secrets_upsert_failed",
+    isSchemaCache: lastError?.isSchemaCache ?? false,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   if (req.method !== "POST") return json(req, 405, { error: "method_not_allowed", details: "Only POST is supported." });
@@ -197,6 +244,7 @@ Deno.serve(async (req) => {
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
+            business_type: "dental",
             messenger_enabled: false,
             meta_last_error: "No se encontraron páginas disponibles en Meta.",
             updated_at: new Date().toISOString(),
@@ -236,16 +284,18 @@ Deno.serve(async (req) => {
 
       const page = pages[0];
       const now = new Date().toISOString();
+      const displayName = page.name || organizationId;
 
       const settingsRes = await supabase.from("org_settings").upsert(
         {
           organization_id: organizationId,
+          business_type: "dental",
           meta_page_id: page.id,
           messenger_enabled: true,
           meta_connected_at: now,
           meta_last_error: null,
           updated_at: now,
-          name: page.name || null,
+          brand_name: displayName,
         },
         { onConflict: "organization_id" }
       );
@@ -253,30 +303,53 @@ Deno.serve(async (req) => {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
 
-      const secretRes = await supabase.from("org_secrets").upsert(
-        {
-          organization_id: organizationId,
-          meta_page_id: page.id,
-          meta_page_access_token: page.access_token,
-          META_PAGE_ACCESS_TOKEN: page.access_token,
-          updated_at: now,
-        },
-        { onConflict: "organization_id" }
-      );
-      if (secretRes.error) {
+      const secretRes = await upsertOrgSecretsWithFallback(supabase, {
+        organizationId,
+        pageId: page.id,
+        pageAccessToken: page.access_token,
+        now,
+      });
+      if (!secretRes.ok) {
+        if (secretRes.isSchemaCache) {
+          await supabase.from("org_settings").upsert(
+            {
+              organization_id: organizationId,
+              business_type: "dental",
+              messenger_enabled: true,
+              meta_last_error: `org_secrets_warning: ${secretRes.error}`,
+              updated_at: now,
+            },
+            { onConflict: "organization_id" }
+          );
+          return json(req, 200, {
+            ok: true,
+            connected: true,
+            page_id: page.id,
+            page_name: displayName,
+            token_saved: false,
+            warning: secretRes.error,
+          });
+        }
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
+            business_type: "dental",
             messenger_enabled: false,
-            meta_last_error: secretRes.error.message,
+            meta_last_error: secretRes.error,
             updated_at: now,
           },
           { onConflict: "organization_id" }
         );
-        return json(req, 500, { error: "org_secrets_upsert_failed", details: secretRes.error.message });
+        return json(req, 500, { error: "org_secrets_upsert_failed", details: secretRes.error });
       }
 
-      return json(req, 200, { ok: true, connected: true, page_id: page.id, page_name: page.name });
+      return json(req, 200, {
+        ok: true,
+        connected: true,
+        page_id: page.id,
+        page_name: displayName,
+        token_saved: secretRes.tokenStored,
+      });
     }
 
     if (action === "save_page") {
@@ -292,16 +365,18 @@ Deno.serve(async (req) => {
       }
 
       const now = new Date().toISOString();
+      const displayName = pageName || organizationId;
 
       const settingsRes = await supabase.from("org_settings").upsert(
         {
           organization_id: organizationId,
+          business_type: "dental",
           meta_page_id: pageId,
           messenger_enabled: true,
           meta_connected_at: now,
           meta_last_error: null,
           updated_at: now,
-          name: pageName || null,
+          brand_name: displayName,
         },
         { onConflict: "organization_id" }
       );
@@ -309,30 +384,40 @@ Deno.serve(async (req) => {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
 
-      const secretRes = await supabase.from("org_secrets").upsert(
-        {
-          organization_id: organizationId,
-          meta_page_id: pageId,
-          meta_page_access_token: pageAccessToken,
-          META_PAGE_ACCESS_TOKEN: pageAccessToken,
-          updated_at: now,
-        },
-        { onConflict: "organization_id" }
-      );
-      if (secretRes.error) {
+      const secretRes = await upsertOrgSecretsWithFallback(supabase, {
+        organizationId,
+        pageId,
+        pageAccessToken,
+        now,
+      });
+      if (!secretRes.ok) {
+        if (secretRes.isSchemaCache) {
+          await supabase.from("org_settings").upsert(
+            {
+              organization_id: organizationId,
+              business_type: "dental",
+              messenger_enabled: true,
+              meta_last_error: `org_secrets_warning: ${secretRes.error}`,
+              updated_at: now,
+            },
+            { onConflict: "organization_id" }
+          );
+          return json(req, 200, { ok: true, page_id: pageId, token_saved: false, warning: secretRes.error });
+        }
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
+            business_type: "dental",
             messenger_enabled: false,
-            meta_last_error: secretRes.error.message,
+            meta_last_error: secretRes.error,
             updated_at: now,
           },
           { onConflict: "organization_id" }
         );
-        return json(req, 500, { error: "org_secrets_upsert_failed", details: secretRes.error.message });
+        return json(req, 500, { error: "org_secrets_upsert_failed", details: secretRes.error });
       }
 
-      return json(req, 200, { ok: true, page_id: pageId });
+      return json(req, 200, { ok: true, page_id: pageId, token_saved: secretRes.tokenStored });
     }
 
     return json(req, 400, {
