@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
-const PUBLIC_APP_URL =
-  ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ??
-    "https://dental.creatyv.io")
-    .replace(/\/+$/, "");
+const APP_URL = ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ?? "https://dental.creatyv.io").replace(
+  /\/+$/,
+  ""
+);
 
 export default function MetaCallback() {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export default function MetaCallback() {
           throw new Error("State inválido: firma ausente.");
         }
 
-        const redirectUri = `${PUBLIC_APP_URL}/auth/meta/callback`;
+        const redirectUri = `${APP_URL}/auth/meta/callback`;
         const r = await fetch(`${FN_BASE}/meta-oauth`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

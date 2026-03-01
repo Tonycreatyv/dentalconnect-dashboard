@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const ALLOWED_ORIGIN = "https://dental.creatyv.io";
+const APP_URL = "https://dental.creatyv.io";
+const EXPECTED_REDIRECT_URI = `${APP_URL}/auth/meta/callback`;
 const DEV_ORIGINS = new Set(["http://localhost:5173"]);
 
 function resolveOrigin(req: Request) {
@@ -151,8 +153,6 @@ Deno.serve(async (req) => {
     const META_APP_ID = env("META_APP_ID");
     const META_APP_SECRET = env("META_APP_SECRET");
     const META_STATE_SECRET = env("META_STATE_SECRET");
-    const PUBLIC_APP_URL = normalizeBaseUrl(env("PUBLIC_APP_URL"));
-    const EXPECTED_REDIRECT_URI = `${PUBLIC_APP_URL}/auth/meta/callback`;
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
       auth: { persistSession: false },
