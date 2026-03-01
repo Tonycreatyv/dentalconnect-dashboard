@@ -1,10 +1,7 @@
 import { useState } from "react";
 
 const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
-const APP_URL = ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ?? "https://dental.creatyv.io").replace(
-  /\/+$/,
-  ""
-);
+const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
 const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
 
 export async function startMetaOAuth(organizationId: string) {

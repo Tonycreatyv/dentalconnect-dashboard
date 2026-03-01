@@ -19,10 +19,7 @@ import PageHeader from "../components/PageHeader";
 import { startMetaOAuth } from "../components/integrations/ConnectMessengerButton";
 
 const GOOGLE_CAL_CONNECT_URL = "";
-const APP_URL = ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ?? "https://dental.creatyv.io").replace(
-  /\/+$/,
-  ""
-);
+const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
 const META_REDIRECT_URI = `${APP_URL}/auth/meta/callback`;
 
 const DEFAULT_ORG = "clinic-demo";

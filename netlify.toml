@@ -3,4 +3,5 @@
   publish = "dist"
 
 [build.environment]
+  VITE_PUBLIC_APP_URL = "https://dental.creatyv.io"
   SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_DASHBOARD_URL"

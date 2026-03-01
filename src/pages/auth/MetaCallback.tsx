@@ -2,10 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
-const APP_URL = ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ?? "https://dental.creatyv.io").replace(
-  /\/+$/,
-  ""
-);
+const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
 
 export default function MetaCallback() {
   const navigate = useNavigate();
