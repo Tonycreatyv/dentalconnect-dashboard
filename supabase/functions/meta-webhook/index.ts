@@ -226,6 +226,7 @@ serve(async (req) => {
           organization_id,
           lead_id: lead.id,
           channel,
+          channel_user_id: psid,
           role: "user",
           actor: "user",
           content: text,
