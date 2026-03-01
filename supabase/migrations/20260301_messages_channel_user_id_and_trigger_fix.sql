@@ -45,7 +45,7 @@ begin
     return new;
   end if;
 
-  if v_org is null or v_provider_mid is null or v_channel_user_id is null then
+  if v_org is null or v_provider_mid is null or v_channel_user_id is null or lower(v_channel_user_id) = 'user' then
     return new;
   end if;
 

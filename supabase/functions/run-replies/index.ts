@@ -628,14 +628,15 @@ Deno.serve(async (req) => {
           skipped++;
           skipped_reasons.push({ id: jobId, reason });
           console.log("[run-replies] job:skipped", { organization_id, job_id: jobId, reason });
+          failures.push({ id: jobId, error: `skipped:${reason}` });
           await supabase
             .from("reply_outbox")
             .update({
-              status: "sent",
-              sent_at: nowIso(),
+              status: "failed",
               claimed_at: nowIso(),
               locked_at: null,
               last_error: `skipped:${reason}`,
+              updated_at: nowIso(),
             })
             .eq("id", jobId);
           continue;

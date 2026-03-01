@@ -817,7 +817,7 @@ export default function Settings() {
       return {
         label: isConnected ? "CONECTADO" : "NO CONECTADO",
         status: isConnected ? ("connected" as const) : ("disconnected" as const),
-        primary: isConnected ? "Desconectar" : "Conectar Messenger",
+        primary: isConnected ? "Disconnect" : "Connect",
         disabled: false,
       };
     }
@@ -1053,6 +1053,17 @@ export default function Settings() {
             {integration.key === "messenger" && import.meta.env.DEV ? (
               <div className="mt-2 text-[11px] text-slate-500">
                 {`enabled=${String(orgIntegration.messenger_enabled ?? null)} page=${orgIntegration.meta_page_id ?? "null"}`}
+              </div>
+            ) : null}
+
+            {isMessenger ? (
+              <div className="mt-3 text-xs text-white/65">
+                <div>
+                  Page: {orgIntegration.meta_page_id ? `${orgIntegration.meta_page_id.slice(0, 8)}...${orgIntegration.meta_page_id.slice(-6)}` : "No vinculada"}
+                </div>
+                <div>
+                  Connected at: {orgIntegration.meta_connected_at ? new Date(orgIntegration.meta_connected_at).toLocaleString("es-HN") : "N/A"}
+                </div>
               </div>
             ) : null}
 
