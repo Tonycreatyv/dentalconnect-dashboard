@@ -456,6 +456,7 @@ export default function Settings() {
   const [guideOpen, setGuideOpen] = useState<IntegrationChannel | null>(null);
   const [requestOpen, setRequestOpen] = useState<IntegrationChannel | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [fixWarningOpen, setFixWarningOpen] = useState(false);
   const [diagBusy, setDiagBusy] = useState(false);
   const [diagResult, setDiagResult] = useState<string | null>(null);
   const [pendingOutbox, setPendingOutbox] = useState<number | null>(null);
@@ -470,8 +471,9 @@ export default function Settings() {
     if (orgRes.error) return;
 
     const orgSettingsData = orgRes.data as any;
-    // TEMP debug to verify which shape arrives from Supabase.
-    console.log("org_settings raw", orgSettingsData);
+    if (import.meta.env.DEV) {
+      console.log("org_settings raw", orgSettingsData);
+    }
     const s = Array.isArray(orgSettingsData) ? orgSettingsData[0] : orgSettingsData;
 
     setOrgIntegration({
@@ -931,6 +933,7 @@ export default function Settings() {
           isMessenger &&
           !import.meta.env.DEV &&
           (orgIntegration.meta_last_error ?? "").includes("org_secrets_schema_mismatch");
+        const showWarningRow = isMessenger && Boolean(orgIntegration.meta_last_error);
 
         return (
           <div
@@ -1048,6 +1051,22 @@ export default function Settings() {
 
             {showFriendlyPendingNote ? (
               <div className="mt-3 text-xs text-white/60">Conectado · Configuración avanzada pendiente</div>
+            ) : null}
+
+            {showWarningRow ? (
+              <div
+                className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+                title={orgIntegration.meta_last_error ?? ""}
+              >
+                <span>Advertencia de configuración detectada.</span>
+                <button
+                  type="button"
+                  onClick={() => setFixWarningOpen(true)}
+                  className="rounded-lg border border-amber-300/35 px-2 py-1 font-semibold text-amber-100 hover:bg-amber-500/10"
+                >
+                  Fix now
+                </button>
+              </div>
             ) : null}
 
             {integration.key === "messenger" && import.meta.env.DEV ? (
@@ -1708,6 +1727,30 @@ export default function Settings() {
             className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
             placeholder="tu@email.com"
           />
+        </div>
+      </Modal>
+
+      <Modal
+        open={fixWarningOpen}
+        title="Resolver configuración Messenger"
+        description="Tu integración está conectada, pero hay una configuración avanzada pendiente."
+        onClose={() => setFixWarningOpen(false)}
+        actions={
+          <button
+            type="button"
+            onClick={() => setFixWarningOpen(false)}
+            className="rounded-2xl bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-95"
+          >
+            Entendido
+          </button>
+        }
+      >
+        <div className="space-y-2 text-sm text-slate-700">
+          <p>Verifica que los secrets de Meta existan en formato key/value para esta organización:</p>
+          <p className="font-mono text-xs">META_PAGE_ACCESS_TOKEN, META_PAGE_ID, META_GRAPH_VERSION</p>
+          {import.meta.env.DEV && orgIntegration.meta_last_error ? (
+            <p className="text-xs text-amber-200">Detalle técnico: {orgIntegration.meta_last_error}</p>
+          ) : null}
         </div>
       </Modal>
 

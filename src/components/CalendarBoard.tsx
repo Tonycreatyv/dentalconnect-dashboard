@@ -384,7 +384,7 @@ function AppointmentModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                className="h-11 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
                 disabled={saving}
               >
                 Cancelar
@@ -392,7 +392,7 @@ function AppointmentModal({
               <button
                 type="button"
                 onClick={onSave}
-                className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                className="h-11 rounded-2xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
                 disabled={saving}
               >
                 {saving ? "Guardando..." : "Guardar"}

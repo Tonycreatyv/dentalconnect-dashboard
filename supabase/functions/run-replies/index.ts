@@ -104,7 +104,8 @@ async function sendToMeta(args: {
   recipientId: string;
   text: string;
 }) {
-  const url = `https://graph.facebook.com/${args.graphVersion}/me/messages`;
+  const url = new URL(`https://graph.facebook.com/${args.graphVersion}/me/messages`);
+  url.searchParams.set("access_token", args.pageAccessToken);
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -112,13 +113,21 @@ async function sendToMeta(args: {
       messaging_type: "RESPONSE",
       recipient: { id: args.recipientId },
       message: { text: args.text },
-      access_token: args.pageAccessToken,
     }),
   });
 
   const data = await res.json();
   if (!res.ok) throw new Error(`Meta error: ${res.status} ${JSON.stringify(data)}`);
   return data;
+}
+
+function normalizeSecretValue(raw: string) {
+  const v = safeStr(raw, "").trim();
+  if (!v) return "";
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1).trim();
+  }
+  return v;
 }
 
 function defaultSystemPrompt() {
@@ -434,7 +443,7 @@ async function loadOrgSecretsKV(
   if (!res.error && Array.isArray(res.data)) {
     for (const row of res.data as any[]) {
       const k = safeStr(row?.key, "").trim();
-      const v = safeStr(row?.value, "");
+      const v = normalizeSecretValue(safeStr(row?.value, ""));
       if (k) kv[k] = v;
     }
   }
@@ -459,6 +468,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
       auth: { persistSession: false },
     });
+    const workerId = `run-replies:${crypto.randomUUID()}`;
 
     const url = new URL(req.url);
     const body = req.headers.get("content-type")?.includes("application/json")
@@ -472,21 +482,20 @@ Deno.serve(async (req) => {
 
     if (!organization_id) return j(400, { ok: false, error: "missing_organization_id" });
 
-    let pageAccessToken = Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "";
-    let metaPageId = "";
+    let pageAccessToken = normalizeSecretValue(Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "");
     let metaGraphVersion = DEFAULT_META_GRAPH_VERSION;
     let systemPrompt = defaultSystemPrompt();
 
     const kvSecrets = await loadOrgSecretsKV(supabase, organization_id);
     pageAccessToken = safeStr(kvSecrets.META_PAGE_ACCESS_TOKEN, pageAccessToken) || pageAccessToken;
-    metaPageId = safeStr(kvSecrets.META_PAGE_ID, metaPageId) || metaPageId;
     metaGraphVersion = safeStr(kvSecrets.META_GRAPH_VERSION, metaGraphVersion) || metaGraphVersion;
 
     const sec = await loadOrgSecretWithFallback(supabase, organization_id);
     if (sec) {
-      const token = safeStr((sec as any).meta_page_access_token, "") || safeStr((sec as any).META_PAGE_ACCESS_TOKEN, "");
+      const token =
+        normalizeSecretValue(safeStr((sec as any).meta_page_access_token, "")) ||
+        normalizeSecretValue(safeStr((sec as any).META_PAGE_ACCESS_TOKEN, ""));
       if (token) pageAccessToken = safeStr(token, pageAccessToken);
-      metaPageId = safeStr((sec as any).meta_page_id, metaPageId);
     }
 
     let clinicCtx: Json = {
@@ -506,14 +515,13 @@ Deno.serve(async (req) => {
     const os = await supabase
       .from("org_settings")
       .select(
-        "name, phone, address, google_maps_url, hours, services, faqs, policies, emergency, system_prompt, meta_page_id, messenger_enabled"
+        "brand_name, phone, address, google_maps_url, hours, services, faqs, policies, emergency, system_prompt, meta_page_id, messenger_enabled"
       )
       .eq("organization_id", organization_id)
       .maybeSingle();
     if (!os.error && os.data) {
       const { system_prompt, ...rest } = os.data as any;
       clinicCtx = { ...clinicCtx, ...rest };
-      metaPageId = safeStr((os.data as any).meta_page_id, metaPageId);
       if (system_prompt && typeof system_prompt === "string" && system_prompt.trim()) {
         systemPrompt = system_prompt.trim();
       }
@@ -567,7 +575,9 @@ Deno.serve(async (req) => {
           status: "processing",
           processing_started_at: nowIso(),
           claimed_at: nowIso(),
+          claimed_by: workerId,
           locked_at: nowIso(),
+          locked_by: workerId,
           attempts: (job.attempts ?? 0) + 1,
         })
         .eq("id", jobId)
@@ -607,15 +617,28 @@ Deno.serve(async (req) => {
         const inboundText = clampText(
           safeStr(job.inbound_text, "") ||
             safeStr(job.text, "") ||
-            safeStr(job.message_text, "") ||
             ""
         );
         const inboundProviderMessageId = safeStr(job.inbound_provider_message_id, "");
 
         if (!recipientId) throw new Error("missing_recipient_id: channel_user_id/psid");
-        if (!inboundText) throw new Error("missing_inbound_text: inbound_text/text/message_text");
-        if (!pageAccessToken) throw new Error("missing_token: META_PAGE_ACCESS_TOKEN (org_secrets/env)");
-        if (!metaPageId) throw new Error("missing_page_id: META_PAGE_ID/meta_page_id (org_secrets/org_settings)");
+        let resolvedInboundText =
+          safeStr(job.message_text, "") ||
+          safeStr((job.payload as Json | null)?.text, "") ||
+          inboundText;
+        if (!resolvedInboundText && safeStr(job.inbound_message_id, "")) {
+          const inboundMsg = await supabase
+            .from("messages")
+            .select("content")
+            .eq("id", safeStr(job.inbound_message_id, ""))
+            .maybeSingle();
+          if (!inboundMsg.error && inboundMsg.data) {
+            resolvedInboundText = safeStr((inboundMsg.data as any).content, "");
+          }
+        }
+
+        if (!resolvedInboundText) throw new Error("missing_inbound_text: inbound_text/message_text/messages.content");
+        if (!pageAccessToken || pageAccessToken.length <= 50) throw new Error("missing_or_invalid_page_token");
 
         let leadState: Json = {};
         if (leadId) {
@@ -646,7 +669,7 @@ Deno.serve(async (req) => {
         if (leadId) {
           const ms = await supabase
             .from("messages")
-            .select("role, content, direction, text, body, created_at")
+            .select("role, content, created_at")
             .eq("lead_id", leadId)
             .order("created_at", { ascending: false })
             .limit(12);
@@ -654,11 +677,10 @@ Deno.serve(async (req) => {
             recent = ms.data
               .map((r: any) => {
                 const role = safeStr(r.role, "").toLowerCase();
-                const dir = safeStr(r.direction, "").toLowerCase();
-                const content = clampText(safeStr(r.content, "") || safeStr(r.text, "") || safeStr(r.body, ""));
+                const content = clampText(safeStr(r.content, ""));
                 if (!content) return null;
                 const normalizedRole =
-                  role === "assistant" || role === "bot" || dir === "outbound" ? ("assistant" as const) : ("user" as const);
+                  role === "assistant" || role === "bot" ? ("assistant" as const) : ("user" as const);
                 return { role: normalizedRole, content };
               })
               .filter(Boolean)
@@ -667,7 +689,7 @@ Deno.serve(async (req) => {
           }
         }
 
-        const guard = questionGuard(leadState, inboundText);
+        const guard = questionGuard(leadState, resolvedInboundText);
         const currentSlots: Json =
           leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
         let debugNote: string | null = null;
@@ -694,7 +716,7 @@ Deno.serve(async (req) => {
             clinic: clinicCtx,
             leadState,
             recent,
-            inboundText: inboundText || "(sin texto)",
+            inboundText: resolvedInboundText || "(sin texto)",
           });
 
           const raw = await callLLM({
@@ -723,7 +745,7 @@ Deno.serve(async (req) => {
           debugNote = "question_guard:anti_repeat_advanced";
         }
 
-        slotsPatch = ensureSlotTypes(slotsPatch, currentSlots, inboundText);
+        slotsPatch = ensureSlotTypes(slotsPatch, currentSlots, resolvedInboundText);
         slotsPatch.greeted = true;
         reply = capOneQuestion(
           guardGreeting({ ...currentSlots, ...slotsPatch }, clampText(stripUrls(reply), 950))
@@ -792,11 +814,16 @@ Deno.serve(async (req) => {
             sent_at: nowIso(),
             outbound_message_id,
             meta_message_id: metaResp?.message_id ?? null,
+            provider_payload: metaResp ?? null,
             claimed_at: nowIso(),
             locked_at: null,
+            locked_by: null,
             last_error: debugNote ? `debug:${debugNote}` : null,
           })
           .eq("id", jobId);
+        if (leadId && metaResp?.message_id) {
+          await supabase.from("leads").update({ last_reply_outbound_mid: String(metaResp.message_id) }).eq("id", leadId);
+        }
         console.log("[run-replies] job:sent", {
           organization_id,
           job_id: jobId,
@@ -814,6 +841,7 @@ Deno.serve(async (req) => {
             last_error: msg,
             claimed_at: nowIso(),
             locked_at: null,
+            locked_by: null,
             updated_at: nowIso(),
           })
           .eq("id", safeStr(job.id));

@@ -220,7 +220,7 @@ serve(async (req) => {
       if (leadErr) throw leadErr;
       updated_leads++;
 
-      const { error: msgErr } = await supabase
+      const msgInsert = await supabase
         .from("messages")
         .insert({
           organization_id,
@@ -232,14 +232,19 @@ serve(async (req) => {
           content: text,
           provider_message_id: providerMid,
           inbound_message_id: null,
-        });
-      if (msgErr) {
-        const m = String(msgErr.message ?? "");
-        if (!m.toLowerCase().includes("duplicate")) throw msgErr;
+        })
+        .select("id")
+        .maybeSingle();
+      if (msgInsert.error) {
+        const m = String(msgInsert.error.message ?? "");
+        if (!m.toLowerCase().includes("duplicate")) throw msgInsert.error;
       }
+      const insertedMessageId = (msgInsert.data as any)?.id ?? null;
       created_jobs++; // Enqueue is handled by DB trigger after insert on messages.
       console.log("[meta-webhook] enqueue:triggered", {
         organization_id,
+        message_id: insertedMessageId,
+        psid,
         provider_message_id: providerMid,
         source: "messages_after_insert_trigger",
       });
