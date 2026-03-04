@@ -2,8 +2,10 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Layout from "./layouts/Layout";
 
-import Overview from "./pages/Overview";
+import Hoy from "./pages/Hoy";
+import Tomorrow from "./pages/Tomorrow";
 import Inbox from "./pages/Inbox";
+import Leads from "./pages/Leads";
 import CalendarBoardPage from "./pages/CalendarBoard";
 import Patients from "./pages/Patients";
 import Settings from "./pages/Settings";
@@ -62,12 +64,15 @@ function AppRoutesInner() {
           </RequireAuth>
         }
       >
-        <Route index element={<Navigate to="/overview" replace />} />
+        <Route index element={<Navigate to="/hoy" replace />} />
 
-        <Route path="overview" element={<Overview />} />
+        <Route path="overview" element={<Hoy />} />
+        <Route path="hoy" element={<Hoy />} />
+        <Route path="tomorrow" element={<Tomorrow />} />
 
         <Route path="inbox" element={<Inbox />} />
         <Route path="inbox/:leadId" element={<Inbox />} />
+        <Route path="leads" element={<Leads />} />
 
         <Route path="agenda" element={<CalendarBoardPage />} />
         <Route path="calendar" element={<CalendarBoardPage />} />
@@ -82,7 +87,7 @@ function AppRoutesInner() {
         <Route path="billing/cancel" element={<BillingCancel />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/overview" replace />} />
+      <Route path="*" element={<Navigate to="/hoy" replace />} />
     </Routes>
   );
 }

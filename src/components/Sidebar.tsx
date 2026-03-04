@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, Sparkles, CreditCard } from "lucide-react";
+import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, Sparkles, CreditCard, UserRound } from "lucide-react";
 import BrandMark from "./BrandMark";
 import { useClinic } from "../context/ClinicContext";
 
@@ -43,11 +43,12 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <div className="mt-4 grid gap-2">
-        <NavItem to="/overview" icon={LayoutDashboard} label="Overview" onNavigate={onNavigate} />
+        <NavItem to="/hoy" icon={LayoutDashboard} label="Hoy" onNavigate={onNavigate} />
         <NavItem to="/inbox" icon={Inbox} label="Inbox" onNavigate={onNavigate} />
+        <NavItem to="/leads" icon={Users} label="Leads" onNavigate={onNavigate} />
         <NavItem to="/agenda" icon={CalendarDays} label="Agenda" onNavigate={onNavigate} />
         <NavItem to="/marketing" icon={Sparkles} label="Marketing IA" onNavigate={onNavigate} />
-        <NavItem to="/patients" icon={Users} label="Patients" onNavigate={onNavigate} />
+        <NavItem to="/patients" icon={UserRound} label="Patients" onNavigate={onNavigate} />
         <NavItem to="/billing" icon={CreditCard} label="Billing" onNavigate={onNavigate} />
         <NavItem to="/settings" icon={Settings} label="Settings" onNavigate={onNavigate} />
       </div>

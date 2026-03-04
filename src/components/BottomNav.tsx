@@ -6,16 +6,14 @@ import {
   LayoutDashboard,
   Settings,
   Sparkles,
-  CreditCard,
 } from "lucide-react";
 
 const items = [
-  { to: "/overview", label: "Overview", icon: LayoutDashboard },
+  { to: "/hoy", label: "Hoy", icon: LayoutDashboard },
   { to: "/inbox", label: "Inbox", icon: MessageSquareText },
   { to: "/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/marketing", label: "Marketing", icon: Sparkles },
-  { to: "/billing", label: "Billing", icon: CreditCard },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/settings", label: "Ajustes", icon: Settings },
 ];
 
 export default function BottomNav() {

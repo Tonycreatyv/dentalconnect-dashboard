@@ -33,6 +33,40 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function logEvent(event: string, data: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({
+      ts: nowIso(),
+      event,
+      ...data,
+    })
+  );
+}
+
+function toErrorStack(err: unknown) {
+  if (err instanceof Error) return err.stack ?? err.message;
+  return safeStr(err, "");
+}
+
+function parseMetaStatus(errorMessage: string) {
+  const m = safeStr(errorMessage, "").match(/meta_error:(\d{3}):/i) || safeStr(errorMessage, "").match(/Meta error:\s*(\d{3})/i);
+  if (m?.[1]) return Number(m[1]);
+  const m2 = safeStr(errorMessage, "").match(/meta_send_failed:(\d{3}):/i);
+  return m2?.[1] ? Number(m2[1]) : null;
+}
+
+function backoffSeconds(attemptCount: number) {
+  const n = Math.max(1, Number(attemptCount) || 1);
+  if (n <= 1) return 60;
+  if (n === 2) return 5 * 60;
+  if (n === 3) return 15 * 60;
+  return 60 * 60;
+}
+
+function plusSecondsIso(seconds: number) {
+  return new Date(Date.now() + Math.max(0, seconds) * 1000).toISOString();
+}
+
 function clampText(s: string, max = 900) {
   const t = (s ?? "").trim();
   if (t.length <= max) return t;
@@ -98,6 +132,16 @@ function tryParseJson(text: string): any | null {
   }
 }
 
+function parseMaybeJson(text: string): any | null {
+  const raw = safeStr(text, "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 async function sendToMeta(args: {
   graphVersion: string;
   pageAccessToken: string;
@@ -117,8 +161,7 @@ async function sendToMeta(args: {
   });
 
   const data = await res.json();
-  if (!res.ok) throw new Error(`Meta error: ${res.status} ${JSON.stringify(data)}`);
-  return data;
+  return { ok: res.ok, status: res.status, data };
 }
 
 function normalizeSecretValue(raw: string) {
@@ -157,6 +200,21 @@ Devuelve SOLO JSON:
 }
 `.trim();
 }
+
+const SYSTEM_PROMPT_CREATYV = `
+Eres asesor comercial B2B de DentalConnect.
+No hablas como clínica ni recepcionista.
+Objetivo: calificar operación, detectar dolor principal y guiar a demo/trial.
+Responde corto (1-3 oraciones), una sola pregunta por turno.
+Devuelve SOLO JSON válido con el formato esperado.
+`.trim();
+
+const SYSTEM_PROMPT_DENTAL = `
+Eres recepcionista de clínica dental.
+Objetivo: ayudar al paciente y avanzar a agendar.
+Responde corto (1-3 oraciones), una sola pregunta por turno.
+Devuelve SOLO JSON válido con el formato esperado.
+`.trim();
 
 function buildUserPrompt(args: {
   clinic: Json;
@@ -358,6 +416,8 @@ function mergeState(prev: Json, args: {
   next.slots = { ...prevSlots, ...(args.slotsPatch ?? {}) };
   next.last_bot_question = normalizeQuestionTag(args.questionTag || safeStr(prev?.last_bot_question, ""));
   next.last_seen_inbound_mid = args.inboundMessageId || safeStr(prev?.last_seen_inbound_mid, "");
+  next.last_seen_inbound_provider_mid =
+    args.inboundMessageId || safeStr(prev?.last_seen_inbound_provider_mid, safeStr(prev?.last_seen_inbound_mid, ""));
 
   return next;
 }
@@ -400,6 +460,113 @@ function ctaFromIntent(intent: string) {
     };
   }
   return { tag: "none", text: "" };
+}
+
+function isOperatorOutboundJob(job: any) {
+  const source = safeStr(job?.payload?.source, "").toLowerCase();
+  const actor = safeStr(job?.actor, "").toLowerCase();
+  const role = safeStr(job?.role, "").toLowerCase();
+  return source.includes("operator") || source.includes("manual") || actor === "human" || role === "operator";
+}
+
+function containsAny(input: string, words: string[]) {
+  const t = safeStr(input, "").toLowerCase();
+  return words.some((w) => t.includes(w));
+}
+
+function resolveMode(args: {
+  organizationId: string;
+  leadState: Json;
+  inboundText: string;
+}) {
+  if (args.organizationId === "clinic-demo") return "dental_clinic";
+  const existing = safeStr(args.leadState?.mode, "").trim();
+  if (existing === "creatyv_product" || existing === "dental_clinic") return existing;
+  if (safeStr(args.inboundText, "").toLowerCase().includes("#testdental")) return "dental_clinic";
+  return "creatyv_product";
+}
+
+function stripTestDentalTag(input: string) {
+  return safeStr(input, "").replace(/#testdental/gi, "").trim();
+}
+
+function fastPathReply(args: {
+  mode: "creatyv_product" | "dental_clinic";
+  inboundText: string;
+  recentTurns: number;
+}) {
+  const inbound = safeStr(args.inboundText, "").trim().toLowerCase();
+  const lowInbound = [
+    "no me escriben",
+    "no recibo mensajes",
+    "nadie me escribe",
+    "no llegan mensajes",
+    "no tengo mensajes",
+  ].some((k) => inbound.includes(k));
+
+  if (args.mode === "creatyv_product" && lowInbound) {
+    return {
+      reply:
+        "Te propongo un plan rápido: anuncio click-to-message, CTA claro en perfil y oferta simple en historias/comentarios para llevar a DM. ¿Qué presupuesto mensual tenés para anuncios y qué zona/servicio querés priorizar primero?",
+      question_tag: "ask_budget_area_service",
+      intent: "low_inbound_messages",
+    };
+  }
+
+  const greeting = /^(hola|buenas|hello|hi|buen dia|buen día|que tal|qué tal)[.!?\s]*$/.test(inbound);
+  if (greeting && args.recentTurns <= 1) {
+    if (args.mode === "creatyv_product") {
+      return {
+        reply: "¡Hola! Te ayudo con DentalConnect. ¿Te llegan mensajes por WhatsApp, Messenger o IG y qué se te complica más hoy?",
+        question_tag: "ask_channel_pain",
+        intent: "intro",
+      };
+    }
+    return {
+      reply: "¡Hola! Con gusto te ayudo. ¿Qué servicio dental te interesa y para cuándo lo necesitás?",
+      question_tag: "ask_service_date",
+      intent: "intro",
+    };
+  }
+
+  if (args.mode === "creatyv_product" && containsAny(inbound, ["whatsapp", "messenger", "instagram", "ig", "seguimiento", "agendar"])) {
+    return {
+      reply: "Perfecto, eso lo cubrimos. ¿Cuántos mensajes reciben al día aproximadamente para ajustar el flujo?",
+      question_tag: "ask_volume",
+      intent: "qualification",
+    };
+  }
+
+  if (args.mode === "dental_clinic" && containsAny(inbound, ["limpieza", "brackets", "endodoncia", "agendar", "cita"])) {
+    return {
+      reply: "Excelente. ¿Qué día y horario te conviene para coordinar tu cita?",
+      question_tag: "ask_schedule",
+      intent: "appointment",
+    };
+  }
+
+  return null;
+}
+
+async function sendMessage(args: {
+  channel: string;
+  graphVersion: string;
+  pageAccessToken: string;
+  recipientId: string;
+  text: string;
+}) {
+  const channel = normalizeChannel(args.channel);
+  if (channel === "messenger") {
+    return await sendToMeta({
+      graphVersion: args.graphVersion,
+      pageAccessToken: args.pageAccessToken,
+      recipientId: args.recipientId,
+      text: args.text,
+    });
+  }
+  if (channel === "whatsapp") throw new Error("not_implemented:channel_whatsapp");
+  if (channel === "instagram") throw new Error("not_implemented:channel_instagram");
+  throw new Error(`unsupported_channel:${channel}`);
 }
 
 async function loadOrgSecretWithFallback(
@@ -450,6 +617,22 @@ async function loadOrgSecretsKV(
   return kv;
 }
 
+async function claimJobsViaRpc(args: {
+  supabase: ReturnType<typeof createClient>;
+  organizationId: string;
+  limit: number;
+  lockOwner: string;
+  lockTtlSeconds: number;
+}) {
+  const res = await args.supabase.rpc("claim_reply_outbox_jobs_v2", {
+    p_org_id: args.organizationId,
+    p_limit: args.limit,
+    p_lock_owner: args.lockOwner,
+    p_lock_ttl_seconds: args.lockTtlSeconds,
+  });
+  return res;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -468,7 +651,8 @@ Deno.serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
       auth: { persistSession: false },
     });
-    const workerId = `run-replies:${crypto.randomUUID()}`;
+    const executionId = crypto.randomUUID();
+    const workerId = `run-replies:${executionId}`;
 
     const url = new URL(req.url);
     const body = req.headers.get("content-type")?.includes("application/json")
@@ -513,24 +697,39 @@ Deno.serve(async (req) => {
     let signupPath = "/signup";
     let trialDays = 14;
     const os = await supabase
-      .from("org_settings")
-      .select(
-        "brand_name, phone, address, google_maps_url, hours, services, faqs, policies, emergency, system_prompt, meta_page_id, messenger_enabled"
-      )
+      .from("organization_settings")
+      .select("organization_id, app_base_url, signup_path, trial_days, system_prompt, prompt_format")
       .eq("organization_id", organization_id)
       .maybeSingle();
-    if (!os.error && os.data) {
-      const { system_prompt, ...rest } = os.data as any;
-      clinicCtx = { ...clinicCtx, ...rest };
-      if (system_prompt && typeof system_prompt === "string" && system_prompt.trim()) {
-        systemPrompt = system_prompt.trim();
-      }
+    const legacyOs = os.data
+      ? null
+      : await supabase
+          .from("org_settings")
+          .select(
+            "organization_id, brand_name, phone, address, google_maps_url, hours, services, faqs, policies, emergency, system_prompt, app_base_url, signup_path, trial_days"
+          )
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+    const settingsData = (os.data ?? legacyOs?.data ?? null) as any;
+    if (settingsData) {
+      clinicCtx = { ...clinicCtx, ...settingsData };
+      const systemPromptRaw = safeStr(settingsData.system_prompt, "");
+      const parsedPrompt = parseMaybeJson(systemPromptRaw);
+      const promptFromJson = safeStr(parsedPrompt?.prompt, "") || safeStr(parsedPrompt?.system, "");
+      const resolvedPrompt = promptFromJson || systemPromptRaw;
+      if (resolvedPrompt.trim()) systemPrompt = resolvedPrompt.trim();
+      appBaseUrl = safeStr(settingsData.app_base_url, appBaseUrl) || appBaseUrl;
+      signupPath = safeStr(settingsData.signup_path, signupPath) || signupPath;
+      const td = Number(settingsData.trial_days ?? trialDays);
+      if (Number.isFinite(td) && td > 0 && td <= 365) trialDays = td;
     }
-    const osCfg = await supabase
-      .from("org_settings")
-      .select("app_base_url, signup_path, trial_days")
-      .eq("organization_id", organization_id)
-      .maybeSingle();
+    const osCfg = settingsData
+      ? { error: null, data: settingsData }
+      : await supabase
+          .from("org_settings")
+          .select("app_base_url, signup_path, trial_days")
+          .eq("organization_id", organization_id)
+          .maybeSingle();
     if (!osCfg.error && osCfg.data) {
       appBaseUrl = safeStr((osCfg.data as any).app_base_url, appBaseUrl) || appBaseUrl;
       signupPath = safeStr((osCfg.data as any).signup_path, signupPath) || signupPath;
@@ -538,77 +737,99 @@ Deno.serve(async (req) => {
       if (Number.isFinite(td) && td > 0 && td <= 365) trialDays = td;
     }
 
-    const runNow = nowIso();
-    const { data: jobs, error: qErr } = await supabase
+    const limit = Math.max(1, Math.min(Number(body?.limit ?? 10) || 10, 50));
+    const lockTtlSeconds = Math.max(30, Math.min(Number(body?.lock_ttl_seconds ?? 60) || 60, 1800));
+    const staleLockCutoff = new Date(Date.now() - lockTtlSeconds * 1000).toISOString();
+    const reclaimRes = await supabase
       .from("reply_outbox")
-      .select("*")
+      .update({
+        status: "queued",
+        locked_at: null,
+        locked_by: null,
+        claimed_at: null,
+        claimed_by: null,
+        last_error: "reclaimed:processing_ttl_expired",
+        updated_at: nowIso(),
+      })
       .eq("organization_id", organization_id)
-      .in("status", ["pending", "queued"])
-      .lte("scheduled_for", runNow)
-      .is("claimed_at", null)
-      .is("locked_at", null)
-      .order("created_at", { ascending: true })
-      .limit(10);
-
-    if (qErr) return j(500, { ok: false, error: qErr.message });
-    console.log("[run-replies] poll", { organization_id, pending: jobs?.length ?? 0 });
-    if (!jobs?.length) return j(200, { ok: true, claimed: 0, sent: 0, skipped: 0, failures: [], skipped_reasons: [] });
+      .eq("status", "processing")
+      .lte("locked_at", staleLockCutoff)
+      .select("id");
+    const reclaimedCount = reclaimRes.error ? 0 : reclaimRes.data?.length ?? 0;
+    const claimRes = await claimJobsViaRpc({
+      supabase,
+      organizationId: organization_id,
+      limit,
+      lockOwner: workerId,
+      lockTtlSeconds,
+    });
+    if (claimRes.error) {
+      return j(500, { ok: false, error: `claim_rpc_failed:${claimRes.error.message}` });
+    }
+    const jobs = Array.isArray(claimRes.data) ? claimRes.data : [];
+    logEvent("run_replies_claimed", {
+      execution_id: executionId,
+      organization_id,
+      claimed: jobs.length,
+      reclaimed_processing: reclaimedCount,
+      worker_id: workerId,
+      lock_ttl_seconds: lockTtlSeconds,
+    });
+    if (!jobs.length)
+      return j(200, {
+        ok: true,
+        execution_id: executionId,
+        org_id: organization_id,
+        claimed_count: 0,
+        sent_count: 0,
+        failed_count: 0,
+        skipped_count: 0,
+        job_ids: [],
+        sample_job_ids: [],
+        reclaimed_processing: reclaimedCount,
+      });
 
     let claimed = 0;
     let sent = 0;
+    let failed = 0;
     let skipped = 0;
     const failures: Array<{ id: string; error: string }> = [];
     const skipped_reasons: Array<{ id: string; reason: string; details?: string }> = [];
+    const sampleJobIds: string[] = [];
 
     for (const job of jobs) {
       const jobId = safeStr(job.id);
-      console.log("[run-replies] job:start", {
+      sampleJobIds.push(jobId);
+      const traceId = safeStr((job.payload as Json | null)?.trace_id, "") || crypto.randomUUID();
+      logEvent("run_replies_job_start", {
+        execution_id: executionId,
+        trace_id: traceId,
         organization_id,
+        lead_id: safeStr(job.lead_id, ""),
         job_id: jobId,
+        channel: safeStr(job.channel, ""),
+        channel_user_id: safeStr(job.channel_user_id, ""),
         inbound_provider_message_id: safeStr(job.inbound_provider_message_id, ""),
         inbound_message_id: safeStr(job.inbound_message_id, ""),
         status: safeStr(job.status, ""),
       });
-      const claim = await supabase
-        .from("reply_outbox")
-        .update({
-          status: "processing",
-          processing_started_at: nowIso(),
-          claimed_at: nowIso(),
-          claimed_by: workerId,
-          locked_at: nowIso(),
-          locked_by: workerId,
-          attempts: (job.attempts ?? 0) + 1,
-        })
-        .eq("id", jobId)
-        .in("status", ["pending", "queued"])
-        .lte("scheduled_for", nowIso())
-        .is("claimed_at", null)
-        .is("locked_at", null)
-        .select("id")
-        .maybeSingle();
-
-      if (claim.error || !claim.data?.id) {
-        const reason = claim.error ? "claim_update_error" : "claim_guardrail_not_met";
-        const details = claim.error?.message ?? "status/scheduled_for/claimed_at/locked_at";
-        console.log("[run-replies] job:claim_skipped", {
-          organization_id,
-          job_id: jobId,
-          reason,
-          details,
-        });
-        await supabase
-          .from("reply_outbox")
-          .update({ last_error: `skipped:${reason}${details ? `:${details}` : ""}`, updated_at: nowIso() })
-          .eq("id", jobId);
-        skipped_reasons.push({ id: jobId, reason, details });
-        skipped++;
-        continue;
-      }
+      logEvent("run_replies_status_transition", {
+        execution_id: executionId,
+        trace_id: traceId,
+        organization_id,
+        lead_id: safeStr(job.lead_id, ""),
+        job_id: jobId,
+        from: safeStr(job.status, ""),
+        to: "processing",
+      });
       claimed++;
 
+      let currentAttemptCount = Number((job as any).attempt_count ?? 0);
       try {
         const channel = normalizeChannel(safeStr(job.channel, "messenger"));
+        if (channel !== "messenger") {
+          throw new Error(`unsupported_channel:${channel}`);
+        }
         const recipientId =
           safeStr(job.channel_user_id, "") ||
           safeStr(job.recipient_id, "") ||
@@ -622,6 +843,21 @@ Deno.serve(async (req) => {
         const inboundProviderMessageId = safeStr(job.inbound_provider_message_id, "");
 
         if (!recipientId) throw new Error("missing_recipient_id: channel_user_id/psid");
+        const attemptBump = await supabase
+          .from("reply_outbox")
+          .update({
+            attempt_count: currentAttemptCount + 1,
+            updated_at: nowIso(),
+          })
+          .eq("id", jobId)
+          .eq("status", "processing")
+          .select("attempt_count")
+          .maybeSingle();
+        if (!attemptBump.error && attemptBump.data) {
+          currentAttemptCount = Number((attemptBump.data as any).attempt_count ?? currentAttemptCount + 1);
+        } else {
+          currentAttemptCount += 1;
+        }
         let resolvedInboundText =
           safeStr(job.message_text, "") ||
           safeStr((job.payload as Json | null)?.text, "") ||
@@ -641,23 +877,51 @@ Deno.serve(async (req) => {
         if (!pageAccessToken || pageAccessToken.length <= 50) throw new Error("missing_or_invalid_page_token");
 
         let leadState: Json = {};
+        let leadLastMessageAt: string | null = null;
         if (leadId) {
-          const ld = await supabase.from("leads").select("state").eq("id", leadId).maybeSingle();
+          const ld = await supabase.from("leads").select("state,last_message_at").eq("id", leadId).maybeSingle();
           if (!ld.error && ld.data?.state) leadState = (ld.data.state as Json) ?? {};
+          if (!ld.error && ld.data?.last_message_at) leadLastMessageAt = safeStr((ld.data as any).last_message_at, "") || null;
         }
 
-        if (inboundProviderMessageId && safeStr(leadState?.last_seen_inbound_mid, "") === inboundProviderMessageId) {
+        const resetByTopic = /(otro tema|otra cosa|cambiando tema|nuevo tema)/i.test(resolvedInboundText);
+        const resetByTime =
+          !!leadLastMessageAt &&
+          Date.now() - new Date(leadLastMessageAt).getTime() > 12 * 60 * 60 * 1000;
+        if (resetByTopic || resetByTime) {
+          leadState = {
+            ...leadState,
+            stage: "intro",
+            intent: "new_topic",
+            last_question_id: null,
+            last_bot_question: null,
+            last_bot_question_repeat_count: 0,
+          };
+        }
+
+        const lastSeenInboundProviderMid =
+          safeStr(leadState?.last_seen_inbound_provider_mid, "") || safeStr(leadState?.last_seen_inbound_mid, "");
+        if (inboundProviderMessageId && lastSeenInboundProviderMid === inboundProviderMessageId) {
           const reason = "deduped_inbound_mid";
           skipped++;
           skipped_reasons.push({ id: jobId, reason });
-          console.log("[run-replies] job:skipped", { organization_id, job_id: jobId, reason });
+          logEvent("run_replies_job_skipped", {
+            execution_id: executionId,
+            trace_id: traceId,
+            organization_id,
+            lead_id: leadId,
+            job_id: jobId,
+            reason,
+          });
           failures.push({ id: jobId, error: `skipped:${reason}` });
           await supabase
             .from("reply_outbox")
             .update({
-              status: "failed",
-              claimed_at: nowIso(),
+              status: "skipped",
+              claimed_at: null,
+              claimed_by: null,
               locked_at: null,
+              locked_by: null,
               last_error: `skipped:${reason}`,
               updated_at: nowIso(),
             })
@@ -689,10 +953,17 @@ Deno.serve(async (req) => {
           }
         }
 
-        const guard = questionGuard(leadState, resolvedInboundText);
+        const operatorOutbound = isOperatorOutboundJob(job);
+        const guard = operatorOutbound ? null : questionGuard(leadState, resolvedInboundText);
         const currentSlots: Json =
           leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
         let debugNote: string | null = null;
+        const mode = resolveMode({
+          organizationId: organization_id,
+          leadState,
+          inboundText: resolvedInboundText,
+        }) as "creatyv_product" | "dental_clinic";
+        const inboundForAI = stripTestDentalTag(resolvedInboundText);
 
         let reply = "";
         let intent = "other";
@@ -702,7 +973,12 @@ Deno.serve(async (req) => {
         let recommendedPlan: "starter" | "growth" | "pro" | null = null;
         let action: "cta_trial" | "continue" = "continue";
 
-        if (guard) {
+        if (operatorOutbound) {
+          reply = clampText(resolvedInboundText, 950);
+          intent = "other";
+          questionTag = safeStr(leadState?.last_bot_question, "none");
+          debugNote = "operator_outbound";
+        } else if (guard) {
           reply = guard.reply;
           intent = guard.intent;
           questionTag = guard.question_tag;
@@ -712,11 +988,26 @@ Deno.serve(async (req) => {
           action = normalizeAction(guard.action);
           debugNote = safeStr(guard.debug, "question_guard_applied");
         } else {
+          const fast = fastPathReply({
+            mode,
+            inboundText: inboundForAI,
+            recentTurns: recent.length,
+          });
+          if (fast) {
+            reply = fast.reply;
+            questionTag = fast.question_tag;
+            intent = safeStr((fast as any).intent, "other");
+            debugNote = "fast_path";
+          }
+        }
+
+        if (!operatorOutbound && !reply) {
+          systemPrompt = mode === "dental_clinic" ? SYSTEM_PROMPT_DENTAL : SYSTEM_PROMPT_CREATYV;
           const userPrompt = buildUserPrompt({
             clinic: clinicCtx,
             leadState,
             recent,
-            inboundText: resolvedInboundText || "(sin texto)",
+            inboundText: inboundForAI || "(sin texto)",
           });
 
           const raw = await callLLM({
@@ -738,7 +1029,7 @@ Deno.serve(async (req) => {
           if (!reply) throw new Error(`LLM missing reply. raw=${raw.slice(0, 160)}...`);
         }
 
-        const prevTag = safeStr(leadState?.last_bot_question, "");
+        const prevTag = safeStr(leadState?.last_question_id, "") || safeStr(leadState?.last_bot_question, "");
         const rawTag = normalizeQuestionTag(questionTag);
         questionTag = enforceNoRepeatTag(prevTag, questionTag);
         if (rawTag && rawTag === normalizeQuestionTag(prevTag) && questionTag !== rawTag) {
@@ -762,7 +1053,17 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (action === "cta_trial") {
+        const nextRepeatCount =
+          normalizeQuestionTag(prevTag) === normalizeQuestionTag(questionTag)
+            ? Number(leadState?.last_bot_question_repeat_count ?? 0) + 1
+            : 0;
+        if (!operatorOutbound && nextRepeatCount >= 2) {
+          reply = "Para avanzar rápido: ya tengo lo esencial. ¿Querés que lo dejemos activo hoy o prefieres una demo corta primero?";
+          questionTag = "cta_connect";
+          debugNote = "question_guard:forced_progress_after_repeat";
+        }
+
+        if (!operatorOutbound && action === "cta_trial") {
           const plan = recommendedPlan ?? normalizePlan(currentSlots?.recommended_plan) ?? "growth";
           const ctaUrl = buildTrialUrl(appBaseUrl, signupPath, plan, trialDays);
           reply = `Perfecto. Aquí tenés tu prueba gratis de ${trialDays} días: ${ctaUrl}`;
@@ -780,32 +1081,62 @@ Deno.serve(async (req) => {
           slotsPatch,
           questionTag,
         });
+        nextState.last_bot_question_repeat_count = nextRepeatCount;
+        nextState.mode = mode;
+        nextState.intent = intent;
+        nextState.last_question_id = questionTag;
+        nextState.last_seen_inbound_mid = inboundProviderMessageId || nextState.last_seen_inbound_mid || null;
 
-        if (leadId) await supabase.from("leads").update({ state: nextState }).eq("id", leadId);
+        if (leadId && !operatorOutbound) await supabase.from("leads").update({ state: nextState }).eq("id", leadId);
 
-        const outMsgInsert = await supabase
-          .from("messages")
-          .insert({
-            organization_id,
-            lead_id: leadId || null,
-            channel,
-            role: "assistant",
-            actor: "bot",
-            content: reply,
-            provider_message_id: null,
-            inbound_message_id: null,
-            created_at: nowIso(),
-          })
-          .select("id")
-          .maybeSingle();
-        const outbound_message_id = outMsgInsert.data?.id ?? null;
+        let outbound_message_id = safeStr((job.payload as Json | null)?.ui_message_id, "") || null;
+        if (!operatorOutbound) {
+          const outMsgInsert = await supabase
+            .from("messages")
+            .insert({
+              organization_id,
+              lead_id: leadId || null,
+              channel,
+              role: "assistant",
+              actor: "bot",
+              content: reply,
+              provider_message_id: null,
+              inbound_message_id: null,
+              created_at: nowIso(),
+            })
+            .select("id")
+            .maybeSingle();
+          outbound_message_id = outMsgInsert.data?.id ?? null;
+        }
 
-        const metaResp = await sendToMeta({
+        logEvent("run_replies_meta_send_attempt", {
+          execution_id: executionId,
+          trace_id: traceId,
+          organization_id,
+          lead_id: leadId,
+          job_id: jobId,
+          channel,
+          endpoint: `https://graph.facebook.com/${metaGraphVersion}/me/messages`,
+        });
+        const metaResp = await sendMessage({
+          channel,
           graphVersion: metaGraphVersion,
           pageAccessToken,
           recipientId,
           text: reply,
         });
+        logEvent("run_replies_meta_send_result", {
+          execution_id: executionId,
+          trace_id: traceId,
+          organization_id,
+          lead_id: leadId,
+          job_id: jobId,
+          http_status: metaResp?.status ?? null,
+          body_snippet: JSON.stringify(metaResp?.data ?? {}).slice(0, 500),
+        });
+        if (!metaResp?.ok) {
+          throw new Error(`meta_send_failed:${metaResp?.status}:${JSON.stringify(metaResp?.data ?? {})}`);
+        }
 
         await supabase
           .from("reply_outbox")
@@ -813,47 +1144,149 @@ Deno.serve(async (req) => {
             status: "sent",
             sent_at: nowIso(),
             outbound_message_id,
-            meta_message_id: metaResp?.message_id ?? null,
-            provider_payload: metaResp ?? null,
-            claimed_at: nowIso(),
+            meta_message_id: metaResp?.data?.message_id ?? null,
+            provider_payload: {
+              message_id: metaResp?.data?.message_id ?? null,
+              recipient_id: metaResp?.data?.recipient_id ?? null,
+              status: metaResp?.status ?? 200,
+            },
             locked_at: null,
             locked_by: null,
+            claimed_at: null,
+            claimed_by: null,
             last_error: debugNote ? `debug:${debugNote}` : null,
+            payload: {
+              ...((job.payload as Json | null) ?? {}),
+              trace_id: traceId,
+            },
           })
           .eq("id", jobId);
-        if (leadId && metaResp?.message_id) {
-          await supabase.from("leads").update({ last_reply_outbound_mid: String(metaResp.message_id) }).eq("id", leadId);
+        if (leadId && metaResp?.data?.message_id) {
+          await supabase.from("leads").update({ last_reply_outbound_mid: String(metaResp.data.message_id) }).eq("id", leadId);
         }
-        console.log("[run-replies] job:sent", {
+        if (outbound_message_id && metaResp?.data?.message_id) {
+          await supabase
+            .from("messages")
+            .update({ provider_message_id: String(metaResp.data.message_id) })
+            .eq("id", outbound_message_id);
+        }
+        if (leadId) {
+          await supabase
+            .from("leads")
+            .update({
+              last_message_at: nowIso(),
+              last_message_preview: safeStr(reply, "").slice(0, 140),
+            })
+            .eq("id", leadId);
+        }
+        logEvent("run_replies_job_sent", {
+          execution_id: executionId,
+          trace_id: traceId,
           organization_id,
+          lead_id: leadId,
           job_id: jobId,
           outbound_message_id,
-          meta_message_id: metaResp?.message_id ?? null,
+          meta_message_id: metaResp?.data?.message_id ?? null,
+          meta_http_status: metaResp?.status ?? 200,
+          meta_response: JSON.stringify(metaResp?.data ?? {}).slice(0, 500),
+          channel,
         });
         sent++;
       } catch (e: any) {
         const msg = safeStr(e?.message, String(e));
+        const retryableStatus = parseMetaStatus(msg);
+        const isRetryable =
+          msg.includes("meta_send_failed:429") ||
+          msg.includes("meta_send_failed:500") ||
+          msg.includes("meta_send_failed:502") ||
+          msg.includes("meta_send_failed:503") ||
+          msg.includes("fetch failed") ||
+          msg.includes("network") ||
+          retryableStatus === 429 ||
+          (retryableStatus !== null && retryableStatus >= 500);
+        const nextAttemptCount = Math.max(1, currentAttemptCount || Number((job as any).attempt_count ?? 1));
+        const maxRetries = Number(Deno.env.get("RUN_REPLIES_MAX_RETRIES") ?? 8);
+        const delaySec = backoffSeconds(nextAttemptCount);
+        const retryAt = plusSecondsIso(delaySec);
+        const shouldRetry = isRetryable && nextAttemptCount < maxRetries;
+        const terminalDead = nextAttemptCount >= maxRetries;
+
         failures.push({ id: safeStr(job.id), error: msg });
+        failed++;
         await supabase
           .from("reply_outbox")
           .update({
-            status: "failed",
+            status: shouldRetry ? "pending" : terminalDead ? "dead" : "failed",
+            scheduled_for: shouldRetry ? retryAt : safeStr((job as any).scheduled_for, nowIso()),
             last_error: msg,
-            claimed_at: nowIso(),
             locked_at: null,
             locked_by: null,
+            claimed_at: null,
+            claimed_by: null,
             updated_at: nowIso(),
+            payload: {
+              ...(((job as any).payload as Json | null) ?? {}),
+              trace_id: traceId,
+              retry_backoff_seconds: delaySec,
+              retryable: shouldRetry,
+            },
           })
           .eq("id", safeStr(job.id));
-        console.log("[run-replies] job:failed", {
+        logEvent("run_replies_job_failed", {
+          execution_id: executionId,
+          trace_id: traceId,
           organization_id,
+          lead_id: safeStr((job as any).lead_id, ""),
           job_id: safeStr(job.id),
           error: msg,
+          stack: toErrorStack(e),
+          retryable: shouldRetry,
+          terminal_dead: terminalDead,
+          retry_at: shouldRetry ? retryAt : null,
         });
+        if (terminalDead) {
+          await supabase.from("alerts").insert({
+            organization_id,
+            type: "reply_job_dead",
+            severity: "error",
+            title: "Reply job moved to dead-letter",
+            body: `job ${safeStr(job.id)} reached max attempts`,
+            action: {
+              job_id: safeStr(job.id),
+              lead_id: safeStr((job as any).lead_id, ""),
+              attempt_count: nextAttemptCount,
+              last_error: msg.slice(0, 500),
+            },
+            status: "open",
+          });
+        }
       }
     }
 
-    return j(200, { ok: true, claimed, sent, skipped, processed: sent, failures, skipped_reasons });
+    logEvent("run_replies_summary", {
+      execution_id: executionId,
+      organization_id,
+      worker_id: workerId,
+      claimed,
+      sent,
+      failed,
+      skipped,
+      failures: failures.length,
+    });
+    return j(200, {
+      ok: true,
+      execution_id: executionId,
+      org_id: organization_id,
+      claimed_count: claimed,
+      sent_count: sent,
+      failed_count: failed,
+      skipped_count: skipped,
+      job_ids: sampleJobIds,
+      sample_job_ids: sampleJobIds.slice(0, 10),
+      reclaimed_processing: reclaimedCount,
+      failures,
+      skipped_reasons,
+    });
   } catch (e: any) {
     return j(500, { ok: false, error: safeStr(e?.message, String(e)) });
   }

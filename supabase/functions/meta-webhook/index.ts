@@ -81,11 +81,27 @@ function parseCsvSet(input: string) {
   return out;
 }
 
-async function fetchMetaProfileName(args: { pageAccessToken: string; psid: string }) {
+function shouldScheduleFollowup(text: string) {
+  const t = String(text ?? "").toLowerCase();
+  const keys = ["precio", "precios", "costo", "costos", "agenda", "agendar", "cita", "horario"];
+  return keys.some((k) => t.includes(k));
+}
+
+function waitlistDecision(text: string): "accept" | "decline" | null {
+  const t = String(text ?? "").trim().toLowerCase();
+  if (!t) return null;
+  const yes = ["si", "sí", "yes", "ok", "dale", "me interesa", "confirmo"];
+  const no = ["no", "nop", "no gracias", "paso", "ahora no"];
+  if (yes.some((k) => t === k || t.includes(k))) return "accept";
+  if (no.some((k) => t === k || t.includes(k))) return "decline";
+  return null;
+}
+
+async function fetchMetaProfile(args: { pageAccessToken: string; psid: string }) {
   if (!args.pageAccessToken || !args.psid) return null;
   try {
     const url = new URL(`https://graph.facebook.com/v19.0/${encodeURIComponent(args.psid)}`);
-    url.searchParams.set("fields", "first_name,last_name");
+    url.searchParams.set("fields", "first_name,last_name,profile_pic");
     url.searchParams.set("access_token", args.pageAccessToken);
     const res = await fetch(url.toString());
     const data = await res.json();
@@ -93,10 +109,35 @@ async function fetchMetaProfileName(args: { pageAccessToken: string; psid: strin
     const first = String(data?.first_name ?? "").trim();
     const last = String(data?.last_name ?? "").trim();
     const full = `${first} ${last}`.trim();
-    return full || null;
+    const profilePic = String(data?.profile_pic ?? "").trim() || null;
+    if (!full && !profilePic) return null;
+    return { fullName: full || null, profilePic };
   } catch {
     return null;
   }
+}
+
+async function resolvePageToken(
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string
+) {
+  const kv = await supabase
+    .from("org_secrets")
+    .select("key, value")
+    .eq("organization_id", organizationId)
+    .in("key", ["META_PAGE_ACCESS_TOKEN", "PAGE_ACCESS_TOKEN", "META_PAGE_TOKEN"]);
+  if (!kv.error && Array.isArray(kv.data)) {
+    for (const row of kv.data as any[]) {
+      const token = String(row?.value ?? "").replace(/^['"]|['"]$/g, "").trim();
+      if (token.length > 50) return token;
+    }
+  }
+  const legacy = await supabase
+    .from("org_secrets")
+    .select('meta_page_access_token, "META_PAGE_ACCESS_TOKEN"')
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  return String((legacy.data as any)?.meta_page_access_token ?? (legacy.data as any)?.META_PAGE_ACCESS_TOKEN ?? "").trim();
 }
 
 serve(async (req) => {
@@ -146,6 +187,7 @@ serve(async (req) => {
       const pageId = ev.page_id;
       const psid = ev.psid;
       const providerMid = ev.mid;
+      const traceId = providerMid || crypto.randomUUID();
       const rawText = ev.text;
       const hasTestdentalTag = rawText.toLowerCase().includes(TESTDENTAL_TAG);
       const text = rawText.replace(/#testdental/gi, "").trim() || rawText;
@@ -178,7 +220,7 @@ serve(async (req) => {
 
       const { data: existingLead, error: selErr } = await supabase
         .from("leads")
-        .select("id, state")
+        .select("id, state, full_name, channel")
         .eq("organization_id", organization_id)
         .eq("channel", channel)
         .eq("channel_user_id", psid)
@@ -186,26 +228,30 @@ serve(async (req) => {
       if (selErr) throw selErr;
 
       const nextState = ensureState(existingLead?.state);
-      const alreadyHasName = typeof nextState?.name === "string" && nextState.name.trim().length > 0;
-      let resolvedName = alreadyHasName ? String(nextState.name).trim() : `Usuario ${psidSuffix(psid)}`;
+      const existingFullName = String(existingLead?.full_name ?? "").trim();
+      const stateName = String(nextState?.name ?? "").trim();
+      const hasRealName =
+        (existingFullName && !existingFullName.startsWith("Usuario ")) ||
+        (stateName && !stateName.startsWith("Usuario "));
+      let resolvedName = existingFullName || stateName || `Usuario ${psidSuffix(psid)}`;
+      let resolvedProfilePic: string | null = String(nextState?.profile_pic ?? "").trim() || null;
 
-      if (!alreadyHasName) {
-        const tokenRes = await supabase
-          .from("org_secrets")
-          .select('meta_page_access_token, "META_PAGE_ACCESS_TOKEN"')
-          .eq("organization_id", organization_id)
-          .maybeSingle();
-        const token = String((tokenRes.data as any)?.meta_page_access_token ?? (tokenRes.data as any)?.META_PAGE_ACCESS_TOKEN ?? "");
-        const profileName = await fetchMetaProfileName({ pageAccessToken: token, psid });
-        if (profileName) resolvedName = profileName;
+      if (!hasRealName) {
+        const token = await resolvePageToken(supabase, organization_id);
+        const profile = await fetchMetaProfile({ pageAccessToken: token, psid });
+        if (profile?.fullName) resolvedName = profile.fullName;
+        if (profile?.profilePic) resolvedProfilePic = profile.profilePic;
       }
       nextState.name = resolvedName;
+      if (resolvedProfilePic) nextState.profile_pic = resolvedProfilePic;
 
       const upsertPayload: Record<string, unknown> = {
         organization_id,
         channel,
+        last_channel: channel,
         channel_user_id: psid,
         full_name: resolvedName,
+        avatar_url: resolvedProfilePic,
         last_message_preview: text.slice(0, 140),
         last_message_at: isoTime,
         state: nextState,
@@ -219,6 +265,125 @@ serve(async (req) => {
         .single();
       if (leadErr) throw leadErr;
       updated_leads++;
+
+      const decision = waitlistDecision(text);
+      if (decision) {
+        const activeHold = await supabase
+          .from("slot_holds")
+          .select("id, slot_key, slot_start, slot_end, service_type, hold_until, status")
+          .eq("organization_id", organization_id)
+          .eq("lead_id", lead.id)
+          .eq("slot_hold_scope", "lead")
+          .eq("status", "held")
+          .gt("hold_until", new Date().toISOString())
+          .order("hold_until", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!activeHold.error && activeHold.data?.id) {
+          const hold = activeHold.data as any;
+          if (decision === "accept") {
+            const appointmentInsert = await supabase.from("appointments").insert({
+              organization_id,
+              lead_id: lead.id,
+              start_at: hold.slot_start ?? null,
+              starts_at: hold.slot_start ?? null,
+              status: "confirmed",
+              title: hold.service_type ?? "Cita",
+              reason: hold.service_type ?? "Servicio",
+              patient_name: resolvedName,
+            });
+            if (!appointmentInsert.error) {
+              await supabase
+                .from("slot_holds")
+                .update({
+                  status: "accepted",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("organization_id", organization_id)
+                .eq("id", hold.id);
+
+              await supabase
+                .from("slot_holds")
+                .update({
+                  status: "expired",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("organization_id", organization_id)
+                .eq("slot_key", hold.slot_key)
+                .eq("slot_hold_scope", "lead")
+                .neq("id", hold.id)
+                .in("status", ["held", "accepted"]);
+
+              const otherLeads = await supabase
+                .from("slot_holds")
+                .select("lead_id")
+                .eq("organization_id", organization_id)
+                .eq("slot_key", hold.slot_key)
+                .eq("slot_hold_scope", "lead");
+              const otherLeadIds = (otherLeads.data ?? [])
+                .map((r: any) => String(r?.lead_id ?? ""))
+                .filter((id) => id && id !== lead.id);
+              if (otherLeadIds.length > 0) {
+                const leadsRows = await supabase
+                  .from("leads")
+                  .select("id, channel, channel_user_id")
+                  .eq("organization_id", organization_id)
+                  .in("id", otherLeadIds);
+                const rows = leadsRows.data ?? [];
+                if (rows.length > 0) {
+                  await supabase.from("reply_outbox").insert(
+                    rows.map((l: any) => ({
+                      organization_id,
+                      lead_id: l.id,
+                      channel: l.channel ?? "messenger",
+                      channel_user_id: l.channel_user_id,
+                      status: "queued",
+                      scheduled_for: new Date().toISOString(),
+                      message_text: "Ese turno ya fue tomado. Si querés, te compartimos nuevas opciones.",
+                      payload: {
+                        source: "waitlist_offer_closed",
+                        provider: "meta",
+                        text: "Ese turno ya fue tomado. Si querés, te compartimos nuevas opciones.",
+                        slot_key: hold.slot_key,
+                      },
+                    }))
+                  );
+                }
+              }
+            }
+          } else if (decision === "decline") {
+            await supabase
+              .from("slot_holds")
+              .update({ status: "cancelled", updated_at: new Date().toISOString() })
+              .eq("organization_id", organization_id)
+              .eq("id", hold.id);
+          }
+        }
+      }
+
+      const cancelFollowupsRes = await supabase
+        .from("followup_outbox")
+        .update({
+          status: "cancelled",
+          lock_owner: null,
+          locked_at: null,
+          updated_at: new Date().toISOString(),
+          last_error: "cancelled:user_replied",
+        })
+        .eq("organization_id", organization_id)
+        .eq("lead_id", lead.id)
+        .in("status", ["queued", "processing"]);
+      if (cancelFollowupsRes.error) {
+        const msg = String(cancelFollowupsRes.error.message ?? "");
+        if (!msg.toLowerCase().includes("does not exist")) {
+          console.log("[meta-webhook] followup_cancel_warn", {
+            organization_id,
+            lead_id: lead.id,
+            error: msg,
+          });
+        }
+      }
 
       const msgInsert = await supabase
         .from("messages")
@@ -240,14 +405,98 @@ serve(async (req) => {
         if (!m.toLowerCase().includes("duplicate")) throw msgInsert.error;
       }
       const insertedMessageId = (msgInsert.data as any)?.id ?? null;
-      created_jobs++; // Enqueue is handled by DB trigger after insert on messages.
-      console.log("[meta-webhook] enqueue:triggered", {
+
+      const outboxRes = await supabase
+        .from("reply_outbox")
+        .upsert(
+          {
+            organization_id,
+            lead_id: lead.id,
+            channel,
+            channel_user_id: psid,
+            status: "queued",
+            scheduled_for: new Date().toISOString(),
+            inbound_message_id: insertedMessageId,
+            inbound_provider_message_id: providerMid,
+            message_text: text,
+            payload: {
+              text,
+              source: "inbound",
+              provider: "meta",
+              trace_id: traceId,
+              recipient: { id: psid },
+              recipient_id: psid,
+            },
+          },
+          {
+            onConflict: "organization_id,inbound_provider_message_id",
+            ignoreDuplicates: true,
+          }
+        )
+        .select("id")
+        .maybeSingle();
+      if (outboxRes.error) {
+        const em = String(outboxRes.error.message ?? "").toLowerCase();
+        if (!em.includes("duplicate")) throw outboxRes.error;
+      } else if (outboxRes.data?.id) {
+        created_jobs += 1;
+      }
+      console.log("[meta-webhook] enqueue", {
         organization_id,
         message_id: insertedMessageId,
+        outbox_id: outboxRes.data?.id ?? null,
         psid,
         provider_message_id: providerMid,
-        source: "messages_after_insert_trigger",
+        source: "meta-webhook",
       });
+
+      if (shouldScheduleFollowup(text)) {
+        const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        const followupRes = await supabase
+          .from("followup_outbox")
+          .upsert(
+            {
+              organization_id,
+              lead_id: lead.id,
+              channel_user_id: psid,
+              provider: "meta",
+              reason: "lead_silent",
+              step: 1,
+              max_steps: 3,
+              due_at: dueAt,
+              status: "queued",
+              payload: {
+                provider: "meta",
+                source: "auto_followup",
+                reason: "lead_silent",
+                step: 1,
+              },
+            },
+            {
+              onConflict: "organization_id,lead_id,reason,step",
+              ignoreDuplicates: true,
+            }
+          )
+          .select("id")
+          .maybeSingle();
+        if (followupRes.error) {
+          const msg = String(followupRes.error.message ?? "");
+          if (!msg.toLowerCase().includes("duplicate") && !msg.toLowerCase().includes("does not exist")) {
+            console.log("[meta-webhook] followup_enqueue_warn", {
+              organization_id,
+              lead_id: lead.id,
+              error: msg,
+            });
+          }
+        } else {
+          console.log("[meta-webhook] followup_queued", {
+            organization_id,
+            lead_id: lead.id,
+            followup_id: followupRes.data?.id ?? null,
+            due_at: dueAt,
+          });
+        }
+      }
 
       if (RUN_REPLIES_SECRET) {
         const RUN_REPLIES_URL = `${SUPABASE_URL}/functions/v1/run-replies`;

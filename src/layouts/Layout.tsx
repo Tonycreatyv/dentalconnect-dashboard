@@ -9,14 +9,17 @@ import { useClinic } from "../context/ClinicContext";
 import BottomNav from "../components/BottomNav";
 
 const PAGE_TITLES: Record<string, string> = {
-  "/overview": "Overview",
+  "/hoy": "Hoy",
+  "/tomorrow": "Mañana",
+  "/overview": "Hoy",
   "/inbox": "Inbox",
+  "/leads": "Leads",
   "/agenda": "Agenda",
   "/calendar": "Agenda",
-  "/marketing": "Marketing IA",
-  "/patients": "Patients",
+  "/marketing": "Marketing",
+  "/patients": "Pacientes",
   "/billing": "Billing",
-  "/settings": "Settings",
+  "/settings": "Ajustes",
 };
 
 export default function Layout() {
@@ -27,6 +30,7 @@ export default function Layout() {
   const { clinic, setClinic, setClinicId } = useClinic();
   const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null);
   const [trialExpired, setTrialExpired] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const pageTitle = useMemo(() => {
     const key = Object.keys(PAGE_TITLES).find((path) => location.pathname.startsWith(path));
@@ -148,7 +152,7 @@ export default function Layout() {
   return (
     <div className="relative min-h-screen overflow-x-hidden dc-bg text-white">
       <div className="pointer-events-none absolute inset-0 dc-bg-overlay" />
-      <div className="relative mx-auto w-full max-w-[1360px] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="relative mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-6 lg:px-8">
         <div className="flex gap-6">
           <div className="hidden shrink-0 lg:block lg:w-[272px]">
             <Sidebar />
@@ -158,6 +162,7 @@ export default function Layout() {
             <div className="mb-4">
               <Topbar
                 onLogout={logout}
+                onMenu={() => setMobileMenuOpen(true)}
                 title={pageTitle}
                 loading={logoutLoading}
               />
@@ -188,6 +193,20 @@ export default function Layout() {
           </div>
         </div>
       </div>
+
+      {mobileMenuOpen ? (
+        <div className="fixed inset-0 z-[70] lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Cerrar menú"
+          />
+          <div className="absolute left-0 top-0 h-full w-[88vw] max-w-[320px] p-3 pt-[max(env(safe-area-inset-top),12px)]">
+            <Sidebar onNavigate={() => setMobileMenuOpen(false)} />
+          </div>
+        </div>
+      ) : null}
 
       <BottomNav />
 

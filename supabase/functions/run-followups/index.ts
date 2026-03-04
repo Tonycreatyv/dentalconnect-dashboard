@@ -1,145 +1,355 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-type Body = { org: string; limit?: number; tz?: string };
+type Json = Record<string, unknown>;
 
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
+type ReqBody = {
+  organization_id?: string;
+  org?: string;
+  limit?: number;
+  lock_ttl_seconds?: number;
+};
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "content-type": "application/json" },
   });
+}
+
+function safeStr(value: unknown, fallback = "") {
+  if (typeof value === "string") return value;
+  if (value == null) return fallback;
+  return String(value);
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function normalizeSecret(value: string) {
+  const v = safeStr(value, "").trim();
+  if (!v) return "";
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+function buildFollowupText(reason: string, step: number) {
+  const r = safeStr(reason, "lead_silent").toLowerCase();
+  if (r.includes("pricing") || r.includes("price")) {
+    if (step <= 1) return "Te comparto un seguimiento rápido: si querés, te paso opciones y precios en un mensaje corto para que compares.";
+    if (step === 2) return "¿Querés que te deje hoy mismo una propuesta clara con opciones y rango de precio?";
+    return "Cierro por ahora para no molestarte. Si querés retomar, te respondo al instante.";
+  }
+  if (r.includes("appointment") || r.includes("cita") || r.includes("agenda")) {
+    if (step <= 1) return "Sigo pendiente para ayudarte con tu cita. Si me compartís día y horario, te ayudo a coordinar.";
+    if (step === 2) return "¿Preferís mañana o tarde para agendar? Con eso te dejo opciones rápidas.";
+    return "Lo dejo en pausa para no insistir. Cuando quieras, retomamos por aquí.";
+  }
+  if (step <= 1) return "Paso por aquí por si querés retomar. Estoy disponible para ayudarte con el siguiente paso.";
+  if (step === 2) return "¿Te parece si te dejo una recomendación concreta según lo que buscás?";
+  return "Cierro este seguimiento para no saturarte. Si querés volver, te respondo por aquí.";
+}
+
+async function loadOrgToken(supabase: ReturnType<typeof createClient>, organizationId: string) {
+  const kv = await supabase
+    .from("org_secrets")
+    .select("key, value")
+    .eq("organization_id", organizationId)
+    .in("key", ["META_PAGE_ACCESS_TOKEN", "PAGE_ACCESS_TOKEN", "META_PAGE_TOKEN", "META_GRAPH_VERSION"]);
+
+  let token = normalizeSecret(Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "");
+  let graphVersion = safeStr(Deno.env.get("META_GRAPH_VERSION"), "v19.0");
+
+  if (!kv.error && Array.isArray(kv.data)) {
+    for (const row of kv.data as any[]) {
+      const key = safeStr(row?.key, "").trim();
+      const value = normalizeSecret(safeStr(row?.value, ""));
+      if (!key || !value) continue;
+      if (key === "META_GRAPH_VERSION") graphVersion = value;
+      if (["META_PAGE_ACCESS_TOKEN", "PAGE_ACCESS_TOKEN", "META_PAGE_TOKEN"].includes(key) && value.length > 50) {
+        token = value;
+      }
+    }
+  }
+
+  return { token, graphVersion };
+}
+
+async function sendMeta(args: {
+  graphVersion: string;
+  pageAccessToken: string;
+  recipientId: string;
+  text: string;
+}) {
+  const url = new URL(`https://graph.facebook.com/${args.graphVersion}/me/messages`);
+  url.searchParams.set("access_token", args.pageAccessToken);
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      messaging_type: "RESPONSE",
+      recipient: { id: args.recipientId },
+      message: { text: args.text },
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(`meta_error:${res.status}:${JSON.stringify(data)}`);
+  return data;
+}
+
+async function sendMessage(args: {
+  provider: string;
+  graphVersion: string;
+  pageAccessToken: string;
+  recipientId: string;
+  text: string;
+}) {
+  const provider = safeStr(args.provider, "meta").toLowerCase();
+  if (provider === "meta" || provider === "messenger") {
+    return await sendMeta({
+      graphVersion: args.graphVersion,
+      pageAccessToken: args.pageAccessToken,
+      recipientId: args.recipientId,
+      text: args.text,
+    });
+  }
+  if (provider === "whatsapp") throw new Error("not_implemented:provider_whatsapp");
+  if (provider === "instagram") throw new Error("not_implemented:provider_instagram");
+  throw new Error(`unsupported_provider:${provider}`);
 }
 
 serve(async (req) => {
   try {
-    if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+    if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
 
-    // 1) Secret propio (anti-abuso)
-    const secret = req.headers.get("x-followup-secret") ?? "";
-    const expected = Deno.env.get("FOLLOWUP_RUN_SECRET") ?? "";
-    if (!expected || secret !== expected) return json({ error: "unauthorized" }, 401);
+    const expected =
+      safeStr(Deno.env.get("RUN_FOLLOWUPS_SECRET"), "") || safeStr(Deno.env.get("FOLLOWUP_RUN_SECRET"), "");
+    const provided =
+      req.headers.get("x-run-followups-secret") ?? req.headers.get("x-followup-secret") ?? "";
+    if (!expected || provided !== expected) return json(401, { ok: false, error: "unauthorized" });
 
-    // 2) Parse body
-    const body = (await req.json().catch(() => ({}))) as Partial<Body>;
-    const org = (body.org ?? "").trim();
-    const limit = Math.min(Math.max(Number(body.limit ?? 10), 1), 50);
-    const tz = (body.tz ?? "America/Tegucigalpa").trim();
+    const body = (await req.json().catch(() => ({}))) as ReqBody;
+    const organizationId = safeStr(body.organization_id, "") || safeStr(body.org, "");
+    if (!organizationId) return json(400, { ok: false, error: "missing_organization_id" });
 
-    if (!org) return json({ error: "missing_org" }, 400);
+    const limit = Math.max(1, Math.min(Number(body.limit ?? 10) || 10, 50));
+    const lockTtlSeconds = Math.max(30, Math.min(Number(body.lock_ttl_seconds ?? 300) || 300, 1800));
 
-    // 3) Supabase client (Service Role)
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabaseUrl = safeStr(Deno.env.get("SUPABASE_URL"), "");
+    const serviceKey = safeStr(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"), "");
     if (!supabaseUrl || !serviceKey) {
-      return json({ error: "missing_supabase_secrets" }, 500);
+      return json(500, { ok: false, error: "missing_supabase_secrets" });
     }
 
-    const sb = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    });
+    const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+    const workerId = `run-followups:${crypto.randomUUID()}`;
 
-    // 4) Reclamar leads listos (usa tu RPC existente)
-    //    IMPORTANTE: esta llamada DEBE devolver rows; si devuelve [] no hay trabajo.
-    const { data: leads, error: claimErr } = await sb.rpc("claim_followups", {
-      p_org: org,
+    const { data: jobs, error: claimErr } = await sb.rpc("claim_followup_outbox_jobs_v2", {
+      p_org_id: organizationId,
       p_limit: limit,
-      p_tz: tz,
+      p_lock_owner: workerId,
+      p_lock_ttl_seconds: lockTtlSeconds,
     });
 
-    if (claimErr) return json({ error: "claim_failed", details: claimErr.message }, 500);
-    if (!leads || leads.length === 0) return json({ ok: true, claimed: 0 });
+    if (claimErr) return json(500, { ok: false, error: `claim_rpc_failed:${claimErr.message}` });
 
-    // 5) OpenAI
-    const openaiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
-    if (!openaiKey) return json({ error: "missing_openai_key" }, 500);
+    const claimedJobs = Array.isArray(jobs) ? jobs : [];
+    if (!claimedJobs.length) return json(200, { ok: true, claimed: 0, sent: 0, failed: 0, skipped: 0, failures: [] });
 
-    const results: any[] = [];
-
-    for (const lead of leads) {
-      // Para cada lead: crear outbox + calcular step/next_due en DB
-      const { data: outboxRows, error: enqErr } = await sb.rpc("enqueue_followup", {
-        p_lead_id: lead.id,
-        p_tz: tz,
-      });
-
-      if (enqErr || !outboxRows?.length) {
-        // Si falla enqueue, despega el lead para no dejarlo colgado
-        await sb.from("leads").update({ conversation_state: "waiting_user" }).eq("id", lead.id);
-        results.push({ lead_id: lead.id, ok: false, stage: "enqueue", error: enqErr?.message ?? "enqueue_failed" });
-        continue;
+    const { token, graphVersion } = await loadOrgToken(sb, organizationId);
+    if (!token || token.length <= 50) {
+      for (const job of claimedJobs) {
+        await sb
+          .from("followup_outbox")
+          .update({
+            status: "failed",
+            last_error: "missing_or_invalid_page_token",
+            locked_at: null,
+            lock_owner: null,
+            updated_at: nowIso(),
+          })
+          .eq("id", safeStr((job as any).id, ""));
       }
+      return json(200, {
+        ok: true,
+        claimed: claimedJobs.length,
+        sent: 0,
+        failed: claimedJobs.length,
+        skipped: 0,
+        failures: claimedJobs.map((j: any) => ({ id: j.id, error: "missing_or_invalid_page_token" })),
+      });
+    }
 
-      const outbox = outboxRows[0];
-      const outboxId = String(outbox.outbox_id ?? outbox.id ?? "").trim();
+    let sent = 0;
+    let failed = 0;
+    let skipped = 0;
+    const failures: Array<{ id: string; error: string }> = [];
 
-      // Prompt (simple y robusto)
-      const policy = String(outbox.policy ?? lead.follow_up_policy ?? "cold");
-      const step = Number(outbox.step_to_send ?? outbox.step ?? 1);
-      const channel = String(outbox.channel ?? lead.channel ?? "web");
-      const last_intent = String(lead.last_intent ?? "general");
-
-      const payload = {
-        model: "gpt-4o-mini",
-        temperature: 0.4,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Eres un asistente de seguimiento comercial B2C. Escribe UN solo mensaje corto en español (2–4 líneas, max 280 caracteres), sin emojis, sin firmas, sin placeholders. Objetivo: provocar respuesta o siguiente paso. Varía el texto según policy y step. policy=cold: 0 preguntas. policy=warm/hot: máximo 1 pregunta. No repitas 'solo quería hacer seguimiento'.",
-          },
-          {
-            role: "user",
-            content: `policy=${policy}, step=${step}. Canal=${channel}. Intención previa=${last_intent}. Escribe el mensaje.`,
-          },
-        ],
-      };
-
-      let messageText = "";
+    for (const job of claimedJobs as any[]) {
+      const jobId = safeStr(job.id, "");
+      const leadId = safeStr(job.lead_id, "");
+      const channelUserId = safeStr(job.channel_user_id, "");
+      const provider = safeStr(job.provider, "meta") || safeStr(job?.payload?.provider, "meta");
+      const step = Math.max(1, Number(job.step ?? 1) || 1);
+      const maxSteps = Math.max(1, Number(job.max_steps ?? 3) || 3);
 
       try {
-        const r = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${openaiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        });
+        if (!channelUserId) throw new Error("missing_channel_user_id");
 
-        const j = await r.json();
-        messageText = j?.choices?.[0]?.message?.content?.trim?.() ?? "";
+        const hasInboundAfter = await sb
+          .from("messages")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .eq("lead_id", leadId)
+          .eq("role", "user")
+          .gt("created_at", safeStr(job.created_at, "1970-01-01T00:00:00.000Z"))
+          .limit(1);
 
-        if (!r.ok || !messageText) {
-          const errMsg = j?.error?.message ?? `openai_failed_status_${r.status}`;
-          // Marcar failed
-          await sb.rpc("mark_followup_failed", { p_outbox_id: outboxId, p_error: String(errMsg) });
-          results.push({ outbox_id: outboxId, lead_id: lead.id, ok: false, stage: "openai", error: errMsg });
+        if (!hasInboundAfter.error && (hasInboundAfter.data?.length ?? 0) > 0) {
+          await sb
+            .from("followup_outbox")
+            .update({
+              status: "cancelled",
+              last_error: "cancelled:user_replied",
+              locked_at: null,
+              lock_owner: null,
+              updated_at: nowIso(),
+            })
+            .eq("id", jobId);
+          skipped += 1;
           continue;
         }
-      } catch (e) {
-        await sb.rpc("mark_followup_failed", { p_outbox_id: outboxId, p_error: String(e?.message ?? e) });
-        results.push({ outbox_id: outboxId, lead_id: lead.id, ok: false, stage: "openai", error: String(e?.message ?? e) });
-        continue;
+
+        if (step > maxSteps) {
+          await sb
+            .from("followup_outbox")
+            .update({
+              status: "skipped",
+              last_error: "skipped:max_steps_reached",
+              locked_at: null,
+              lock_owner: null,
+              updated_at: nowIso(),
+            })
+            .eq("id", jobId);
+          skipped += 1;
+          continue;
+        }
+
+        const payload = (job.payload as Json | null) ?? {};
+        const text = safeStr(payload.text, "").trim() || safeStr(job.message_text, "").trim() || buildFollowupText(safeStr(job.reason, "lead_silent"), step);
+        if (!text) throw new Error("missing_followup_text");
+
+        const providerResp = await sendMessage({
+          provider,
+          graphVersion,
+          pageAccessToken: token,
+          recipientId: channelUserId,
+          text,
+        });
+
+        const outMsg = await sb
+          .from("messages")
+          .insert({
+            organization_id: organizationId,
+            lead_id: leadId || null,
+            channel: "messenger",
+            channel_user_id: channelUserId,
+            role: "assistant",
+            actor: "bot",
+            content: text,
+            provider_message_id: (providerResp as any)?.message_id ?? null,
+            created_at: nowIso(),
+          })
+          .select("id")
+          .maybeSingle();
+
+        await sb
+          .from("followup_outbox")
+          .update({
+            status: "sent",
+            sent_at: nowIso(),
+            payload: {
+              ...(payload ?? {}),
+              sent_message_id: safeStr((providerResp as any)?.message_id, ""),
+              ui_message_id: outMsg.data?.id ?? null,
+            },
+            locked_at: null,
+            lock_owner: null,
+            updated_at: nowIso(),
+          })
+          .eq("id", jobId);
+
+        await sb
+          .from("leads")
+          .update({
+            last_message_at: nowIso(),
+            last_message_preview: text.slice(0, 140),
+            last_bot_reply_at: nowIso(),
+          })
+          .eq("id", leadId);
+
+        if (step < maxSteps) {
+          const nextDue = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+          await sb
+            .from("followup_outbox")
+            .upsert(
+              {
+                organization_id: organizationId,
+                lead_id: leadId,
+                channel_user_id: channelUserId,
+                provider,
+                reason: safeStr(job.reason, "lead_silent"),
+                step: step + 1,
+                max_steps: maxSteps,
+                due_at: nextDue,
+                status: "queued",
+                payload: {
+                  ...(payload ?? {}),
+                  source: "auto_followup",
+                  provider,
+                  step: step + 1,
+                },
+              },
+              {
+                onConflict: "organization_id,lead_id,reason,step",
+                ignoreDuplicates: true,
+              }
+            );
+        }
+
+        sent += 1;
+      } catch (e: any) {
+        const error = safeStr(e?.message, String(e));
+        failed += 1;
+        failures.push({ id: jobId, error });
+        await sb
+          .from("followup_outbox")
+          .update({
+            status: "failed",
+            last_error: error,
+            locked_at: null,
+            lock_owner: null,
+            updated_at: nowIso(),
+          })
+          .eq("id", jobId);
       }
-
-      // 6) Marcar sent (usa la versión de 2 args si la tienes; es la más estable)
-      //    Si tu mark_followup_sent(2 args) ya calcula next_due_at dentro, mejor.
-      const { error: sentErr } = await sb.rpc("mark_followup_sent", {
-        p_outbox_id: outboxId,
-        p_message: messageText,
-      });
-
-      if (sentErr) {
-        await sb.rpc("mark_followup_failed", { p_outbox_id: outboxId, p_error: sentErr.message });
-        results.push({ outbox_id: outboxId, lead_id: lead.id, ok: false, stage: "mark_sent", error: sentErr.message });
-        continue;
-      }
-
-      results.push({ outbox_id: outboxId, lead_id: lead.id, ok: true });
     }
 
-    return json({ ok: true, claimed: leads.length, results });
-  } catch (e) {
-    return json({ error: "fatal", details: String(e?.message ?? e) }, 500);
+    return json(200, {
+      ok: true,
+      worker_id: workerId,
+      claimed: claimedJobs.length,
+      sent,
+      failed,
+      skipped,
+      failures,
+    });
+  } catch (e: any) {
+    return json(500, { ok: false, error: safeStr(e?.message, String(e)) });
   }
 });

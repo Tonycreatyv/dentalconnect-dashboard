@@ -66,6 +66,7 @@ type OrgIntegrationState = {
   messenger_enabled: boolean | null;
   meta_connected_at: string | null;
   meta_last_error: string | null;
+  waitlist_offer_mode: "manual" | "semi_auto" | "auto";
 };
 
 const SPECIALTIES = [
@@ -451,6 +452,7 @@ export default function Settings() {
     messenger_enabled: false,
     meta_connected_at: null,
     meta_last_error: null,
+    waitlist_offer_mode: "semi_auto",
   });
 
   const [guideOpen, setGuideOpen] = useState<IntegrationChannel | null>(null);
@@ -462,11 +464,19 @@ export default function Settings() {
   const [pendingOutbox, setPendingOutbox] = useState<number | null>(null);
 
   async function loadOrgIntegration(targetOrgId = ORG) {
-    const orgRes = await supabase
+    let orgRes = await supabase
       .from("org_settings")
-      .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
+      .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error, waitlist_offer_mode")
       .eq("organization_id", targetOrgId)
       .limit(1);
+
+    if (orgRes.error && orgRes.error.message.toLowerCase().includes("waitlist_offer_mode")) {
+      orgRes = await supabase
+        .from("org_settings")
+        .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
+        .eq("organization_id", targetOrgId)
+        .limit(1);
+    }
 
     if (orgRes.error) return;
 
@@ -481,6 +491,10 @@ export default function Settings() {
       messenger_enabled: s?.messenger_enabled ?? false,
       meta_connected_at: s?.meta_connected_at ?? null,
       meta_last_error: s?.meta_last_error ?? null,
+      waitlist_offer_mode:
+        s?.waitlist_offer_mode === "manual" || s?.waitlist_offer_mode === "auto"
+          ? s.waitlist_offer_mode
+          : "semi_auto",
     });
 
     const pendingRes = await supabase
@@ -581,6 +595,27 @@ export default function Settings() {
 
     setToast({ kind: "success", message: "Messenger desconectado." });
     await loadOrgIntegration();
+  }
+
+  async function setWaitlistOfferMode(mode: "manual" | "semi_auto" | "auto") {
+    setOrgIntegration((prev) => ({ ...prev, waitlist_offer_mode: mode }));
+    const now = new Date().toISOString();
+    const upsertRes = await supabase
+      .from("org_settings")
+      .upsert(
+        {
+          organization_id: ORG,
+          waitlist_offer_mode: mode,
+          updated_at: now,
+        },
+        { onConflict: "organization_id" }
+      );
+    if (upsertRes.error) {
+      setToast({ kind: "error", message: "No se pudo actualizar modo de waitlist." });
+      await loadOrgIntegration();
+      return;
+    }
+    setToast({ kind: "success", message: "Modo de waitlist actualizado." });
   }
 
   async function runRepliesDiagnostic() {
@@ -919,6 +954,27 @@ export default function Settings() {
               </select>
             </label>
           ) : null}
+        </div>
+        <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Waitlist offers
+          </div>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-slate-700">
+              Define si la oferta de huecos es manual, semi-auto (CTA) o automática.
+            </p>
+            <select
+              value={orgIntegration.waitlist_offer_mode}
+              onChange={(e) =>
+                void setWaitlistOfferMode(e.target.value as "manual" | "semi_auto" | "auto")
+              }
+              className="h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#0894C1]"
+            >
+              <option value="manual">manual</option>
+              <option value="semi_auto">semi_auto</option>
+              <option value="auto">auto</option>
+            </select>
+          </div>
         </div>
       </div>
 

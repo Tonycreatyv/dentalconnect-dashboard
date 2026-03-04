@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { SectionCard } from "../components/SectionCard";
+import { useClinic } from "../context/ClinicContext";
+import { getLeadDisplayName } from "../lib/leads";
 
 const ORG = "clinic-demo";
 
@@ -10,12 +13,17 @@ type LeadRow = {
   phone: string | null;
   status: string | null;
   channel: string | null;
+  channel_user_id: string | null;
+  state: Record<string, any> | null;
   last_intent: string | null;
   last_message_at: string | null;
   last_message_preview: string | null;
 };
 
 export default function Leads() {
+  const navigate = useNavigate();
+  const { clinic } = useClinic();
+  const activeOrg = clinic?.organization_id ?? ORG;
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -24,9 +32,9 @@ export default function Leads() {
     const { data, error } = await supabase
       .from("leads")
       .select(
-        "id, full_name, phone, status, channel, last_intent, last_message_at, last_message_preview"
+        "id, full_name, phone, status, channel, channel_user_id, state, last_intent, last_message_at, last_message_preview"
       )
-      .eq("organization_id", ORG)
+      .eq("organization_id", activeOrg)
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(300);
@@ -38,19 +46,19 @@ export default function Leads() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeOrg]);
 
   // ✅ Realtime: si entra mensaje, recargás leads
   useEffect(() => {
     const channel = supabase
-      .channel(`rt-leads-${ORG}`)
+      .channel(`rt-leads-${activeOrg}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "messages",
-          filter: `organization_id=eq.${ORG}`,
+          filter: `organization_id=eq.${activeOrg}`,
         },
         async () => {
           await load();
@@ -62,7 +70,7 @@ export default function Leads() {
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeOrg]);
 
   return (
     <SectionCard title="Leads" description="Lista de leads (preview + último mensaje).">
@@ -85,9 +93,13 @@ export default function Leads() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-white/[0.02]">
+                <tr
+                  key={r.id}
+                  className="cursor-pointer hover:bg-white/[0.02]"
+                  onClick={() => navigate(`/inbox/${r.id}`)}
+                >
                   <td className="px-4 py-3">
-                    <div className="font-semibold text-white">{r.full_name ?? "Sin nombre"}</div>
+                    <div className="font-semibold text-white">{getLeadDisplayName(r)}</div>
                     <div className="text-xs text-white/50">{r.phone ?? ""}</div>
                   </td>
                   <td className="px-4 py-3 text-white/70">{r.channel ?? "—"}</td>
