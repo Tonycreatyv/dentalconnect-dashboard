@@ -420,10 +420,12 @@ serve(async (req) => {
             inbound_provider_message_id: providerMid,
             message_text: text,
             payload: {
-              text,
               source: "inbound",
+              inbound_text: text,
               provider: "meta",
               trace_id: traceId,
+              channel: "messenger",
+              inbound_provider_message_id: providerMid,
               recipient: { id: psid },
               recipient_id: psid,
             },

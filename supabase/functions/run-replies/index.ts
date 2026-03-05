@@ -77,6 +77,16 @@ function stripUrls(input: string) {
   return safeStr(input, "").replace(/https?:\/\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
 }
 
+function normalizeComparable(input: string) {
+  return safeStr(input, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeChannel(ch: string) {
   const c = (ch ?? "").toLowerCase();
   if (c.includes("messenger")) return "messenger";
@@ -624,13 +634,16 @@ async function claimJobsViaRpc(args: {
   lockOwner: string;
   lockTtlSeconds: number;
 }) {
-  const res = await args.supabase.rpc("claim_reply_outbox_jobs_v2", {
+  const params = {
     p_org_id: args.organizationId,
     p_limit: args.limit,
     p_lock_owner: args.lockOwner,
     p_lock_ttl_seconds: args.lockTtlSeconds,
-  });
-  return res;
+  };
+  const v3 = await args.supabase.rpc("claim_reply_outbox_jobs_v3", params);
+  if (!v3.error) return v3;
+  const v2 = await args.supabase.rpc("claim_reply_outbox_jobs_v2", params);
+  return v2;
 }
 
 Deno.serve(async (req) => {
@@ -644,7 +657,7 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = env("SUPABASE_URL");
     const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
     const OPENAI_API_KEY = env("OPENAI_API_KEY");
-    const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+    const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
     const DEFAULT_META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
     const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ?? "clinic-demo";
 
@@ -858,9 +871,12 @@ Deno.serve(async (req) => {
         } else {
           currentAttemptCount += 1;
         }
+        const operatorOutbound = isOperatorOutboundJob(job);
+        const payloadSource = safeStr((job.payload as Json | null)?.source, "").toLowerCase();
         let resolvedInboundText =
-          safeStr(job.message_text, "") ||
+          safeStr((job.payload as Json | null)?.inbound_text, "") ||
           safeStr((job.payload as Json | null)?.text, "") ||
+          safeStr(job.message_text, "") ||
           inboundText;
         if (!resolvedInboundText && safeStr(job.inbound_message_id, "")) {
           const inboundMsg = await supabase
@@ -873,7 +889,9 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (!resolvedInboundText) throw new Error("missing_inbound_text: inbound_text/message_text/messages.content");
+        if (!operatorOutbound && payloadSource === "inbound" && !resolvedInboundText) {
+          throw new Error("missing_inbound_text: payload.inbound_text/payload.text/messages.content");
+        }
         if (!pageAccessToken || pageAccessToken.length <= 50) throw new Error("missing_or_invalid_page_token");
 
         let leadState: Json = {};
@@ -953,7 +971,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        const operatorOutbound = isOperatorOutboundJob(job);
         const guard = operatorOutbound ? null : questionGuard(leadState, resolvedInboundText);
         const currentSlots: Json =
           leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
@@ -1073,6 +1090,17 @@ Deno.serve(async (req) => {
         }
         if (!reply) {
           reply = "Perfecto, seguimos. Contame y te ayudo con el siguiente paso.";
+        }
+
+        if (
+          !operatorOutbound &&
+          normalizeComparable(reply) &&
+          normalizeComparable(resolvedInboundText) &&
+          normalizeComparable(reply) === normalizeComparable(resolvedInboundText)
+        ) {
+          reply =
+            "Gracias por escribirnos. Para ayudarte mejor, ¿buscas información de precios, horarios o agendar una cita?";
+          debugNote = "anti_echo_guard_triggered";
         }
 
         const nextState = mergeState(leadState, {
@@ -1216,7 +1244,7 @@ Deno.serve(async (req) => {
         await supabase
           .from("reply_outbox")
           .update({
-            status: shouldRetry ? "pending" : terminalDead ? "dead" : "failed",
+            status: shouldRetry ? "queued" : terminalDead ? "dead" : "failed",
             scheduled_for: shouldRetry ? retryAt : safeStr((job as any).scheduled_for, nowIso()),
             last_error: msg,
             locked_at: null,
