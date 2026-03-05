@@ -108,6 +108,32 @@ function normalizeChannel(ch: string) {
   return c || "messenger";
 }
 
+function runP0ConversationPhase(phase: string, inboundText: string) {
+  const normalized = safeStr(inboundText, "").trim();
+  if (phase === "new") {
+    return {
+      reply:
+        "¡Hola! 👋 Soy Jose de Creatyv. Ayudamos a negocios de servicios a responder mensajes, agendar y dar seguimiento automático para que no se pierdan clientes.\n¿Qué tipo de negocio tenés?",
+      nextPhase: "ask_pain",
+      key: "ask_business_type",
+    };
+  }
+  if (phase === "ask_pain") {
+    return {
+      reply:
+        "Perfecto. ¿Qué te duele más hoy: 1) te escriben y no respondés a tiempo, o 2) no te escriben suficiente?",
+      nextPhase: "ask_channel",
+      key: "ask_pain",
+    };
+  }
+  return {
+    reply:
+      "Con gusto. ¿Querés empezar por WhatsApp, Messenger o Instagram?",
+    nextPhase: "ask_channel",
+    key: "ask_channel",
+  };
+}
+
 async function callLLM(args: {
   apiKey: string;
   model: string;
@@ -819,6 +845,11 @@ Deno.serve(async (req) => {
         const operatorOutbound = isOperatorOutboundJob(job) || payloadSource === "ui_manual";
         const manualText = safeStr(payload.text, "");
 
+        const inboundMid =
+          safeStr(job.inbound_provider_message_id, "") ||
+          safeStr(payload.inbound_provider_message_id, "") ||
+          safeStr((payload.raw as any)?.message?.mid, "");
+
         let resolvedInboundText =
           safeStr(payload.inbound_text, "") || safeStr(payload.text, "");
         if (!resolvedInboundText && safeStr(job.inbound_message_id, "")) {
@@ -840,10 +871,42 @@ Deno.serve(async (req) => {
 
         let leadState: Json = {};
         let leadLastMessageAt: string | null = null;
+        let leadLastSeenInbound = "";
         if (leadId) {
-          const ld = await supabase.from("leads").select("state,last_message_at").eq("id", leadId).maybeSingle();
+          const ld = await supabase
+            .from("leads")
+            .select("state,last_message_at,last_seen_inbound_message_id")
+            .eq("id", leadId)
+            .maybeSingle();
           if (!ld.error) leadState = ensureConversationState(((ld.data?.state ?? {}) as Json) ?? {});
           if (!ld.error && ld.data?.last_message_at) leadLastMessageAt = safeStr((ld.data as any).last_message_at, "") || null;
+          leadLastSeenInbound = safeStr((ld.data as any).last_seen_inbound_message_id ?? "");
+        }
+
+        if (leadId && inboundMid && leadLastSeenInbound === inboundMid) {
+          const reason = "duplicate_inbound_mid";
+          failures.push({ id: jobId, error: reason });
+          await supabase
+            .from("reply_outbox")
+            .update({
+              status: "skipped",
+              claimed_at: null,
+              claimed_by: null,
+              locked_at: null,
+              locked_by: null,
+              last_error: reason,
+              updated_at: nowIso(),
+            })
+            .eq("id", jobId);
+          logEvent("run_replies_job_skipped", {
+            execution_id: executionId,
+            trace_id: traceId,
+            organization_id,
+            lead_id: leadId,
+            job_id: jobId,
+            reason,
+          });
+          continue;
         }
 
         const resetByTopic = /(otro tema|otra cosa|cambiando tema|nuevo tema)/i.test(resolvedInboundText);
@@ -959,6 +1022,14 @@ Deno.serve(async (req) => {
           recommendedPlan = normalizePlan(guard.recommended_plan);
           action = normalizeAction(guard.action);
           debugNote = safeStr(guard.debug, "question_guard_applied");
+        } else if (organization_id === "creatyv-product") {
+          const currentPhase = safeStr(leadState?.phase, "new");
+          const conv = runP0ConversationPhase(currentPhase, resolvedInboundText);
+          reply = conv.reply;
+          statePatch.phase = conv.nextPhase;
+          statePatch.last_bot_question_key = conv.key;
+          questionTag = conv.key;
+          debugNote = debugNote ?? "p0_state_machine";
         } else {
           const engineResult = buildConversationReply({
             mode: engineMode,
@@ -1074,8 +1145,6 @@ Deno.serve(async (req) => {
         nextState.last_question_id = questionTag;
         nextState.last_seen_inbound_mid = inboundProviderMessageId || nextState.last_seen_inbound_mid || null;
 
-        if (leadId && !operatorOutbound) await supabase.from("leads").update({ state: nextState }).eq("id", leadId);
-
         let outbound_message_id = safeStr((job.payload as Json | null)?.ui_message_id, "") || null;
         if (!operatorOutbound) {
           const outMsgInsert = await supabase
@@ -1163,6 +1232,10 @@ Deno.serve(async (req) => {
             .update({
               last_message_at: nowIso(),
               last_message_preview: safeStr(reply, "").slice(0, 140),
+              state: nextState,
+              ...(operatorOutbound || !inboundMid
+                ? {}
+                : { last_seen_inbound_message_id: inboundMid }),
             })
             .eq("id", leadId);
         }
