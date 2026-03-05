@@ -1,6 +1,14 @@
 /// <reference deno-types="https://deno.land/x/types/index.d.ts" />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  buildConversationReply,
+  ensureConversationState,
+  resolveMode,
+  stripTestDentalTag,
+  SQL_DEBUG_CHECKLIST,
+  type ConversationMode,
+} from "./conversationEngine.ts";
 
 type Json = Record<string, any>;
 
@@ -42,6 +50,11 @@ function logEvent(event: string, data: Record<string, unknown>) {
     })
   );
 }
+
+/*
+SQL Debug Checklist is available via SQL_DEBUG_CHECKLIST in ./conversationEngine.ts.
+Paste those queries when hunting stuck processing jobs or checking outbox status.
+*/
 
 function toErrorStack(err: unknown) {
   if (err instanceof Error) return err.stack ?? err.message;
@@ -428,6 +441,9 @@ function mergeState(prev: Json, args: {
   next.last_seen_inbound_mid = args.inboundMessageId || safeStr(prev?.last_seen_inbound_mid, "");
   next.last_seen_inbound_provider_mid =
     args.inboundMessageId || safeStr(prev?.last_seen_inbound_provider_mid, safeStr(prev?.last_seen_inbound_mid, ""));
+  next.phase = safeStr(args.statePatch?.phase, safeStr(prev?.phase, "new")) || "new";
+  next.mode = safeStr(args.statePatch?.mode ?? prev?.mode ?? "", "") || undefined;
+  next.mode_locked = Boolean(args.statePatch?.mode_locked ?? prev?.mode_locked);
 
   return next;
 }
@@ -479,84 +495,7 @@ function isOperatorOutboundJob(job: any) {
   return source.includes("operator") || source.includes("manual") || actor === "human" || role === "operator";
 }
 
-function containsAny(input: string, words: string[]) {
-  const t = safeStr(input, "").toLowerCase();
-  return words.some((w) => t.includes(w));
-}
 
-function resolveMode(args: {
-  organizationId: string;
-  leadState: Json;
-  inboundText: string;
-}) {
-  if (args.organizationId === "clinic-demo") return "dental_clinic";
-  const existing = safeStr(args.leadState?.mode, "").trim();
-  if (existing === "creatyv_product" || existing === "dental_clinic") return existing;
-  if (safeStr(args.inboundText, "").toLowerCase().includes("#testdental")) return "dental_clinic";
-  return "creatyv_product";
-}
-
-function stripTestDentalTag(input: string) {
-  return safeStr(input, "").replace(/#testdental/gi, "").trim();
-}
-
-function fastPathReply(args: {
-  mode: "creatyv_product" | "dental_clinic";
-  inboundText: string;
-  recentTurns: number;
-}) {
-  const inbound = safeStr(args.inboundText, "").trim().toLowerCase();
-  const lowInbound = [
-    "no me escriben",
-    "no recibo mensajes",
-    "nadie me escribe",
-    "no llegan mensajes",
-    "no tengo mensajes",
-  ].some((k) => inbound.includes(k));
-
-  if (args.mode === "creatyv_product" && lowInbound) {
-    return {
-      reply:
-        "Te propongo un plan rápido: anuncio click-to-message, CTA claro en perfil y oferta simple en historias/comentarios para llevar a DM. ¿Qué presupuesto mensual tenés para anuncios y qué zona/servicio querés priorizar primero?",
-      question_tag: "ask_budget_area_service",
-      intent: "low_inbound_messages",
-    };
-  }
-
-  const greeting = /^(hola|buenas|hello|hi|buen dia|buen día|que tal|qué tal)[.!?\s]*$/.test(inbound);
-  if (greeting && args.recentTurns <= 1) {
-    if (args.mode === "creatyv_product") {
-      return {
-        reply: "¡Hola! Te ayudo con DentalConnect. ¿Te llegan mensajes por WhatsApp, Messenger o IG y qué se te complica más hoy?",
-        question_tag: "ask_channel_pain",
-        intent: "intro",
-      };
-    }
-    return {
-      reply: "¡Hola! Con gusto te ayudo. ¿Qué servicio dental te interesa y para cuándo lo necesitás?",
-      question_tag: "ask_service_date",
-      intent: "intro",
-    };
-  }
-
-  if (args.mode === "creatyv_product" && containsAny(inbound, ["whatsapp", "messenger", "instagram", "ig", "seguimiento", "agendar"])) {
-    return {
-      reply: "Perfecto, eso lo cubrimos. ¿Cuántos mensajes reciben al día aproximadamente para ajustar el flujo?",
-      question_tag: "ask_volume",
-      intent: "qualification",
-    };
-  }
-
-  if (args.mode === "dental_clinic" && containsAny(inbound, ["limpieza", "brackets", "endodoncia", "agendar", "cita"])) {
-    return {
-      reply: "Excelente. ¿Qué día y horario te conviene para coordinar tu cita?",
-      question_tag: "ask_schedule",
-      intent: "appointment",
-    };
-  }
-
-  return null;
-}
 
 async function sendMessage(args: {
   channel: string;
@@ -666,6 +605,9 @@ Deno.serve(async (req) => {
     });
     const executionId = crypto.randomUUID();
     const workerId = `run-replies:${executionId}`;
+    if (Deno.env.get("RUN_REPLIES_SQL_DEBUG") === "1") {
+      console.log(SQL_DEBUG_CHECKLIST);
+    }
 
     const url = new URL(req.url);
     const body = req.headers.get("content-type")?.includes("application/json")
@@ -871,13 +813,14 @@ Deno.serve(async (req) => {
         } else {
           currentAttemptCount += 1;
         }
-        const operatorOutbound = isOperatorOutboundJob(job);
-        const payloadSource = safeStr((job.payload as Json | null)?.source, "").toLowerCase();
+        const payload = ((job.payload as Json | null) ?? {}) as Json;
+        const payloadSourceRaw = safeStr(payload.source, "").toLowerCase();
+        const payloadSource = payloadSourceRaw || "inbound";
+        const operatorOutbound = isOperatorOutboundJob(job) || payloadSource === "ui_manual";
+        const manualText = safeStr(payload.text, "");
+
         let resolvedInboundText =
-          safeStr((job.payload as Json | null)?.inbound_text, "") ||
-          safeStr((job.payload as Json | null)?.text, "") ||
-          safeStr(job.message_text, "") ||
-          inboundText;
+          safeStr(payload.inbound_text, "") || safeStr(payload.text, "");
         if (!resolvedInboundText && safeStr(job.inbound_message_id, "")) {
           const inboundMsg = await supabase
             .from("messages")
@@ -888,6 +831,7 @@ Deno.serve(async (req) => {
             resolvedInboundText = safeStr((inboundMsg.data as any).content, "");
           }
         }
+        if (!resolvedInboundText) resolvedInboundText = inboundText || safeStr(job.message_text, "");
 
         if (!operatorOutbound && payloadSource === "inbound" && !resolvedInboundText) {
           throw new Error("missing_inbound_text: payload.inbound_text/payload.text/messages.content");
@@ -898,7 +842,7 @@ Deno.serve(async (req) => {
         let leadLastMessageAt: string | null = null;
         if (leadId) {
           const ld = await supabase.from("leads").select("state,last_message_at").eq("id", leadId).maybeSingle();
-          if (!ld.error && ld.data?.state) leadState = (ld.data.state as Json) ?? {};
+          if (!ld.error) leadState = ensureConversationState(((ld.data?.state ?? {}) as Json) ?? {});
           if (!ld.error && ld.data?.last_message_at) leadLastMessageAt = safeStr((ld.data as any).last_message_at, "") || null;
         }
 
@@ -975,13 +919,24 @@ Deno.serve(async (req) => {
         const currentSlots: Json =
           leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
         let debugNote: string | null = null;
-        const mode = resolveMode({
-          organizationId: organization_id,
-          leadState,
-          inboundText: resolvedInboundText,
-        }) as "creatyv_product" | "dental_clinic";
-        const inboundForAI = stripTestDentalTag(resolvedInboundText);
-
+        const orgBusinessType = safeStr(settingsData?.business_type ?? "", "");
+        const payloadModeRaw = safeStr(payload.mode, "");
+        const payloadMode =
+          payloadModeRaw === "creatyv_product" || payloadModeRaw === "dental_clinic"
+            ? (payloadModeRaw as ConversationMode)
+            : null;
+        const payloadModeLocked = Boolean(payload.mode_locked);
+        const inboundHasTestDentalTag = Boolean(payload.has_testdental) || /#testdental/i.test(resolvedInboundText);
+        const engineMode =
+          payloadMode ??
+          resolveMode({
+            organizationId: organization_id,
+            leadState,
+            orgBusinessType,
+            hasTestDentalTag: inboundHasTestDentalTag,
+          }) as ConversationMode;
+        leadState.mode = engineMode;
+        if (payloadModeLocked) leadState.mode_locked = true;
         let reply = "";
         let intent = "other";
         let questionTag = "";
@@ -991,7 +946,7 @@ Deno.serve(async (req) => {
         let action: "cta_trial" | "continue" = "continue";
 
         if (operatorOutbound) {
-          reply = clampText(resolvedInboundText, 950);
+          reply = clampText(manualText || resolvedInboundText, 950);
           intent = "other";
           questionTag = safeStr(leadState?.last_bot_question, "none");
           debugNote = "operator_outbound";
@@ -1005,26 +960,27 @@ Deno.serve(async (req) => {
           action = normalizeAction(guard.action);
           debugNote = safeStr(guard.debug, "question_guard_applied");
         } else {
-          const fast = fastPathReply({
-            mode,
-            inboundText: inboundForAI,
-            recentTurns: recent.length,
+          const engineResult = buildConversationReply({
+            mode: engineMode,
+            inboundText: stripTestDentalTag(resolvedInboundText),
+            leadState,
+            previousQuestionTag: safeStr(leadState?.last_bot_question, ""),
           });
-          if (fast) {
-            reply = fast.reply;
-            questionTag = fast.question_tag;
-            intent = safeStr((fast as any).intent, "other");
-            debugNote = "fast_path";
-          }
+          reply = engineResult.reply;
+          intent = engineResult.intent;
+          questionTag = engineResult.questionTag;
+          statePatch = { ...statePatch, ...engineResult.statePatch };
+          slotsPatch = { ...slotsPatch, ...engineResult.slotsPatch };
+          debugNote = debugNote ?? engineResult.debug;
         }
 
         if (!operatorOutbound && !reply) {
-          systemPrompt = mode === "dental_clinic" ? SYSTEM_PROMPT_DENTAL : SYSTEM_PROMPT_CREATYV;
+          systemPrompt = engineMode === "dental_clinic" ? SYSTEM_PROMPT_DENTAL : SYSTEM_PROMPT_CREATYV;
           const userPrompt = buildUserPrompt({
             clinic: clinicCtx,
             leadState,
             recent,
-            inboundText: inboundForAI || "(sin texto)",
+            inboundText: stripTestDentalTag(resolvedInboundText) || "(sin texto)",
           });
 
           const raw = await callLLM({
@@ -1102,6 +1058,9 @@ Deno.serve(async (req) => {
             "Gracias por escribirnos. Para ayudarte mejor, ¿buscas información de precios, horarios o agendar una cita?";
           debugNote = "anti_echo_guard_triggered";
         }
+
+        statePatch.mode = engineMode;
+        statePatch.mode_locked = Boolean(leadState.mode_locked);
 
         const nextState = mergeState(leadState, {
           inboundMessageId: inboundProviderMessageId,

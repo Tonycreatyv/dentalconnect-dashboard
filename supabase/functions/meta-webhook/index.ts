@@ -1,6 +1,7 @@
 /// <reference lib="deno.unstable" />
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { ensureConversationState, resolveMode, stripTestDentalTag } from "../_shared/conversationEngine.ts";
 
 type Json = Record<string, unknown>;
 
@@ -42,6 +43,42 @@ type MessengerEvent = {
   timestamp: number;
 };
 
+function normalizePsid(input: unknown) {
+  if (typeof input === "string") {
+    return input.trim();
+  }
+  if (typeof input === "number") {
+    return String(input).trim();
+  }
+  return "";
+}
+
+function collectTesterPsids(target: Set<string>, raw: unknown) {
+  if (!raw) return;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const normalized = normalizePsid(item);
+      if (normalized) target.add(normalized);
+    }
+    return;
+  }
+  const asString = String(raw).trim();
+  if (!asString) return;
+  try {
+    const parsed = JSON.parse(asString);
+    if (Array.isArray(parsed)) {
+      collectTesterPsids(target, parsed);
+      return;
+    }
+  } catch {
+    // fall back to comma/space split
+  }
+  for (const chunk of asString.split(/[\\s,]+/)) {
+    const normalized = chunk.trim();
+    if (normalized) target.add(normalized);
+  }
+}
+
 function extractMessengerTextEvents(body: any): MessengerEvent[] {
   const events: MessengerEvent[] = [];
   const entries = Array.isArray(body?.entry) ? body.entry : [];
@@ -79,6 +116,12 @@ function parseCsvSet(input: string) {
     if (value) out.add(value);
   }
   return out;
+}
+
+function safeString(input: unknown) {
+  if (typeof input === "string") return input.trim();
+  if (typeof input === "number") return String(input).trim();
+  return "";
 }
 
 function shouldScheduleFollowup(text: string) {
@@ -190,10 +233,13 @@ serve(async (req) => {
       const traceId = providerMid || crypto.randomUUID();
       const rawText = ev.text;
       const hasTestdentalTag = rawText.toLowerCase().includes(TESTDENTAL_TAG);
-      const text = rawText.replace(/#testdental/gi, "").trim() || rawText;
+      const cleanedText = stripTestDentalTag(rawText);
+      const text = cleanedText || rawText;
       const isoTime = new Date(ev.timestamp).toISOString();
 
       let organization_id = DEFAULT_ORG;
+      let orgBusinessType = "";
+      let orgTesterPsids = new Set<string>();
       const canUseTestdentalOverride = hasTestdentalTag && TESTDENTAL_ALLOWED_PSIDS.has(psid);
 
       if (canUseTestdentalOverride) {
@@ -201,21 +247,45 @@ serve(async (req) => {
       } else if (pageId) {
         const orgLookup = await supabase
           .from("org_settings")
-          .select("organization_id")
+          .select("organization_id,business_type,tester_psids")
           .eq("meta_page_id", pageId)
           .eq("messenger_enabled", true)
           .maybeSingle();
         if (!orgLookup.error && orgLookup.data?.organization_id) {
           organization_id = String(orgLookup.data.organization_id);
+          orgBusinessType = String(orgLookup.data.business_type ?? "").trim();
+          collectTesterPsids(orgTesterPsids, orgLookup.data?.tester_psids);
         }
       }
       orgIds.add(organization_id);
+      if (!orgBusinessType) {
+        const typeRes = await supabase
+          .from("org_settings")
+          .select("business_type")
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+        if (!typeRes.error) {
+          orgBusinessType = String(typeRes.data?.business_type ?? "").trim();
+        }
+      }
+      if (!orgTesterPsids.size) {
+        const testerRes = await supabase
+          .from("org_settings")
+          .select("tester_psids")
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+        if (!testerRes.error) {
+          collectTesterPsids(orgTesterPsids, testerRes.data?.tester_psids);
+        }
+      }
+      const isTester = orgTesterPsids.has(psid);
       console.log("[meta-webhook] inbound", {
         organization_id,
         page_id: pageId,
         psid,
         provider_message_id: providerMid,
         override_testdental: canUseTestdentalOverride,
+        is_tester: isTester,
       });
 
       const { data: existingLead, error: selErr } = await supabase
@@ -227,7 +297,18 @@ serve(async (req) => {
         .maybeSingle();
       if (selErr) throw selErr;
 
-      const nextState = ensureState(existingLead?.state);
+      const nextState = ensureConversationState(ensureState(existingLead?.state));
+      const resolvedMode = resolveMode({
+        organizationId: organization_id,
+        leadState: nextState,
+        orgBusinessType,
+        hasTestDentalTag,
+      });
+      const existingMode = safeString(nextState.mode);
+      const forceDentalMode =
+        organization_id === "creatyv-product" && isTester && hasTestdentalTag && !existingMode;
+      nextState.mode = forceDentalMode ? "dental_clinic" : resolvedMode;
+      nextState.mode_locked = forceDentalMode ? true : Boolean(nextState.mode_locked);
       const existingFullName = String(existingLead?.full_name ?? "").trim();
       const stateName = String(nextState?.name ?? "").trim();
       const hasRealName =
@@ -418,18 +499,17 @@ serve(async (req) => {
             scheduled_for: new Date().toISOString(),
             inbound_message_id: insertedMessageId,
             inbound_provider_message_id: providerMid,
-            message_text: text,
-            payload: {
-              source: "inbound",
-              inbound_text: text,
-              provider: "meta",
-              trace_id: traceId,
-              channel: "messenger",
-              inbound_provider_message_id: providerMid,
-              recipient: { id: psid },
-              recipient_id: psid,
-            },
+          message_text: text,
+          payload: {
+            source: "inbound",
+            inbound_text: text,
+            trace_id: traceId,
+            inbound_provider_message_id: providerMid,
+            mode: nextState.mode,
+            mode_locked: Boolean(nextState.mode_locked),
+            has_testdental: hasTestdentalTag,
           },
+        },
           {
             onConflict: "organization_id,inbound_provider_message_id",
             ignoreDuplicates: true,
