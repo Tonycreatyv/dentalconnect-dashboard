@@ -448,14 +448,23 @@ export default function Inbox() {
             ) : (
               <div className="grid gap-2">
                 {thread.map((m) => {
-                  const isUser = (m.actor ?? m.role) === "user";
+                  const normalizedRole = (m.role ?? "").toLowerCase();
+                  const normalizedActor = (m.actor ?? "").toLowerCase();
+                  const isInbound =
+                    normalizedRole === "user" ||
+                    normalizedActor === "user";
+                  const isOutbound =
+                    normalizedRole === "assistant" ||
+                    normalizedActor === "bot" ||
+                    normalizedActor === "operator";
+                  const bubbleInbound = isInbound || (!isOutbound && isInbound);
                   return (
                     <div
                       key={messageKey(m)}
                       className={[
                         "max-w-[78%] rounded-2xl px-4 py-3 text-sm",
                         "break-words whitespace-pre-wrap",
-                        isUser
+                        bubbleInbound
                           ? "ml-auto bg-[#F4F5F7] text-slate-900"
                           : "mr-auto bg-slate-900 text-white",
                       ].join(" ")}
