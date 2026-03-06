@@ -441,12 +441,14 @@ Deno.serve(async (req) => {
             inboundText: resolvedInboundText,
             channel,
           });
-          reply = clampText(engineResult.replyText ?? "", 950);
-          statePatch = engineResult.nextStatePatch ?? {};
-          if (engineResult.debug) {
+          if (engineResult?.replyText) {
+            reply = clampText(engineResult.replyText, 950);
+            statePatch = engineResult.nextStatePatch ?? {};
             debugNote = `engine:${safeStr(engineResult.debug.phase, "") || safeStr(engineResult.debug.intent, "") || "reply"}`;
           } else {
-            debugNote = "engine";
+            reply = "Gracias por escribirnos. Te respondo en un momento.";
+            statePatch = {};
+            debugNote = "fallback";
           }
         }
         if (!reply) reply = "Gracias por escribirnos. Te respondo en un momento.";
