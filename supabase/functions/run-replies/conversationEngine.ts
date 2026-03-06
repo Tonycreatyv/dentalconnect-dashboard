@@ -1,5 +1,7 @@
 /// <reference lib="deno.unstable" />
 
+export const CX2_GREETING = "[CX2]\nHola 👋\nSoy Creatyv.\n¿Qué tipo de negocio tienes?";
+
 type Phase = "new" | "ask_business_type" | "ask_channel" | "ask_pain" | "offer_explanation";
 type State = {
   mode?: string;
@@ -66,7 +68,7 @@ export function runConversationEngine(input: EngineInput): EngineOutput | null {
   }
 
   if (phase === "new") {
-    const reply = "Hola 👋\nSoy Creatyv.\n\nAyudamos a negocios a responder mensajes automáticamente, organizar citas o leads y hacer seguimiento para que no se pierdan clientes.\n\n¿Qué tipo de negocio tenés?";
+    const reply = CX2_GREETING;
     return {
       replyText: reply,
       nextStatePatch: {

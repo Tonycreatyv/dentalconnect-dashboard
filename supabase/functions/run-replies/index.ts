@@ -1,7 +1,7 @@
 /// <reference deno-types="https://deno.land/x/types/index.d.ts" />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { runConversationEngine } from "./conversationEngine.ts";
+import { runConversationEngine, CX2_GREETING } from "./conversationEngine.ts";
 
 type Json = Record<string, unknown>;
 
@@ -474,6 +474,14 @@ Deno.serve(async (req) => {
           outbound_message_id = outMsgInsert.data?.id ?? null;
         }
 
+        if (reply === CX2_GREETING) {
+          console.log("CX2_GREETING_SENT", {
+            organizationId: organization_id,
+            leadId,
+            channelUserId: recipientId,
+            replyText: reply,
+          });
+        }
         logEvent("run_replies_meta_send_attempt", {
           execution_id: executionId,
           trace_id: traceId,
