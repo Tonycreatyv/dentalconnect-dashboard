@@ -6,7 +6,6 @@ import { ensureConversationState, resolveMode, stripTestDentalTag } from "../_sh
 type Json = Record<string, unknown>;
 
 const TESTDENTAL_TAG = "#testdental";
-const TESTDENTAL_ORG = "clinic-demo";
 
 function json(status: number, body: Json) {
   return new Response(JSON.stringify(body), {
@@ -140,21 +139,32 @@ function waitlistDecision(text: string): "accept" | "decline" | null {
   return null;
 }
 
-async function fetchMetaProfile(args: { pageAccessToken: string; psid: string }) {
+async function fetchMetaProfileDetails(args: { pageAccessToken: string; psid: string }) {
   if (!args.pageAccessToken || !args.psid) return null;
   try {
     const url = new URL(`https://graph.facebook.com/v19.0/${encodeURIComponent(args.psid)}`);
-    url.searchParams.set("fields", "first_name,last_name,profile_pic");
+    url.searchParams.set("fields", "first_name,last_name,profile_pic,locale,timezone,gender");
     url.searchParams.set("access_token", args.pageAccessToken);
     const res = await fetch(url.toString());
     const data = await res.json();
     if (!res.ok) return null;
-    const first = String(data?.first_name ?? "").trim();
-    const last = String(data?.last_name ?? "").trim();
-    const full = `${first} ${last}`.trim();
+    const first = String(data?.first_name ?? "").trim() || null;
+    const last = String(data?.last_name ?? "").trim() || null;
+    const locale = String(data?.locale ?? "").trim() || null;
+    const timezone = typeof data?.timezone === "number" ? String(data?.timezone) : null;
+    const gender = String(data?.gender ?? "").trim() || null;
     const profilePic = String(data?.profile_pic ?? "").trim() || null;
-    if (!full && !profilePic) return null;
-    return { fullName: full || null, profilePic };
+    const full = [first, last].filter(Boolean).join(" ").trim() || null;
+    if (!first && !last && !profilePic && !full) return null;
+    return {
+      firstName: first,
+      lastName: last,
+      fullName: full,
+      profilePic,
+      locale,
+      timezone,
+      gender,
+    };
   } catch {
     return null;
   }
@@ -232,7 +242,9 @@ serve(async (req) => {
       const providerMid = ev.mid;
       const traceId = providerMid || crypto.randomUUID();
       const rawText = ev.text;
-      const hasTestdentalTag = rawText.toLowerCase().includes(TESTDENTAL_TAG);
+      const lowerText = rawText.toLowerCase();
+      const hasTestdentalTag = lowerText.includes(TESTDENTAL_TAG);
+      const hasResetTag = lowerText.includes("#reset");
       const cleanedText = stripTestDentalTag(rawText);
       const text = cleanedText || rawText;
       const isoTime = new Date(ev.timestamp).toISOString();
@@ -240,11 +252,7 @@ serve(async (req) => {
       let organization_id = DEFAULT_ORG;
       let orgBusinessType = "";
       let orgTesterPsids = new Set<string>();
-      const canUseTestdentalOverride = hasTestdentalTag && TESTDENTAL_ALLOWED_PSIDS.has(psid);
-
-      if (canUseTestdentalOverride) {
-        organization_id = TESTDENTAL_ORG;
-      } else if (pageId) {
+      if (pageId) {
         const orgLookup = await supabase
           .from("org_settings")
           .select("organization_id,business_type,tester_psids")
@@ -284,7 +292,7 @@ serve(async (req) => {
         page_id: pageId,
         psid,
         provider_message_id: providerMid,
-        override_testdental: canUseTestdentalOverride,
+        has_testdental_tag: hasTestdentalTag,
         is_tester: isTester,
       });
 
@@ -298,17 +306,45 @@ serve(async (req) => {
       if (selErr) throw selErr;
 
       const nextState = ensureConversationState(ensureState(existingLead?.state));
+      const existingMode = safeString(nextState.mode);
+      const resetTriggered = organization_id === "creatyv-product" && isTester && hasResetTag;
+      if (resetTriggered) {
+        nextState.mode = "creatyv_product";
+        nextState.phase = "new";
+        nextState.mode_locked = false;
+        nextState.collected = {};
+        nextState.slots = {};
+        nextState.last_bot_question = null;
+        nextState.last_bot_question_key = null;
+        nextState.last_bot_text = null;
+        nextState.intent = null;
+        nextState.last_seen_inbound_provider_mid = null;
+        nextState.last_seen_inbound_mid = null;
+      }
       const resolvedMode = resolveMode({
         organizationId: organization_id,
         leadState: nextState,
         orgBusinessType,
-        hasTestDentalTag,
+        hasTestDentalTag: isTester && hasTestdentalTag,
       });
-      const existingMode = safeString(nextState.mode);
-      const forceDentalMode =
-        organization_id === "creatyv-product" && isTester && hasTestdentalTag && !existingMode;
-      nextState.mode = forceDentalMode ? "dental_clinic" : resolvedMode;
-      nextState.mode_locked = forceDentalMode ? true : Boolean(nextState.mode_locked);
+      const shouldActivateDental =
+        organization_id === "creatyv-product" &&
+        isTester &&
+        hasTestdentalTag &&
+        !existingMode &&
+        !resetTriggered;
+      if (shouldActivateDental) {
+        nextState.mode = "dental_clinic";
+        nextState.phase = "new";
+        nextState.mode_locked = true;
+      } else if (organization_id === "creatyv-product") {
+        nextState.mode = resolvedMode || "creatyv_product";
+        if (nextState.mode === "creatyv_product") {
+          nextState.mode_locked = false;
+        }
+      } else {
+        nextState.mode = resolvedMode;
+      }
       const existingFullName = String(existingLead?.full_name ?? "").trim();
       const stateName = String(nextState?.name ?? "").trim();
       const hasRealName =
@@ -319,7 +355,7 @@ serve(async (req) => {
 
       if (!hasRealName) {
         const token = await resolvePageToken(supabase, organization_id);
-        const profile = await fetchMetaProfile({ pageAccessToken: token, psid });
+        const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid });
         if (profile?.fullName) resolvedName = profile.fullName;
         if (profile?.profilePic) resolvedProfilePic = profile.profilePic;
       }
@@ -337,6 +373,9 @@ serve(async (req) => {
         last_message_at: isoTime,
         state: nextState,
       };
+      if (resetTriggered) {
+        upsertPayload.last_seen_inbound_message_id = null;
+      }
       if (!existingLead?.id) upsertPayload["handoff_to_human"] = false;
 
       const { data: lead, error: leadErr } = await supabase
@@ -487,50 +526,58 @@ serve(async (req) => {
       }
       const insertedMessageId = (msgInsert.data as any)?.id ?? null;
 
-      const outboxRes = await supabase
-        .from("reply_outbox")
-        .upsert(
-          {
-            organization_id,
-            lead_id: lead.id,
-            channel,
-            channel_user_id: psid,
-            status: "queued",
-            scheduled_for: new Date().toISOString(),
-            inbound_message_id: insertedMessageId,
-            inbound_provider_message_id: providerMid,
-          message_text: text,
+      const canEnqueue = Boolean(text && text.trim()) && Boolean(providerMid);
+      if (canEnqueue) {
+        const outboxPayload = {
+          organization_id,
+          lead_id: lead.id,
+          channel: "messenger",
+          channel_user_id: psid,
+          status: "queued",
+          scheduled_for: new Date().toISOString(),
+          inbound_provider_message_id: providerMid,
           payload: {
-            source: "inbound",
-            inbound_text: text,
-            trace_id: traceId,
+            text,
+            channel: "messenger",
+            channel_user_id: psid,
+            organization_id,
             inbound_provider_message_id: providerMid,
-            mode: nextState.mode,
-            mode_locked: Boolean(nextState.mode_locked),
-            has_testdental: hasTestdentalTag,
+            trace_id: traceId,
           },
-        },
-          {
+        };
+        const outboxInsert = await supabase
+          .from("reply_outbox")
+          .insert(outboxPayload, {
             onConflict: "organization_id,inbound_provider_message_id",
             ignoreDuplicates: true,
-          }
-        )
-        .select("id")
-        .maybeSingle();
-      if (outboxRes.error) {
-        const em = String(outboxRes.error.message ?? "").toLowerCase();
-        if (!em.includes("duplicate")) throw outboxRes.error;
-      } else if (outboxRes.data?.id) {
-        created_jobs += 1;
+          })
+          .select("id")
+          .maybeSingle();
+        let enqueueStatus: "enqueued" | "duplicate_skip" = "duplicate_skip";
+        let enqueuedOutboxId: string | null = null;
+        if (outboxInsert.error) {
+          const em = String(outboxInsert.error.message ?? "").toLowerCase();
+          if (!em.includes("duplicate")) throw outboxInsert.error;
+        } else if (outboxInsert.data?.id) {
+          created_jobs += 1;
+          enqueueStatus = "enqueued";
+          enqueuedOutboxId = String(outboxInsert.data.id);
+        }
+        console.log("[meta-webhook] enqueue", {
+          organization_id,
+          psid,
+          provider_message_id: providerMid,
+          outbox_id: enqueuedOutboxId,
+          result: enqueueStatus,
+        });
+      } else {
+        console.log("[meta-webhook] enqueue_skip", {
+          organization_id,
+          psid,
+          provider_message_id: providerMid,
+          reason: !providerMid ? "missing_mid" : "missing_text",
+        });
       }
-      console.log("[meta-webhook] enqueue", {
-        organization_id,
-        message_id: insertedMessageId,
-        outbox_id: outboxRes.data?.id ?? null,
-        psid,
-        provider_message_id: providerMid,
-        source: "meta-webhook",
-      });
 
       if (shouldScheduleFollowup(text)) {
         const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -576,6 +623,50 @@ serve(async (req) => {
             lead_id: lead.id,
             followup_id: followupRes.data?.id ?? null,
             due_at: dueAt,
+          });
+        }
+      }
+      const profileNeedsFetch = await (async () => {
+        try {
+          const leadState = await supabase
+            .from("leads")
+            .select("full_name,fb_profile_fetched_at")
+            .eq("id", lead.id)
+            .maybeSingle();
+          if (leadState.error) return false;
+          const fullName = String(leadState.data?.full_name ?? "").trim();
+          if (!fullName || fullName.startsWith("Usuario ")) return true;
+          const fetchedAt = leadState.data?.fb_profile_fetched_at;
+          if (!fetchedAt) return true;
+          const elapsed = Date.now() - new Date(fetchedAt).getTime();
+          return elapsed > 30 * 24 * 60 * 60 * 1000;
+        } catch {
+          return false;
+        }
+      })();
+      if (profileNeedsFetch) {
+        try {
+          const token = await resolvePageToken(supabase, organization_id);
+          const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid });
+          if (profile) {
+            await supabase
+              .from("leads")
+              .update({
+                first_name: profile.firstName,
+                last_name: profile.lastName,
+                full_name: profile.fullName,
+                locale: profile.locale,
+                timezone: profile.timezone,
+                gender: profile.gender,
+                fb_profile_fetched_at: new Date().toISOString(),
+              })
+              .eq("id", lead.id);
+          }
+        } catch (err) {
+          console.warn("[meta-webhook] profile_fetch_failed", {
+            organization_id,
+            lead_id: lead.id,
+            error: safeString((err as any)?.message ?? err),
           });
         }
       }

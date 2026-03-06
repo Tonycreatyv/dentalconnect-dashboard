@@ -1,16 +1,9 @@
 /// <reference deno-types="https://deno.land/x/types/index.d.ts" />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import {
-  buildConversationReply,
-  ensureConversationState,
-  resolveMode,
-  stripTestDentalTag,
-  SQL_DEBUG_CHECKLIST,
-  type ConversationMode,
-} from "./conversationEngine.ts";
+import { runConversationEngine } from "./conversationEngine.ts";
 
-type Json = Record<string, any>;
+type Json = Record<string, unknown>;
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -41,6 +34,20 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function clampText(s: string, max = 900) {
+  const t = (s ?? "").trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1) + "…";
+}
+
+function normalizeChannel(ch: string) {
+  const c = (ch ?? "").toLowerCase();
+  if (c.includes("messenger")) return "messenger";
+  if (c.includes("instagram")) return "instagram";
+  if (c.includes("whatsapp")) return "whatsapp";
+  return c || "messenger";
+}
+
 function logEvent(event: string, data: Record<string, unknown>) {
   console.log(
     JSON.stringify({
@@ -51,18 +58,14 @@ function logEvent(event: string, data: Record<string, unknown>) {
   );
 }
 
-/*
-SQL Debug Checklist is available via SQL_DEBUG_CHECKLIST in ./conversationEngine.ts.
-Paste those queries when hunting stuck processing jobs or checking outbox status.
-*/
-
 function toErrorStack(err: unknown) {
   if (err instanceof Error) return err.stack ?? err.message;
   return safeStr(err, "");
 }
 
 function parseMetaStatus(errorMessage: string) {
-  const m = safeStr(errorMessage, "").match(/meta_error:(\d{3}):/i) || safeStr(errorMessage, "").match(/Meta error:\s*(\d{3})/i);
+  const m = safeStr(errorMessage, "").match(/meta_error:(\d{3}):/i) ||
+    safeStr(errorMessage, "").match(/Meta error:\s*(\d{3})/i);
   if (m?.[1]) return Number(m[1]);
   const m2 = safeStr(errorMessage, "").match(/meta_send_failed:(\d{3}):/i);
   return m2?.[1] ? Number(m2[1]) : null;
@@ -80,115 +83,13 @@ function plusSecondsIso(seconds: number) {
   return new Date(Date.now() + Math.max(0, seconds) * 1000).toISOString();
 }
 
-function clampText(s: string, max = 900) {
-  const t = (s ?? "").trim();
-  if (t.length <= max) return t;
-  return t.slice(0, max - 1) + "…";
-}
-
-function stripUrls(input: string) {
-  return safeStr(input, "").replace(/https?:\/\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
-}
-
-function normalizeComparable(input: string) {
-  return safeStr(input, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeChannel(ch: string) {
-  const c = (ch ?? "").toLowerCase();
-  if (c.includes("messenger")) return "messenger";
-  if (c.includes("instagram")) return "instagram";
-  if (c.includes("whatsapp")) return "whatsapp";
-  return c || "messenger";
-}
-
-function runP0ConversationPhase(phase: string, inboundText: string) {
-  const normalized = safeStr(inboundText, "").trim();
-  if (phase === "new") {
-    return {
-      reply:
-        "¡Hola! 👋 Soy Jose de Creatyv. Ayudamos a negocios de servicios a responder mensajes, agendar y dar seguimiento automático para que no se pierdan clientes.\n¿Qué tipo de negocio tenés?",
-      nextPhase: "ask_pain",
-      key: "ask_business_type",
-    };
+function normalizeSecretValue(raw: string) {
+  const v = safeStr(raw, "").trim();
+  if (!v) return "";
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1).trim();
   }
-  if (phase === "ask_pain") {
-    return {
-      reply:
-        "Perfecto. ¿Qué te duele más hoy: 1) te escriben y no respondés a tiempo, o 2) no te escriben suficiente?",
-      nextPhase: "ask_channel",
-      key: "ask_pain",
-    };
-  }
-  return {
-    reply:
-      "Con gusto. ¿Querés empezar por WhatsApp, Messenger o Instagram?",
-    nextPhase: "ask_channel",
-    key: "ask_channel",
-  };
-}
-
-async function callLLM(args: {
-  apiKey: string;
-  model: string;
-  system: string;
-  user: string;
-  temperature?: number;
-  maxTokens?: number;
-}) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${args.apiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: args.model,
-      temperature: args.temperature ?? 0.4,
-      max_tokens: args.maxTokens ?? 320,
-      messages: [
-        { role: "system", content: args.system },
-        { role: "user", content: args.user },
-      ],
-      response_format: { type: "json_object" },
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${JSON.stringify(data)}`);
-  return String(data?.choices?.[0]?.message?.content ?? "");
-}
-
-function tryParseJson(text: string): any | null {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const m =
-      text.match(/```json\s*([\s\S]*?)\s*```/i) ||
-      text.match(/```\s*([\s\S]*?)\s*```/);
-    if (!m?.[1]) return null;
-    try {
-      return JSON.parse(m[1]);
-    } catch {
-      return null;
-    }
-  }
-}
-
-function parseMaybeJson(text: string): any | null {
-  const raw = safeStr(text, "").trim();
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return v;
 }
 
 async function sendToMeta(args: {
@@ -213,361 +114,11 @@ async function sendToMeta(args: {
   return { ok: res.ok, status: res.status, data };
 }
 
-function normalizeSecretValue(raw: string) {
-  const v = safeStr(raw, "").trim();
-  if (!v) return "";
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-    return v.slice(1, -1).trim();
-  }
-  return v;
-}
-
-function defaultSystemPrompt() {
-  return `
-Eres una recepcionista humana de una clínica dental en Honduras. Hablas español natural.
-Objetivo: ayudar rápido, sonar cálida y cerrar cita cuando aplica.
-
-Reglas:
-- Respuestas cortas (1 a 3 oraciones).
-- Máximo 1 pregunta por respuesta.
-- Saluda solo si el lead no ha sido saludado (slots.greeted=false).
-- Nunca repitas la misma pregunta dos veces seguidas.
-- Nunca inventes datos ni números.
-- Solo menciona números si vienen del inbound actual o de state.slots del mismo lead.
-- Si detectas intención de recordatorios/citas/agendar, usa CTA suave al Trial.
-- No incluyas links/URLs en tu reply.
-
-Devuelve SOLO JSON:
-{
-  "intent": "appointment|pricing|faq|handoff|other",
-  "reply": "texto",
-  "question_tag": "ask_owner|ask_volume|ask_goal|cta_connect|none",
-  "recommended_plan": "starter|growth|pro|null",
-  "action": "cta_trial|continue",
-  "slots_patch": {},
-  "state_patch": {}
-}
-`.trim();
-}
-
-const SYSTEM_PROMPT_CREATYV = `
-Eres asesor comercial B2B de DentalConnect.
-No hablas como clínica ni recepcionista.
-Objetivo: calificar operación, detectar dolor principal y guiar a demo/trial.
-Responde corto (1-3 oraciones), una sola pregunta por turno.
-Devuelve SOLO JSON válido con el formato esperado.
-`.trim();
-
-const SYSTEM_PROMPT_DENTAL = `
-Eres recepcionista de clínica dental.
-Objetivo: ayudar al paciente y avanzar a agendar.
-Responde corto (1-3 oraciones), una sola pregunta por turno.
-Devuelve SOLO JSON válido con el formato esperado.
-`.trim();
-
-function buildUserPrompt(args: {
-  clinic: Json;
-  leadState: Json;
-  recent: Array<{ role: "user" | "assistant"; content: string }>;
-  inboundText: string;
-}) {
-  return `
-CLINIC_CONTEXT:
-${JSON.stringify(args.clinic ?? {})}
-
-LEAD_STATE:
-${JSON.stringify(args.leadState ?? {})}
-
-RECENT_TURNS:
-${args.recent.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n")}
-
-INBOUND:
-${args.inboundText}
-`.trim();
-}
-
-const YES_WORDS = ["si", "sí", "yo", "ambos", "recepcionista", "asistente", "dueño", "owner"];
-const RECEPTION_WORDS = ["recepcion", "recepción", "recepcionista", "secretaria", "secretaría"];
-const OWNER_WORDS = ["yo", "dueño", "dueno", "owner", "encargado"];
-const BOTH_WORDS = ["ambos", "los dos", "yo y recepcion", "yo y la recepcion"];
-
-function norm(s: string) {
-  return safeStr(s)
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}
-
-function looksLikePositiveAnswer(input: string) {
-  const t = norm(input);
-  return YES_WORDS.some((w) => t.includes(norm(w))) || /(^|[\s.,;:!?])(si|sí)([\s.,;:!?]|$)/.test(t);
-}
-
-function extractNumber(input: string): number | null {
-  const m = norm(input).match(/\b(\d{1,5})\b/);
-  if (!m?.[1]) return null;
-  const n = Number(m[1]);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return n;
-}
-
-function normalizePlan(input: unknown): "starter" | "growth" | "pro" | null {
-  const p = safeStr(input, "").trim().toLowerCase();
-  if (p === "starter" || p === "growth" || p === "pro") return p;
-  return null;
-}
-
-function normalizeAction(input: unknown): "cta_trial" | "continue" {
-  const a = safeStr(input, "").trim().toLowerCase();
-  if (a === "cta_trial") return "cta_trial";
-  return "continue";
-}
-
-function buildTrialUrl(base: string, path: string, plan: string, trialDays: number) {
-  const normalizedBase = safeStr(base, "").replace(/\/+$/, "");
-  const normalizedPath = safeStr(path, "").startsWith("/") ? safeStr(path, "") : `/${safeStr(path, "")}`;
-  return `${normalizedBase}${normalizedPath}?plan=${encodeURIComponent(plan)}&trial=${encodeURIComponent(String(trialDays))}`;
-}
-
-function resolveWhoResponds(input: string): string | null {
-  const t = norm(input);
-  if (RECEPTION_WORDS.some((w) => t.includes(norm(w)))) return "recepcionista";
-  if (BOTH_WORDS.some((w) => t.includes(norm(w)))) return "ambos";
-  if (OWNER_WORDS.some((w) => t.includes(norm(w)))) return "dueño";
-  return null;
-}
-
-function deterministicTrialCTA() {
-  return "Perfecto. Para activarlo: te paso el link del Trial y luego conectás Messenger en Settings. ¿Seguimos?";
-}
-
-function nextStageFromTag(current: string) {
-  if (current === "ask_owner") return "qualifying";
-  if (current === "ask_volume") return "qualifying";
-  if (current === "ask_goal") return "cta";
-  return "cta";
-}
-
-function nextQuestionTag(current: string) {
-  if (current === "ask_owner") return "ask_volume";
-  if (current === "ask_volume") return "ask_goal";
-  if (current === "ask_goal") return "cta_connect";
-  return "cta_connect";
-}
-
-function questionGuard(leadState: Json, inboundText: string) {
-  const lastTag = safeStr(leadState?.last_bot_question, "");
-  if (!lastTag) return null;
-
-  const slots: Json = leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
-  const inboundNorm = norm(inboundText);
-  const alreadyHasWho = typeof slots?.who_responds === "string" && slots.who_responds.trim().length > 0;
-  const hasMessagesPerDay = Number(slots?.messages_per_day ?? 0) > 0;
-
-  if (lastTag === "ask_owner") {
-    const who = resolveWhoResponds(inboundText);
-    const isPositive = looksLikePositiveAnswer(inboundText);
-
-    if ((isPositive && alreadyHasWho) || who) {
-      const nextWho = who || safeStr(slots.who_responds, "");
-      return {
-        reply: deterministicTrialCTA(),
-        question_tag: "cta_trial",
-        slots_patch: {
-          ...(nextWho ? { who_responds: nextWho, process_owner: nextWho } : {}),
-          owner_confirmed: true,
-          greeted: true,
-        },
-        state_patch: { stage: nextStageFromTag(lastTag) },
-        intent: "appointment",
-        action: "cta_trial",
-        recommended_plan: "growth",
-        debug: "question_guard:advance_from_ask_owner",
-      };
-    }
-  }
-
-  if (lastTag === "ask_volume") {
-    if (hasMessagesPerDay) {
-      return {
-        reply:
-          "Perfecto. Ya con eso te dejo listo el Trial y conectamos Messenger en Settings. ¿Seguimos?",
-        question_tag: "cta_trial",
-        slots_patch: { greeted: true },
-        state_patch: { stage: nextStageFromTag(lastTag) },
-        intent: "appointment",
-        action: "cta_trial",
-        recommended_plan: "growth",
-        debug: "question_guard:skip_ask_volume_already_known",
-      };
-    }
-
-    const n = extractNumber(inboundText);
-    if (n !== null) {
-      return {
-        reply:
-          "Excelente. Con eso te puedo dejar el flujo listo hoy. ¿Querés que activemos el Trial ahora?",
-        question_tag: "cta_trial",
-        slots_patch: { messages_per_day: n, greeted: true },
-        state_patch: { stage: nextStageFromTag(lastTag) },
-        intent: "appointment",
-        action: "cta_trial",
-        recommended_plan: "growth",
-        debug: "question_guard:captured_messages_per_day",
-      };
-    }
-
-    if (inboundNorm) {
-      return {
-        reply:
-          "Genial. Para calibrarlo bien, decime un aproximado de mensajes por día y lo activo.",
-        question_tag: "ask_volume",
-        slots_patch: { greeted: true },
-        state_patch: { stage: "discovering" },
-        intent: "appointment",
-        debug: "question_guard:ask_volume_needs_number",
-      };
-    }
-  }
-
-  return null;
-}
-
-function normalizeQuestionTag(tag: string) {
-  const t = safeStr(tag, "").trim().toLowerCase();
-  if (!t) return "none";
-  return t;
-}
-
-function enforceNoRepeatTag(prevTag: string, nextTag: string) {
-  const p = normalizeQuestionTag(prevTag);
-  const n = normalizeQuestionTag(nextTag);
-  if (!n || n === "none") return n;
-  if (p && p === n) {
-    if (n === "cta_trial" || n === "cta_connect") return "cta_trial";
-    return nextQuestionTag(n);
-  }
-  return n;
-}
-
-function mergeState(prev: Json, args: {
-  inboundMessageId: string;
-  statePatch: Json;
-  slotsPatch: Json;
-  questionTag: string;
-}) {
-  const next: Json = {};
-  const prevSlots = prev?.slots && typeof prev.slots === "object" ? prev.slots : {};
-  const incomingStage = safeStr(args.statePatch?.stage, safeStr(prev?.stage, ""));
-
-  next.stage = incomingStage || "discovering";
-  next.slots = { ...prevSlots, ...(args.slotsPatch ?? {}) };
-  next.last_bot_question = normalizeQuestionTag(args.questionTag || safeStr(prev?.last_bot_question, ""));
-  next.last_seen_inbound_mid = args.inboundMessageId || safeStr(prev?.last_seen_inbound_mid, "");
-  next.last_seen_inbound_provider_mid =
-    args.inboundMessageId || safeStr(prev?.last_seen_inbound_provider_mid, safeStr(prev?.last_seen_inbound_mid, ""));
-  next.phase = safeStr(args.statePatch?.phase, safeStr(prev?.phase, "new")) || "new";
-  next.mode = safeStr(args.statePatch?.mode ?? prev?.mode ?? "", "") || undefined;
-  next.mode_locked = Boolean(args.statePatch?.mode_locked ?? prev?.mode_locked);
-
-  return next;
-}
-
-function guardGreeting(slots: Json, reply: string) {
-  const greeted = Boolean(slots?.greeted);
-  if (!greeted) return reply;
-  return reply.replace(/^(hola|buenas|buen día|buen dia|qué tal|que tal)[,!\s]*/i, "").trim() || reply;
-}
-
-function capOneQuestion(text: string) {
-  const t = safeStr(text, "").trim();
-  if (!t) return t;
-  const firstQ = t.indexOf("?");
-  if (firstQ < 0) return t;
-  const rest = t.slice(firstQ + 1).replace(/\?/g, ".").trim();
-  return `${t.slice(0, firstQ + 1)}${rest ? ` ${rest}` : ""}`.trim();
-}
-
-function ensureSlotTypes(slotsPatch: Json, currentSlots: Json, inboundText: string) {
-  const next = { ...(slotsPatch ?? {}) };
-  if ("messages_per_day" in next) {
-    const n = Number(next.messages_per_day);
-    if (!Number.isFinite(n) || n <= 0) {
-      const extracted = extractNumber(inboundText);
-      if (extracted !== null) next.messages_per_day = extracted;
-      else if (Number(currentSlots?.messages_per_day ?? 0) > 0) delete next.messages_per_day;
-      else delete next.messages_per_day;
-    }
-  }
-  return next;
-}
-
-function ctaFromIntent(intent: string) {
-  const i = safeStr(intent, "").toLowerCase();
-  if (i.includes("appointment") || i.includes("pricing") || i.includes("other")) {
-    return {
-      tag: "cta_trial",
-      text: "Si querés, te paso el link del Trial y lo activamos ahora mismo.",
-    };
-  }
-  return { tag: "none", text: "" };
-}
-
 function isOperatorOutboundJob(job: any) {
   const source = safeStr(job?.payload?.source, "").toLowerCase();
   const actor = safeStr(job?.actor, "").toLowerCase();
   const role = safeStr(job?.role, "").toLowerCase();
   return source.includes("operator") || source.includes("manual") || actor === "human" || role === "operator";
-}
-
-
-
-async function sendMessage(args: {
-  channel: string;
-  graphVersion: string;
-  pageAccessToken: string;
-  recipientId: string;
-  text: string;
-}) {
-  const channel = normalizeChannel(args.channel);
-  if (channel === "messenger") {
-    return await sendToMeta({
-      graphVersion: args.graphVersion,
-      pageAccessToken: args.pageAccessToken,
-      recipientId: args.recipientId,
-      text: args.text,
-    });
-  }
-  if (channel === "whatsapp") throw new Error("not_implemented:channel_whatsapp");
-  if (channel === "instagram") throw new Error("not_implemented:channel_instagram");
-  throw new Error(`unsupported_channel:${channel}`);
-}
-
-async function loadOrgSecretWithFallback(
-  supabase: ReturnType<typeof createClient>,
-  organizationId: string
-) {
-  const selects = [
-    'meta_page_id, meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
-    'meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
-    '"META_PAGE_ACCESS_TOKEN"',
-  ];
-
-  for (const sel of selects) {
-    const r = await supabase
-      .from("org_secrets")
-      .select(sel)
-      .eq("organization_id", organizationId)
-      .maybeSingle();
-
-    if (!r.error) return r.data as Json | null;
-
-    const isSchemaCache = r.error.message.includes("schema cache") && r.error.message.includes("Could not find");
-    if (!isSchemaCache) break;
-  }
-
-  return null;
 }
 
 async function loadOrgSecretsKV(
@@ -592,6 +143,32 @@ async function loadOrgSecretsKV(
   return kv;
 }
 
+async function loadOrgSecretWithFallback(
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string
+) {
+  const selects = [
+    'meta_page_id, meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
+    'meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
+    '"META_PAGE_ACCESS_TOKEN"',
+  ];
+
+  for (const sel of selects) {
+    const r = await supabase
+      .from("org_secrets")
+      .select(sel)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+
+    if (!r.error) return r.data as Json | null;
+    const isSchemaCache =
+      r.error.message.includes("schema cache") && r.error.message.includes("Could not find");
+    if (!isSchemaCache) break;
+  }
+
+  return null;
+}
+
 async function claimJobsViaRpc(args: {
   supabase: ReturnType<typeof createClient>;
   organizationId: string;
@@ -611,6 +188,14 @@ async function claimJobsViaRpc(args: {
   return v2;
 }
 
+function mergeLeadState(existing: Json | null, patch: Json | null) {
+  const base = existing && typeof existing === "object" ? { ...existing } : {};
+  const baseCollected = base?.collected && typeof base.collected === "object" ? { ...base.collected } : {};
+  const patchCollected = patch?.collected && typeof patch.collected === "object" ? { ...patch.collected } : {};
+  const merged = { ...base, ...(patch ?? {}), collected: { ...baseCollected, ...patchCollected } };
+  return merged;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -621,8 +206,6 @@ Deno.serve(async (req) => {
 
     const SUPABASE_URL = env("SUPABASE_URL");
     const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
-    const OPENAI_API_KEY = env("OPENAI_API_KEY");
-    const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
     const DEFAULT_META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
     const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ?? "clinic-demo";
 
@@ -631,9 +214,6 @@ Deno.serve(async (req) => {
     });
     const executionId = crypto.randomUUID();
     const workerId = `run-replies:${executionId}`;
-    if (Deno.env.get("RUN_REPLIES_SQL_DEBUG") === "1") {
-      console.log(SQL_DEBUG_CHECKLIST);
-    }
 
     const url = new URL(req.url);
     const body = req.headers.get("content-type")?.includes("application/json")
@@ -649,7 +229,6 @@ Deno.serve(async (req) => {
 
     let pageAccessToken = normalizeSecretValue(Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "");
     let metaGraphVersion = DEFAULT_META_GRAPH_VERSION;
-    let systemPrompt = defaultSystemPrompt();
 
     const kvSecrets = await loadOrgSecretsKV(supabase, organization_id);
     pageAccessToken = safeStr(kvSecrets.META_PAGE_ACCESS_TOKEN, pageAccessToken) || pageAccessToken;
@@ -661,61 +240,6 @@ Deno.serve(async (req) => {
         normalizeSecretValue(safeStr((sec as any).meta_page_access_token, "")) ||
         normalizeSecretValue(safeStr((sec as any).META_PAGE_ACCESS_TOKEN, ""));
       if (token) pageAccessToken = safeStr(token, pageAccessToken);
-    }
-
-    let clinicCtx: Json = {
-      name: "Clínica",
-      phone: "",
-      address: "",
-      google_maps_url: "",
-      hours: null,
-      services: [],
-      faqs: [],
-      policies: {},
-      emergency: "",
-    };
-    let appBaseUrl = Deno.env.get("PUBLIC_APP_URL") ?? "https://dental.creatyv.io";
-    let signupPath = "/signup";
-    let trialDays = 14;
-    const os = await supabase
-      .from("organization_settings")
-      .select("organization_id, app_base_url, signup_path, trial_days, system_prompt, prompt_format")
-      .eq("organization_id", organization_id)
-      .maybeSingle();
-    const legacyOs = os.data
-      ? null
-      : await supabase
-          .from("org_settings")
-          .select(
-            "organization_id, brand_name, phone, address, google_maps_url, hours, services, faqs, policies, emergency, system_prompt, app_base_url, signup_path, trial_days"
-          )
-          .eq("organization_id", organization_id)
-          .maybeSingle();
-    const settingsData = (os.data ?? legacyOs?.data ?? null) as any;
-    if (settingsData) {
-      clinicCtx = { ...clinicCtx, ...settingsData };
-      const systemPromptRaw = safeStr(settingsData.system_prompt, "");
-      const parsedPrompt = parseMaybeJson(systemPromptRaw);
-      const promptFromJson = safeStr(parsedPrompt?.prompt, "") || safeStr(parsedPrompt?.system, "");
-      const resolvedPrompt = promptFromJson || systemPromptRaw;
-      if (resolvedPrompt.trim()) systemPrompt = resolvedPrompt.trim();
-      appBaseUrl = safeStr(settingsData.app_base_url, appBaseUrl) || appBaseUrl;
-      signupPath = safeStr(settingsData.signup_path, signupPath) || signupPath;
-      const td = Number(settingsData.trial_days ?? trialDays);
-      if (Number.isFinite(td) && td > 0 && td <= 365) trialDays = td;
-    }
-    const osCfg = settingsData
-      ? { error: null, data: settingsData }
-      : await supabase
-          .from("org_settings")
-          .select("app_base_url, signup_path, trial_days")
-          .eq("organization_id", organization_id)
-          .maybeSingle();
-    if (!osCfg.error && osCfg.data) {
-      appBaseUrl = safeStr((osCfg.data as any).app_base_url, appBaseUrl) || appBaseUrl;
-      signupPath = safeStr((osCfg.data as any).signup_path, signupPath) || signupPath;
-      const td = Number((osCfg.data as any).trial_days ?? trialDays);
-      if (Number.isFinite(td) && td > 0 && td <= 365) trialDays = td;
     }
 
     const limit = Math.max(1, Math.min(Number(body?.limit ?? 10) || 10, 50));
@@ -812,16 +336,12 @@ Deno.serve(async (req) => {
           throw new Error(`unsupported_channel:${channel}`);
         }
         const recipientId =
-          safeStr(job.channel_user_id, "") ||
-          safeStr(job.recipient_id, "") ||
-          safeStr(job.psid, "");
+          safeStr(job.channel_user_id, "") || safeStr(job.recipient_id, "") || safeStr(job.psid, "");
         const leadId = safeStr(job.lead_id, "");
-        const inboundText = clampText(
-          safeStr(job.inbound_text, "") ||
-            safeStr(job.text, "") ||
-            ""
-        );
-        const inboundProviderMessageId = safeStr(job.inbound_provider_message_id, "");
+        const inboundProviderMessageId =
+          safeStr(job.inbound_provider_message_id, "") ||
+          safeStr((job.payload as Json | null)?.inbound_provider_message_id, "") ||
+          safeStr(((job.payload as Json | null)?.raw as any)?.message?.mid, "");
 
         if (!recipientId) throw new Error("missing_recipient_id: channel_user_id/psid");
         const attemptBump = await supabase
@@ -840,18 +360,14 @@ Deno.serve(async (req) => {
           currentAttemptCount += 1;
         }
         const payload = ((job.payload as Json | null) ?? {}) as Json;
-        const payloadSourceRaw = safeStr(payload.source, "").toLowerCase();
-        const payloadSource = payloadSourceRaw || "inbound";
+        const payloadSource = safeStr(payload.source, "").toLowerCase() || "inbound";
         const operatorOutbound = isOperatorOutboundJob(job) || payloadSource === "ui_manual";
-        const manualText = safeStr(payload.text, "");
+        const manualText = clampText(safeStr(payload.text, ""));
 
-        const inboundMid =
-          safeStr(job.inbound_provider_message_id, "") ||
-          safeStr(payload.inbound_provider_message_id, "") ||
-          safeStr((payload.raw as any)?.message?.mid, "");
-
-        let resolvedInboundText =
-          safeStr(payload.inbound_text, "") || safeStr(payload.text, "");
+        const inboundTextCandidate = clampText(
+          safeStr(job.inbound_text, "") || safeStr(job.text, "") || ""
+        );
+        let resolvedInboundText = clampText(safeStr(payload.inbound_text, "") || safeStr(payload.text, ""));
         if (!resolvedInboundText && safeStr(job.inbound_message_id, "")) {
           const inboundMsg = await supabase
             .from("messages")
@@ -859,33 +375,35 @@ Deno.serve(async (req) => {
             .eq("id", safeStr(job.inbound_message_id, ""))
             .maybeSingle();
           if (!inboundMsg.error && inboundMsg.data) {
-            resolvedInboundText = safeStr((inboundMsg.data as any).content, "");
+            resolvedInboundText = clampText(safeStr((inboundMsg.data as any).content, ""));
           }
         }
-        if (!resolvedInboundText) resolvedInboundText = inboundText || safeStr(job.message_text, "");
+        if (!resolvedInboundText) resolvedInboundText = inboundTextCandidate || safeStr(job.message_text, "");
 
-        if (!operatorOutbound && payloadSource === "inbound" && !resolvedInboundText) {
+        if (!operatorOutbound && !resolvedInboundText) {
           throw new Error("missing_inbound_text: payload.inbound_text/payload.text/messages.content");
         }
         if (!pageAccessToken || pageAccessToken.length <= 50) throw new Error("missing_or_invalid_page_token");
 
-        let leadState: Json = {};
-        let leadLastMessageAt: string | null = null;
+        let leadState: Json | null = null;
         let leadLastSeenInbound = "";
         if (leadId) {
           const ld = await supabase
             .from("leads")
-            .select("state,last_message_at,last_seen_inbound_message_id")
+            .select("state,last_seen_inbound_message_id")
             .eq("id", leadId)
             .maybeSingle();
-          if (!ld.error) leadState = ensureConversationState(((ld.data?.state ?? {}) as Json) ?? {});
-          if (!ld.error && ld.data?.last_message_at) leadLastMessageAt = safeStr((ld.data as any).last_message_at, "") || null;
-          leadLastSeenInbound = safeStr((ld.data as any).last_seen_inbound_message_id ?? "");
+          if (!ld.error && ld.data) {
+            leadState = (ld.data as any).state as Json | null;
+            leadLastSeenInbound = safeStr((ld.data as any).last_seen_inbound_message_id ?? "", "");
+          }
         }
 
-        if (leadId && inboundMid && leadLastSeenInbound === inboundMid) {
+        if (!operatorOutbound && inboundProviderMessageId && leadLastSeenInbound === inboundProviderMessageId) {
           const reason = "duplicate_inbound_mid";
           failures.push({ id: jobId, error: reason });
+          skipped++;
+          skipped_reasons.push({ id: jobId, reason });
           await supabase
             .from("reply_outbox")
             .update({
@@ -909,243 +427,32 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const resetByTopic = /(otro tema|otra cosa|cambiando tema|nuevo tema)/i.test(resolvedInboundText);
-        const resetByTime =
-          !!leadLastMessageAt &&
-          Date.now() - new Date(leadLastMessageAt).getTime() > 12 * 60 * 60 * 1000;
-        if (resetByTopic || resetByTime) {
-          leadState = {
-            ...leadState,
-            stage: "intro",
-            intent: "new_topic",
-            last_question_id: null,
-            last_bot_question: null,
-            last_bot_question_repeat_count: 0,
-          };
-        }
-
-        const lastSeenInboundProviderMid =
-          safeStr(leadState?.last_seen_inbound_provider_mid, "") || safeStr(leadState?.last_seen_inbound_mid, "");
-        if (inboundProviderMessageId && lastSeenInboundProviderMid === inboundProviderMessageId) {
-          const reason = "deduped_inbound_mid";
-          skipped++;
-          skipped_reasons.push({ id: jobId, reason });
-          logEvent("run_replies_job_skipped", {
-            execution_id: executionId,
-            trace_id: traceId,
-            organization_id,
-            lead_id: leadId,
-            job_id: jobId,
-            reason,
-          });
-          failures.push({ id: jobId, error: `skipped:${reason}` });
-          await supabase
-            .from("reply_outbox")
-            .update({
-              status: "skipped",
-              claimed_at: null,
-              claimed_by: null,
-              locked_at: null,
-              locked_by: null,
-              last_error: `skipped:${reason}`,
-              updated_at: nowIso(),
-            })
-            .eq("id", jobId);
-          continue;
-        }
-
-        let recent: Array<{ role: "user" | "assistant"; content: string }> = [];
-        if (leadId) {
-          const ms = await supabase
-            .from("messages")
-            .select("role, content, created_at")
-            .eq("lead_id", leadId)
-            .order("created_at", { ascending: false })
-            .limit(12);
-          if (!ms.error && Array.isArray(ms.data)) {
-            recent = ms.data
-              .map((r: any) => {
-                const role = safeStr(r.role, "").toLowerCase();
-                const content = clampText(safeStr(r.content, ""));
-                if (!content) return null;
-                const normalizedRole =
-                  role === "assistant" || role === "bot" ? ("assistant" as const) : ("user" as const);
-                return { role: normalizedRole, content };
-              })
-              .filter(Boolean)
-              .reverse() as Array<{ role: "user" | "assistant"; content: string }>;
-            if (recent.length > 8) recent = recent.slice(recent.length - 8);
-          }
-        }
-
-        const guard = operatorOutbound ? null : questionGuard(leadState, resolvedInboundText);
-        const currentSlots: Json =
-          leadState?.slots && typeof leadState.slots === "object" ? leadState.slots : {};
-        let debugNote: string | null = null;
-        const orgBusinessType = safeStr(settingsData?.business_type ?? "", "");
-        const payloadModeRaw = safeStr(payload.mode, "");
-        const payloadMode =
-          payloadModeRaw === "creatyv_product" || payloadModeRaw === "dental_clinic"
-            ? (payloadModeRaw as ConversationMode)
-            : null;
-        const payloadModeLocked = Boolean(payload.mode_locked);
-        const inboundHasTestDentalTag = Boolean(payload.has_testdental) || /#testdental/i.test(resolvedInboundText);
-        const engineMode =
-          payloadMode ??
-          resolveMode({
-            organizationId: organization_id,
-            leadState,
-            orgBusinessType,
-            hasTestDentalTag: inboundHasTestDentalTag,
-          }) as ConversationMode;
-        leadState.mode = engineMode;
-        if (payloadModeLocked) leadState.mode_locked = true;
         let reply = "";
-        let intent = "other";
-        let questionTag = "";
         let statePatch: Json = {};
-        let slotsPatch: Json = {};
-        let recommendedPlan: "starter" | "growth" | "pro" | null = null;
-        let action: "cta_trial" | "continue" = "continue";
-
+        let debugNote: string | null = null;
         if (operatorOutbound) {
-          reply = clampText(manualText || resolvedInboundText, 950);
-          intent = "other";
-          questionTag = safeStr(leadState?.last_bot_question, "none");
+          reply = manualText || resolvedInboundText || "Gracias por escribirnos.";
           debugNote = "operator_outbound";
-        } else if (guard) {
-          reply = guard.reply;
-          intent = guard.intent;
-          questionTag = guard.question_tag;
-          statePatch = guard.state_patch;
-          slotsPatch = guard.slots_patch;
-          recommendedPlan = normalizePlan(guard.recommended_plan);
-          action = normalizeAction(guard.action);
-          debugNote = safeStr(guard.debug, "question_guard_applied");
-        } else if (organization_id === "creatyv-product") {
-          const currentPhase = safeStr(leadState?.phase, "new");
-          const conv = runP0ConversationPhase(currentPhase, resolvedInboundText);
-          reply = conv.reply;
-          statePatch.phase = conv.nextPhase;
-          statePatch.last_bot_question_key = conv.key;
-          questionTag = conv.key;
-          debugNote = debugNote ?? "p0_state_machine";
         } else {
-          const engineResult = buildConversationReply({
-            mode: engineMode,
-            inboundText: stripTestDentalTag(resolvedInboundText),
+          const engineResult = runConversationEngine({
+            organizationId: organization_id,
+            leadId,
             leadState,
-            previousQuestionTag: safeStr(leadState?.last_bot_question, ""),
+            inboundText: resolvedInboundText,
+            channel,
           });
-          reply = engineResult.reply;
-          intent = engineResult.intent;
-          questionTag = engineResult.questionTag;
-          statePatch = { ...statePatch, ...engineResult.statePatch };
-          slotsPatch = { ...slotsPatch, ...engineResult.slotsPatch };
-          debugNote = debugNote ?? engineResult.debug;
-        }
-
-        if (!operatorOutbound && !reply) {
-          systemPrompt = engineMode === "dental_clinic" ? SYSTEM_PROMPT_DENTAL : SYSTEM_PROMPT_CREATYV;
-          const userPrompt = buildUserPrompt({
-            clinic: clinicCtx,
-            leadState,
-            recent,
-            inboundText: stripTestDentalTag(resolvedInboundText) || "(sin texto)",
-          });
-
-          const raw = await callLLM({
-            apiKey: OPENAI_API_KEY,
-            model: OPENAI_MODEL,
-            system: systemPrompt,
-            user: userPrompt,
-            temperature: 0.5,
-            maxTokens: 320,
-          });
-          const parsed = tryParseJson(raw);
-          reply = clampText(safeStr(parsed?.reply, ""), 950);
-          intent = safeStr(parsed?.intent, "other");
-          questionTag = safeStr(parsed?.question_tag, "");
-          recommendedPlan = normalizePlan(parsed?.recommended_plan);
-          action = normalizeAction(parsed?.action);
-          statePatch = parsed?.state_patch && typeof parsed.state_patch === "object" ? parsed.state_patch : {};
-          slotsPatch = parsed?.slots_patch && typeof parsed.slots_patch === "object" ? parsed.slots_patch : {};
-          if (!reply) throw new Error(`LLM missing reply. raw=${raw.slice(0, 160)}...`);
-        }
-
-        const prevTag = safeStr(leadState?.last_question_id, "") || safeStr(leadState?.last_bot_question, "");
-        const rawTag = normalizeQuestionTag(questionTag);
-        questionTag = enforceNoRepeatTag(prevTag, questionTag);
-        if (rawTag && rawTag === normalizeQuestionTag(prevTag) && questionTag !== rawTag) {
-          debugNote = "question_guard:anti_repeat_advanced";
-        }
-
-        slotsPatch = ensureSlotTypes(slotsPatch, currentSlots, resolvedInboundText);
-        slotsPatch.greeted = true;
-        reply = capOneQuestion(
-          guardGreeting({ ...currentSlots, ...slotsPatch }, clampText(stripUrls(reply), 950))
-        );
-
-        if (!guard && prevTag && normalizeQuestionTag(questionTag) === normalizeQuestionTag(prevTag)) {
-          const fallback = ctaFromIntent(intent);
-          if (fallback.text) {
-            reply = fallback.text;
-            questionTag = fallback.tag;
-            action = "cta_trial";
-            recommendedPlan = recommendedPlan ?? "growth";
-            debugNote = "question_guard:forced_cta_on_repeat_tag";
+          reply = clampText(engineResult.replyText ?? "", 950);
+          statePatch = engineResult.nextStatePatch ?? {};
+          if (engineResult.debug) {
+            debugNote = `engine:${safeStr(engineResult.debug.phase, "") || safeStr(engineResult.debug.intent, "") || "reply"}`;
+          } else {
+            debugNote = "engine";
           }
         }
+        if (!reply) reply = "Gracias por escribirnos. Te respondo en un momento.";
 
-        const nextRepeatCount =
-          normalizeQuestionTag(prevTag) === normalizeQuestionTag(questionTag)
-            ? Number(leadState?.last_bot_question_repeat_count ?? 0) + 1
-            : 0;
-        if (!operatorOutbound && nextRepeatCount >= 2) {
-          reply = "Para avanzar rápido: ya tengo lo esencial. ¿Querés que lo dejemos activo hoy o prefieres una demo corta primero?";
-          questionTag = "cta_connect";
-          debugNote = "question_guard:forced_progress_after_repeat";
-        }
-
-        if (!operatorOutbound && action === "cta_trial") {
-          const plan = recommendedPlan ?? normalizePlan(currentSlots?.recommended_plan) ?? "growth";
-          const ctaUrl = buildTrialUrl(appBaseUrl, signupPath, plan, trialDays);
-          reply = `Perfecto. Aquí tenés tu prueba gratis de ${trialDays} días: ${ctaUrl}`;
-          slotsPatch.recommended_plan = plan;
-          slotsPatch.last_cta_url = ctaUrl;
-          debugNote = debugNote ?? "cta_trial_url_injected";
-        }
-        if (!reply) {
-          reply = "Perfecto, seguimos. Contame y te ayudo con el siguiente paso.";
-        }
-
-        if (
-          !operatorOutbound &&
-          normalizeComparable(reply) &&
-          normalizeComparable(resolvedInboundText) &&
-          normalizeComparable(reply) === normalizeComparable(resolvedInboundText)
-        ) {
-          reply =
-            "Gracias por escribirnos. Para ayudarte mejor, ¿buscas información de precios, horarios o agendar una cita?";
-          debugNote = "anti_echo_guard_triggered";
-        }
-
-        statePatch.mode = engineMode;
-        statePatch.mode_locked = Boolean(leadState.mode_locked);
-
-        const nextState = mergeState(leadState, {
-          inboundMessageId: inboundProviderMessageId,
-          statePatch,
-          slotsPatch,
-          questionTag,
-        });
-        nextState.last_bot_question_repeat_count = nextRepeatCount;
-        nextState.mode = mode;
-        nextState.intent = intent;
-        nextState.last_question_id = questionTag;
-        nextState.last_seen_inbound_mid = inboundProviderMessageId || nextState.last_seen_inbound_mid || null;
-
-        let outbound_message_id = safeStr((job.payload as Json | null)?.ui_message_id, "") || null;
+        const nextState = mergeLeadState(leadState, { ...statePatch, last_bot_text: reply });
+        let outbound_message_id: string | null = null;
         if (!operatorOutbound) {
           const outMsgInsert = await supabase
             .from("messages")
@@ -1174,7 +481,7 @@ Deno.serve(async (req) => {
           channel,
           endpoint: `https://graph.facebook.com/${metaGraphVersion}/me/messages`,
         });
-        const metaResp = await sendMessage({
+        const metaResp = await sendToMeta({
           channel,
           graphVersion: metaGraphVersion,
           pageAccessToken,
@@ -1218,7 +525,10 @@ Deno.serve(async (req) => {
           })
           .eq("id", jobId);
         if (leadId && metaResp?.data?.message_id) {
-          await supabase.from("leads").update({ last_reply_outbound_mid: String(metaResp.data.message_id) }).eq("id", leadId);
+          await supabase
+            .from("leads")
+            .update({ last_reply_outbound_mid: String(metaResp.data.message_id) })
+            .eq("id", leadId);
         }
         if (outbound_message_id && metaResp?.data?.message_id) {
           await supabase
@@ -1233,9 +543,9 @@ Deno.serve(async (req) => {
               last_message_at: nowIso(),
               last_message_preview: safeStr(reply, "").slice(0, 140),
               state: nextState,
-              ...(operatorOutbound || !inboundMid
+              ...(operatorOutbound || !inboundProviderMessageId
                 ? {}
-                : { last_seen_inbound_message_id: inboundMid }),
+                : { last_seen_inbound_message_id: inboundProviderMessageId }),
             })
             .eq("id", leadId);
         }
