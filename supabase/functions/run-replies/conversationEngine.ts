@@ -24,17 +24,6 @@ export type EngineOutput = {
 
 const GREETING_RE = /^(hola|hey|buenas|buenos días|buen día|qué tal)/i;
 const CHANNEL_RE = /(whatsapp|messenger|instagram)/i;
-const INTENT_NO_BUSINESS = /(no tengo negocio|no tengo empresa|todaví?a no tengo negocio|soy empleado|no vendo nada)/i;
-const INTENT_BUSINESS_TYPE = /(dentista|barber[ií]a|cl[ií]nica|real estate|bienes ra[ií]ces|est[eé]tica|spa|taller)/i;
-const INTENT_PRODUCT_DEFINITION = /(qu[eé] haces|qu[eé] vendes|de qu[eé] se trata|c[oó]mo me ayud[áa])/i;
-const INTENT_CAPABILITIES = /(qu[eé] m[aá]s hace|qu[eé] puede hacer|qu[eé] incluye)/i;
-const INTENT_CONFUSED = /(no s[eé]|todav[ií]a no lo s[eé]|no entend[ií]|expl[ií]came mejor)/i;
-const INTENT_NEGATIVE = /^(no|nop|no gracias)$/i;
-const INTENT_ASKS_PRICE = /(precio|precios|cuanto cuesta|cu[aá]nto cuesta)/i;
-const INTENT_ASKS_INDUSTRY_FIT = /(tamb[ií]en tengo|tambien tengo|bienes ra[ií]ces|real estate|otro negocio|tamb[ií]en aplica|tambien aplica)/i;
-const INTENT_ASKS_HUMAN = /(hablar con|con un humano|con alguien)/i;
-const INTENT_SMALL_TALK = /(gracias|muy bien|genial|qué tal)/i;
-const INTENT_POSITIVE = /(si|sí|claro|perfecto|vale|gracias)/i;
 
 type Intent =
   | "GREETING"
@@ -49,24 +38,35 @@ type Intent =
   | "POSITIVE"
   | "NEGATIVE"
   | "ASKS_HUMAN"
+  | "CHANNEL_MENTION"
   | "SMALL_TALK"
   | "UNKNOWN";
 
-function detectIntent(text: string): Intent {
-  const t = text.toLowerCase();
-  if (GREETING_RE.test(t)) return "GREETING";
-  if (INTENT_NO_BUSINESS.test(t)) return "NO_BUSINESS";
-  if (INTENT_ASKS_PRODUCT_DEFINITION.test(t)) return "ASKS_PRODUCT_DEFINITION";
-  if (INTENT_CAPABILITIES.test(t)) return "ASKS_CAPABILITIES";
-  if (INTENT_ASKS_PRICE.test(t)) return "ASKS_PRICE";
-  if (INTENT_ASKS_INDUSTRY_FIT.test(t)) return "ASKS_INDUSTRY_FIT";
-  if (INTENT_CONFUSED.test(t)) return "CONFUSED";
-  if (/tod[áa]v[ií]a no lo sé/.test(t) || INTENT_CONFUSED.test(t)) return "NOT_SURE";
-  if (INTENT_NEGATIVE.test(t)) return "NEGATIVE";
-  if (INTENT_BUSINESS_TYPE.test(t)) return "BUSINESS_TYPE";
-  if (INTENT_ASKS_HUMAN.test(t)) return "ASKS_HUMAN";
-  if (INTENT_SMALL_TALK.test(t)) return "SMALL_TALK";
-  if (INTENT_POSITIVE.test(t)) return "POSITIVE";
+function norm(text: string) {
+  return (text ?? "").trim().toLowerCase();
+}
+
+function hasAny(text: string, patterns: string[]) {
+  const t = norm(text);
+  return patterns.some((pattern) => t.includes(pattern));
+}
+
+function detectIntent(inboundText: string): Intent {
+  const t = norm(inboundText);
+  if (["hola", "holaa", "hey", "buenas", "hello"].includes(t)) return "GREETING";
+  if (hasAny(t, ["no tengo negocio", "no tengo empresa", "soy empleado", "no vendo nada"])) return "NO_BUSINESS";
+  if (hasAny(t, ["dentista", "clinica", "clínica", "barberia", "barbería", "bienes raíces", "real estate", "joyeria", "joyería", "taller", "spa", "med spa"])) return "BUSINESS_TYPE";
+  if (hasAny(t, ["que haces", "qué haces", "qué vendes", "que vendes", "de que se trata", "de qué se trata", "como me ayudas"])) return "ASKS_PRODUCT_DEFINITION";
+  if (hasAny(t, ["que mas hace", "qué más hace", "que puede hacer", "qué puede hacer", "que incluye"])) return "ASKS_CAPABILITIES";
+  if (hasAny(t, ["precio", "precios", "cuanto cuesta", "cuánto cuesta"])) return "ASKS_PRICE";
+  if (hasAny(t, ["tambien tengo", "también tengo", "otro negocio", "aplica para"])) return "ASKS_INDUSTRY_FIT";
+  if (hasAny(t, ["no se", "no sé", "todavia no lo se", "todavía no lo sé"])) return "NOT_SURE";
+  if (hasAny(t, ["no entendi", "no entendí", "explicame mejor"])) return "CONFUSED";
+  if (["si", "sí", "ok", "claro", "dale"].includes(t)) return "POSITIVE";
+  if (["no", "nop", "no gracias"].includes(t)) return "NEGATIVE";
+  if (hasAny(t, ["humano", "persona", "asesor"])) return "ASKS_HUMAN";
+  if (hasAny(t, ["whatsapp", "messenger", "instagram"])) return "CHANNEL_MENTION";
+  if (hasAny(t, ["gracias", "muy bien", "genial", "qué tal"])) return "SMALL_TALK";
   return "UNKNOWN";
 }
 
@@ -94,6 +94,65 @@ function buildIntentResponse(reply: string, currentPhase: Phase, nextPhase: Phas
     },
     debug: { phase: nextPhase ?? currentPhase, intent },
   };
+}
+
+function decideNextAction(intent: Intent, state: State | null) {
+  const phase = state?.phase ?? "new";
+  switch (intent) {
+    case "GREETING":
+      return {
+        replyText: `Hola 👋\nSoy Creatyv.\n\nAyudamos a negocios a responder mensajes automáticamente, organizar citas o leads y hacer seguimiento para que no se pierdan clientes.\n\n¿Qué tipo de negocio tienes?`,
+        nextPhase: "ask_business_type" as Phase,
+      };
+    case "NO_BUSINESS":
+      return {
+        replyText: `Entiendo.\n\nCreatyv está pensado para negocios o personas que manejan clientes, pedidos, citas o consultas y quieren automatizar mensajes, organizar contactos y dar seguimiento.\n\nPuede servir tanto para una clínica como para alguien que vende por WhatsApp o Instagram.\n\n¿En tu caso manejas clientes, pedidos o consultas por mensaje?`,
+        nextPhase: "ask_business_type" as Phase,
+      };
+    case "ASKS_PRODUCT_DEFINITION":
+      return {
+        replyText: `Creatyv es un sistema para negocios que ayuda a responder mensajes, organizar leads o citas y hacer seguimiento automático.\n\nLa idea es que no se te vayan oportunidades por responder tarde o por no dar seguimiento.\n\n¿Qué tipo de negocio tienes?`,
+        nextPhase: "ask_business_type" as Phase,
+      };
+    case "ASKS_CAPABILITIES":
+      return {
+        replyText: `Además de responder mensajes, también puede:\n\n• organizar leads o citas\n• hacer seguimiento automático\n• mantener conversaciones más ordenadas\n• ayudarte a que no se te vayan oportunidades por falta de respuesta\n\nSi quieres, te explico cómo se usaría específicamente en tu negocio.`,
+        nextPhase: phase,
+      };
+    case "ASKS_PRICE":
+      return {
+        replyText: `El precio depende más que todo de cómo se usaría en tu negocio y qué parte quieres automatizar primero.\n\nSi me dices qué tipo de negocio tienes, te orientó mejor.`,
+        nextPhase: "ask_business_type" as Phase,
+      };
+    case "NEGATIVE":
+      return {
+        replyText: `Está bien.\n\nSi quieres, puedo explicarte rápidamente para qué tipo de negocios suele funcionar mejor.`,
+        nextPhase: phase,
+      };
+    case "NOT_SURE":
+    case "CONFUSED":
+      return {
+        replyText: `No pasa nada.\n\nNormalmente lo usan para 3 cosas:\n\n• responder más rápido\n• organizar clientes o citas\n• no perder seguimiento\n\n¿Cuál de esas crees que te ayudaría más hoy?`,
+        nextPhase: "ask_pain" as Phase,
+      };
+    case "ASKS_INDUSTRY_FIT":
+      return {
+        replyText: `Perfecto, también aplica para ese tipo de negocio.\n\nAhí sirve para responder leads, organizarlos mejor y hacer seguimiento automático para que no se enfríen.\n\n¿En tu caso te interesa más responder más rápido o dar mejor seguimiento?`,
+        nextPhase: "ask_pain" as Phase,
+      };
+    case "BUSINESS_TYPE":
+      return {
+        replyText: `Perfecto.\n\nEn negocios como el tuyo, normalmente el problema está en una de estas tres cosas: responder tarde, perder seguimiento o tener los leads desordenados.\n\n¿Qué te gustaría resolver primero?`,
+        nextPhase: "ask_pain" as Phase,
+      };
+    default:
+      return {
+        replyText: phase === "ask_business_type"
+          ? "Cuéntame, ¿qué tipo de negocio tienes?"
+          : "Perfecto. ¿Qué tipo de negocio tienes?",
+        nextPhase: "ask_business_type" as Phase,
+      };
+  }
 }
 
 export function runConversationEngine(input: EngineInput): EngineOutput | null {
@@ -127,98 +186,18 @@ export function runConversationEngine(input: EngineInput): EngineOutput | null {
 
   const lowerInbound = inbound.toLowerCase();
   const intent = detectIntent(lowerInbound);
-  if (intent === "NO_BUSINESS") {
-    const reply = "Entiendo.\n\nCreatyv está pensado sobre todo para negocios que quieren responder mensajes, organizar clientes o automatizar seguimiento.\n\nSi quieres, te puedo explicar rápido en qué tipo de negocios suele funcionar mejor.";
-    return buildIntentResponse(reply, phase, phase, "no_business", lastBotText, "no_business");
-  }
-  if (intent === "ASKS_PRODUCT_DEFINITION") {
-    const reply = "Creatyv es un sistema para negocios que ayuda a responder mensajes, organizar leads o citas y hacer seguimiento automático.\n\nLa idea es que no se te vayan oportunidades por responder tarde o por no dar seguimiento.\n\n¿Qué tipo de negocio tenés?";
-    return buildIntentResponse(reply, phase, "ask_business_type", "product_definition", lastBotText, "asks_product_definition");
-  }
-  if (intent === "ASKS_CAPABILITIES") {
-    const reply = "Además de responder mensajes, también puede:\n\n• organizar leads o citas\n• hacer seguimiento automático\n• mantener conversaciones más ordenadas\n• ayudarte a que no se te vayan oportunidades por falta de respuesta\n\nSi quieres, te explico cómo se usaría específicamente en tu caso.";
-    return buildIntentResponse(reply, phase, phase, "capabilities", lastBotText, "asks_capabilities");
-  }
-  if (intent === "CONFUSED" || intent === "NOT_SURE") {
-    const reply = "No pasa nada.\n\nTe lo resumo simple: normalmente lo usan para responder más rápido, ordenar clientes o no perder seguimiento.\n\n¿Cuál de esas crees que te ayudaría más hoy?";
-    return buildIntentResponse(reply, phase, phase, "confused", lastBotText, "confused");
-  }
-  if (intent === "NEGATIVE") {
-    const reply = "Está bien.\n\nSi quieres, te lo puedo resumir en una sola frase o explicarte rápido para qué tipo de negocio sirve.";
-    return buildIntentResponse(reply, phase, phase, "negative", lastBotText, "negative");
-  }
-  if (intent === "ASKS_PRICE") {
-    const reply = "El precio depende más que todo de cómo se usaría en tu negocio y qué parte quieres automatizar primero.\n\nSi me dices qué tipo de negocio tenés, te oriento mejor.";
-    return buildIntentResponse(reply, phase, phase, "pricing", lastBotText, "asks_pricing");
-  }
-  if (intent === "ASKS_INDUSTRY_FIT") {
-    const reply = "Perfecto, también aplica para ese tipo de negocio.\n\nAhí sirve para responder leads, organizarlos mejor y hacer seguimiento automático para que no se enfríen.\n\n¿En tu caso te interesa más responder más rápido o dar mejor seguimiento?";
-    return buildIntentResponse(reply, phase, "ask_pain", "industry_fit", lastBotText, "asks_industry_fit");
-  }
-  if (intent === "BUSINESS_TYPE") {
-    const reply = "Perfecto.\n\nEn negocios como el tuyo, normalmente el problema está en una de estas tres cosas: responder tarde, perder seguimiento o tener los leads desordenados.\n\n¿Qué te gustaría resolver primero?";
-    return buildIntentResponse(reply, phase, "ask_pain", "business_type", lastBotText, "business_type");
-  }
-
-  if (phase === "new") {
-    const reply = CX2_GREETING;
-    return {
-      replyText: reply,
-      nextStatePatch: {
-        phase: "ask_business_type",
-        last_bot_question_key: "ask_business_type",
-        last_bot_text: reply,
-        mode: "creatyv_product",
-      },
-      debug: { phase: "ask_business_type" },
-    };
-  }
-
-
-  if (phase === "ask_business_type" && inbound) {
-    const reply = "Perfecto.\n\nEn negocios como el tuyo, normalmente el problema está en una de estas tres cosas: responder tarde, perder seguimiento o tener los leads desordenados.\n\n¿Qué te gustaría resolver primero?";
-    const replyText = avoidRepeat(reply, lastBotText);
-    return {
-      replyText,
-      nextStatePatch: {
-        phase: "ask_pain",
-        last_bot_question_key: "ask_pain",
-        last_bot_text: replyText,
-        mode: "creatyv_product",
-      },
-      debug: { phase: "ask_pain" },
-    };
-  }
-
-  if (phase === "ask_pain" && inbound) {
-    const reply = "Entiendo.\n\nJusto ahí es donde Creatyv ayuda más: el sistema puede responder, ordenar los contactos y mantener el seguimiento sin que tengas que estar pendiente todo el tiempo.\n\n¿Quieres que te explique cómo se vería aplicado en tu negocio?";
-    const replyText = avoidRepeat(reply, lastBotText);
-    return {
-      replyText,
-      nextStatePatch: {
-        phase: "offer_explanation",
-        last_bot_question_key: "offer_explanation",
-        last_bot_text: replyText,
-        mode: "creatyv_product",
-      },
-      debug: { phase: "offer_explanation" },
-    };
-  }
-
-  if (phase === "ask_channel" && CHANNEL_RE.test(inbound)) {
-    const reply = "Perfecto.\n\nPodemos adaptarlo para ese canal y hacer que responda, organice y dé seguimiento automáticamente.\n\n¿Qué tipo de negocio tenés?";
-    const replyText = avoidRepeat(reply, lastBotText);
-    return {
-      replyText,
-      nextStatePatch: {
-        phase: "ask_business_type",
-        last_bot_question_key: "ask_business_type",
-        last_bot_text: replyText,
-        mode: "creatyv_product",
-      },
-      debug: { phase: "ask_business_type", intent: "channel" },
-    };
-  }
+  const action = decideNextAction(intent, input.leadState);
+  const replyText = avoidRepeat(action.replyText, lastBotText);
+  return {
+    replyText,
+    nextStatePatch: {
+      phase: action.nextPhase,
+      last_bot_text: replyText,
+      last_bot_question_key: intent.toLowerCase(),
+      mode: "creatyv_product",
+    },
+    debug: { phase: action.nextPhase, intent },
+  };
 
   return null;
 }
