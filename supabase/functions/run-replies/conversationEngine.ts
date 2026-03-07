@@ -23,8 +23,13 @@ export type EngineOutput = {
 };
 
 const GREETING_RE = /^(hola|hey|buenas|buenos días|buen día|qué tal)/i;
-const CONFUSION_RE = /(qué haces|qué vendes|qué haces|qué vend[oé]s|no sé qué (haces|vendes)|cómo me ayudás|cómo me ayudas)/i;
 const CHANNEL_RE = /(whatsapp|messenger|instagram)/i;
+const INTENT_OTHER_INDUSTRY = /(también tengo|tambien tengo|bienes raíces|real estate|otro negocio|también aplica|tambien aplica)/i;
+const INTENT_CAPABILITIES = /(que más hace|qué más hace|que hace|qué hace|que más)/i;
+const INTENT_NOT_SURE = /(no lo se|no lo sé|todavia no lo se|todavía no lo sé|no estoy seguro)/i;
+const INTENT_DECLINES_EXPLANATION = /^(no|nop|no gracias)$/i;
+const INTENT_PRODUCT_DEFINITION = /(que es|qué es|de que se trata|de qué se trata|qué vendes|que vendes)/i;
+const INTENT_PRICING = /(precio|precios|cuanto cuesta|cuánto cuesta)/i;
 
 function normalize(text: string) {
   return String(text ?? "").trim();
@@ -36,6 +41,20 @@ function avoidRepeat(reply: string, last: string) {
     return `${reply} ¿Te sirve esta opción?`;
   }
   return reply;
+}
+
+function buildIntentResponse(reply: string, currentPhase: Phase, nextPhase: Phase | null, questionKey: string, lastBotText: string, intent: string) {
+  const replyText = avoidRepeat(reply, lastBotText);
+  return {
+    replyText,
+    nextStatePatch: {
+      phase: nextPhase ?? currentPhase,
+      last_bot_question_key: questionKey,
+      last_bot_text: replyText,
+      mode: "creatyv_product",
+    },
+    debug: { phase: nextPhase ?? currentPhase, intent },
+  };
 }
 
 export function runConversationEngine(input: EngineInput): EngineOutput | null {
@@ -65,6 +84,32 @@ export function runConversationEngine(input: EngineInput): EngineOutput | null {
       },
       debug: { phase, intent: "greeting_repeat" },
     };
+  }
+
+  const lowerInbound = inbound.toLowerCase();
+  if (INTENT_OTHER_INDUSTRY.test(lowerInbound)) {
+    const reply = "Perfecto, también aplica para ese tipo de negocio.\n\nAhí sirve para responder leads, organizarlos mejor y hacer seguimiento automático para que no se enfríen.\n\n¿En tu caso te interesa más responder más rápido o dar mejor seguimiento?";
+    return buildIntentResponse(reply, phase, "ask_pain", "asks_other_industry_fit", lastBotText, "asks_other_industry_fit");
+  }
+  if (INTENT_CAPABILITIES.test(lowerInbound)) {
+    const reply = "Además de responder mensajes, también puede:\n\n• organizar leads o citas\n• hacer seguimiento automático\n• mantener conversaciones más ordenadas\n• ayudarte a que no se te vayan oportunidades por falta de respuesta\n\nSi quieres, te explico cómo se usaría específicamente en tu negocio.";
+    return buildIntentResponse(reply, phase, phase, "capabilities", lastBotText, "asks_capabilities");
+  }
+  if (INTENT_NOT_SURE.test(lowerInbound)) {
+    const reply = "No pasa nada. Te lo resumo simple:\n\nnormalmente lo usan para 3 cosas:\n• responder más rápido\n• ordenar clientes o citas\n• no perder seguimiento\n\n¿Cuál de esas crees que te ayudaría más hoy?";
+    return buildIntentResponse(reply, phase, phase, "not_sure", lastBotText, "not_sure");
+  }
+  if (INTENT_DECLINES_EXPLANATION.test(lowerInbound)) {
+    const reply = "Está bien.\n\nEntonces te lo dejo corto: Creatyv sirve para responder, organizar y dar seguimiento sin que tengas que estar pendiente todo el tiempo.\n\n¿Quieres que te diga en cuál de esas 3 te ayudaría más según tu negocio?";
+    return buildIntentResponse(reply, phase, phase, "declines_explanation", lastBotText, "declines_explanation");
+  }
+  if (INTENT_PRODUCT_DEFINITION.test(lowerInbound)) {
+    const reply = "Creatyv es un sistema para negocios que ayuda a responder mensajes, organizar leads o citas y hacer seguimiento automático.\n\nLa idea es que no se te vayan oportunidades por responder tarde o por no dar seguimiento.\n\n¿Qué tipo de negocio tenés?";
+    return buildIntentResponse(reply, phase, "ask_business_type", "product_definition", lastBotText, "asks_product_definition");
+  }
+  if (INTENT_PRICING.test(lowerInbound)) {
+    const reply = "El precio depende más que todo de cómo se usaría en tu negocio y qué parte quieres automatizar primero.\n\nSi me dices qué tipo de negocio tenés, te oriento mejor.";
+    return buildIntentResponse(reply, phase, phase, "pricing", lastBotText, "asks_pricing");
   }
 
   if (phase === "new") {
