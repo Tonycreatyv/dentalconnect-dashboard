@@ -20,8 +20,8 @@ export function messageKey(msg: MessageLike) {
 
   const created = msg.created_at ? new Date(msg.created_at) : null;
   const minute = created && !isNaN(created.getTime()) ? Math.floor(created.getTime() / 60000) : 0;
-  const direction = msg.direction ?? msg.actor ?? msg.role ?? "unknown";
-  const text = msg.content ?? msg.body ?? msg.text ?? "";
+  const direction = msg.actor ?? msg.role ?? "unknown";
+  const text = msg.content ?? msg.body ?? "";
   const prefix = text.slice(0, 32);
   return stableHash(`${direction}::${minute}::${prefix}`);
 }

@@ -455,23 +455,30 @@ Deno.serve(async (req) => {
 
         const nextState = mergeLeadState(leadState, { ...statePatch, last_bot_text: reply });
         let outbound_message_id: string | null = null;
-        if (!operatorOutbound) {
+        const messagePayload = {
+          organization_id,
+          lead_id: leadId || null,
+          channel,
+          role: "assistant",
+          actor: operatorOutbound ? "operator" : "bot",
+          content: operatorOutbound ? manualText || reply : reply,
+          created_at: nowIso(),
+          channel_user_id: recipientId,
+        };
+        try {
           const outMsgInsert = await supabase
             .from("messages")
-            .insert({
-              organization_id,
-              lead_id: leadId || null,
-              channel,
-              role: "assistant",
-              actor: "bot",
-              content: reply,
-              provider_message_id: null,
-              inbound_message_id: null,
-              created_at: nowIso(),
-            })
+            .insert(messagePayload)
             .select("id")
             .maybeSingle();
           outbound_message_id = outMsgInsert.data?.id ?? null;
+        } catch (err) {
+          console.warn("[run-replies] message_insert_failed", {
+            organization_id,
+            lead_id: leadId,
+            job_id: jobId,
+            error: safeStr((err as any)?.message ?? err),
+          });
         }
 
         if (reply === CX2_GREETING) {

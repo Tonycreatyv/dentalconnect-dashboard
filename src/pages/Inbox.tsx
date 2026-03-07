@@ -538,7 +538,7 @@ export default function Inbox() {
                     <button
                       key={reply.label}
                       type="button"
-                      onClick={() => setComposer(reply.text)}
+                      onClick={() => setComposer(reply.content)}
                       className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-slate-700 hover:bg-[#F4F5F7]"
                     >
                       {reply.label}

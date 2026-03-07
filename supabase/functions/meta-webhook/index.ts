@@ -510,19 +510,23 @@ serve(async (req) => {
         .insert({
           organization_id,
           lead_id: lead.id,
-          channel,
-          channel_user_id: psid,
+          channel: "messenger",
           role: "user",
           actor: "user",
           content: text,
+          created_at: new Date().toISOString(),
           provider_message_id: providerMid,
-          inbound_message_id: null,
+          inbound_message_id: providerMid,
+          channel_user_id: psid,
         })
         .select("id")
         .maybeSingle();
       if (msgInsert.error) {
-        const m = String(msgInsert.error.message ?? "");
-        if (!m.toLowerCase().includes("duplicate")) throw msgInsert.error;
+        console.warn("[meta-webhook] message_insert_failed", {
+          organization_id,
+          lead_id: lead.id,
+          error: String(msgInsert.error.message ?? ""),
+        });
       }
       const insertedMessageId = (msgInsert.data as any)?.id ?? null;
 
