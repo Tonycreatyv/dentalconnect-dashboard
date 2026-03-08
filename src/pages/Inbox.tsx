@@ -70,6 +70,19 @@ export default function Inbox() {
     return byChannelUser?.id ?? leadId;
   }, [leadId, leads]);
 
+  const selectedLeadState = selectedLead?.state ?? null;
+  const selectedCollected = (selectedLeadState?.collected ?? {}) as Record<string, any>;
+  const stageLabel = String(selectedLeadState?.stage ?? selectedCollected?.stage ?? "").trim();
+  const businessTypeLabel = String(selectedCollected?.business_type ?? "").trim();
+  const trialOffered = Boolean(selectedCollected?.trial_offered);
+  const onboardingStarted = Boolean(selectedCollected?.onboarding_started);
+  const leadMetaChips = [
+    stageLabel ? { key: "stage", label: stageLabel } : null,
+    businessTypeLabel ? { key: "business", label: businessTypeLabel } : null,
+    trialOffered ? { key: "trial", label: "Trial ofrecida" } : null,
+    onboardingStarted ? { key: "boarding", label: "Onboarding iniciado" } : null,
+  ].filter((chip): chip is { key: string; label: string } => Boolean(chip));
+
   const quickReplies = [
     {
       label: "Precios",
@@ -434,6 +447,18 @@ export default function Inbox() {
               <div className="text-xs text-slate-500 truncate">
                 {selectedLead ? getLeadDisplayName(selectedLead) : "Conversación"}
               </div>
+            </div>
+          ) : null}
+          {leadMetaChips.length ? (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {leadMetaChips.map((chip) => (
+                <span
+                  key={chip.key}
+                  className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-0.5 text-[10px] font-semibold text-slate-600"
+                >
+                  {chip.label}
+                </span>
+              ))}
             </div>
           ) : null}
           <div ref={threadScrollRef} className="max-h-[calc(100vh-340px)] overflow-y-auto pr-1 sm:max-h-[calc(100vh-300px)]">
