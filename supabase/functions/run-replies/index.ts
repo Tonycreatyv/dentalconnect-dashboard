@@ -2,6 +2,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { runConversationEngine, CX2_GREETING } from "./conversationEngine.ts";
+import { executeToolAction, type ActionExecutionResult } from "./domain/actionExecutor.ts";
 
 type Json = Record<string, unknown>;
 
@@ -17,6 +18,8 @@ function j(status: number, body: unknown) {
     headers: { ...corsHeaders, "content-type": "application/json" },
   });
 }
+
+export { mergeLeadState, mergeStatePatches };
 
 function env(name: string, fallback?: string) {
   const v = Deno.env.get(name) ?? fallback;
@@ -194,6 +197,21 @@ function mergeLeadState(existing: Json | null, patch: Json | null) {
   const patchCollected = patch?.collected && typeof patch.collected === "object" ? { ...patch.collected } : {};
   const merged = { ...base, ...(patch ?? {}), collected: { ...baseCollected, ...patchCollected } };
   return merged;
+}
+
+function mergeStatePatches(primary?: Json | null, secondary?: Json | null): Json {
+  if (!primary) return secondary && typeof secondary === "object" ? { ...secondary } : {};
+  if (!secondary) return primary;
+  const primaryCollected = primary.collected && typeof primary.collected === "object" ? { ...primary.collected } : {};
+  const secondaryCollected = secondary.collected && typeof secondary.collected === "object" ? { ...secondary.collected } : {};
+  return {
+    ...primary,
+    ...secondary,
+    collected: {
+      ...primaryCollected,
+      ...secondaryCollected,
+    },
+  };
 }
 
 Deno.serve(async (req) => {
@@ -430,6 +448,7 @@ Deno.serve(async (req) => {
         let reply = "";
         let statePatch: Json = {};
         let debugNote: string | null = null;
+        let actionExecution: ActionExecutionResult | null = null;
         if (operatorOutbound) {
           reply = manualText || resolvedInboundText || "Gracias por escribirnos.";
           debugNote = "operator_outbound";
@@ -444,6 +463,25 @@ Deno.serve(async (req) => {
           if (engineResult?.replyText) {
             reply = clampText(engineResult.replyText, 950);
             statePatch = engineResult.nextStatePatch ?? {};
+            if (engineResult.toolAction && leadId) {
+              actionExecution = await executeToolAction({
+                supabase,
+                organizationId: organization_id,
+                leadId,
+                action: engineResult.toolAction,
+              });
+              if (actionExecution.event) {
+                logEvent("run_replies_tool_action", {
+                  execution_id: executionId,
+                  trace_id: traceId,
+                  organization_id,
+                  lead_id: leadId,
+                  job_id: jobId,
+                  action: actionExecution.event.type,
+                  payload: actionExecution.event.payload,
+                });
+              }
+            }
             debugNote = `engine:${safeStr(engineResult.debug.phase, "") || safeStr(engineResult.debug.intent, "") || "reply"}`;
           } else {
             reply = "Gracias por escribirnos. Te respondo en un momento.";
@@ -453,7 +491,8 @@ Deno.serve(async (req) => {
         }
         if (!reply) reply = "Gracias por escribirnos. Te respondo en un momento.";
 
-        const nextState = mergeLeadState(leadState, { ...statePatch, last_bot_text: reply });
+        const combinedPatch = mergeStatePatches(statePatch, actionExecution?.statePatch ?? undefined);
+        const nextState = mergeLeadState(leadState, { ...combinedPatch, last_bot_text: reply });
         let outbound_message_id: string | null = null;
         const messagePayload = {
           organization_id,
