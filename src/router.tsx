@@ -5,6 +5,7 @@ import { Layout } from "./layouts/Layout";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import Signup from "./pages/Signup";
 import Dashboard from "./pages/ReportsDashboard";
 import Conversations from "./pages/Conversations";
 import Patients from "./pages/Patients";
@@ -17,9 +18,12 @@ import MetaCallback from "./pages/MetaCallback";
 export const AppRoutes = () => {
   return (
     <Routes>
+      {/* Public routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/signup" element={<Signup />} />
 
+      {/* Protected routes */}
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />

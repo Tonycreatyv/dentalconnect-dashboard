@@ -1,123 +1,170 @@
 import { normalizeText } from "./normalization.ts";
 
 export type Intent =
-  | "greeting"
-  | "acceptance"
-  | "activation_interest"
-  | "pricing"
-  | "book_appointment"
-  | "reschedule_appointment"
-  | "cancel_appointment"
-  | "hours"
-  | "location"
-  | "services"
-  | "insurance"
-  | "emergency"
   | "human_handoff"
-  | "selected_pain"
-  | "more_appointments"
-  | "faster_replies"
-  | "organization"
-  | "follow_up"
-  | "recommendation_request"
-  | "revenue_question"
-  | "pain_selection_confirmed"
-  | "product_interest"
-  | "why_question"
-  | "confusion"
-  | "skepticism"
-  | "curiosity"
+  | "emergency"
+  | "pricing"
+  | "services"
+  | "book_appointment"
   | "demo_interest"
   | "trial_interest"
-  | "onboarding_interest"
-  | "pricing_interest"
-  | "off_topic"
+  | "how_it_works"
+  | "confirmation"
+  | "denial"
+  | "more_appointments"
+  | "faster_replies"
+  | "follow_up"
+  | "hours"
+  | "location"
+  | "insurance"
+  | "gratitude"
+  | "confusion"
+  | "greeting"
   | "unknown";
 
 export type IntentResult = {
   intent: Intent;
-  entities?: Record<string, string>;
+  confidence: number;
+  priority: number;
 };
 
-const keywordList: Array<[Intent, string[]]> = [
-  ["acceptance", [
-    "si",
-    "sí",
-    "dale",
-    "vale",
-    "ok",
-    "vamos",
-    "me interesa",
-    "quiero probarlo",
-    "quiero probar",
-    "probarlo",
-    "quiero activarlo",
-    "activarlo",
-    "quiero que arranque",
-    "quiero que empiece",
-    "lo hacemos",
-    "listo",
-    "estoy listo",
-  ]],
-  ["activation_interest", [
-    "cómo lo activo",
-    "como lo activo",
-    "cómo lo pongo en marcha",
-    "como lo pongo en marcha",
-    "quiero activarlo",
-    "cómo empiezo",
-    "como empiezo",
-    "cómo lo inicio",
-    "como lo inicio",
-    "quiero empezar a usar",
-  ]],
-  ["greeting", ["hola", "hey", "buenas", "buen día"]],
-  ["pricing", ["cuanto cuesta", "precio", "precios", "costos"]],
-  ["book_appointment", ["agendar", "agenda", "cita", "reservar"]],
-  ["reschedule_appointment", ["reagendar", "cambiar cita", "mover cita", "modificar cita"]],
-  ["cancel_appointment", ["cancelar", "no puedo", "anular"]],
-  ["hours", ["horarios", "abierto"]],
-  ["location", ["ubicación", "dónde están", "direccion"]],
-  ["services", ["servicios", "tratamientos", "especialidades"]],
-  ["insurance", ["obra social", "seguro", "cobertura"]],
-  ["emergency", ["urgencia", "emergencia", "dolor"]],
-  ["human_handoff", ["hablar con", "humano", "asesor", "persona"]],
-  ["selected_pain", ["responder", "seguimiento", "recordatorio", "citas"]],
-  ["more_appointments", ["más citas", "conseguir más citas", "conseguir citas", "citas"]],
-  ["faster_replies", ["responder más rápido", "contestar más rápido", "respuestas rápidas", "responder rápido"]],
-  ["organization", ["organización", "más orden", "ordenar"]],
-  ["follow_up", ["seguimiento", "dar seguimiento", "reenganchar"]],
-  ["recommendation_request", [
-    "qué me conviene",
-    "qué me recomiendas",
-    "qué da más resultado",
-    "qué me genera más dinero",
-  ]],
-  ["revenue_question", [
-    "qué es lo que más me generaría dinero",
-    "qué me daría más ingresos",
-    "más dinero",
-  ]],
-  ["pain_selection_confirmed", ["sí", "si", "correcto", "exacto", "citas"]],
-  ["product_interest", ["qué hace", "cómo funciona", "háblame del producto"]],
-  ["why_question", ["para que", "por que", "why", "para qué"]],
-  ["confusion", ["no entiendo", "como funciona", "cómo funciona"]],
-  ["skepticism", ["eso funciona", "eso sirve", "en serio"]],
-  ["curiosity", ["como funciona", "qué hace", "que hace"]],
-  ["demo_interest", ["quiero ver", "demo", "ver una demo", "mostrar"]],
-  ["trial_interest", ["trial", "prueba", "quiero probar", "quiero un trial"]],
-  ["onboarding_interest", ["quiero empezar", "activar", "comenzar", "empezar"]],
-  ["pricing_interest", ["precio", "costos", "¿cuánto"]],
-  ["off_topic", ["otra cosa", "lo otro"]],
-  ["unknown", []],
+const intentPatterns: Array<{
+  intent: Intent;
+  priority: number;
+  patterns: string[];
+  exactMatch?: boolean;
+}> = [
+  {
+    intent: "human_handoff",
+    priority: 1,
+    patterns: ["hablar con alguien", "hablar con una persona", "quiero hablar con", "pasame con", "asesor", "agente", "humano", "operador"],
+  },
+  {
+    intent: "emergency",
+    priority: 1,
+    patterns: ["urgencia", "emergencia", "dolor fuerte", "me duele mucho", "es urgente"],
+  },
+  {
+    intent: "pricing",
+    priority: 2,
+    patterns: ["cuanto cuesta", "cuánto cuesta", "precio", "precios", "costos", "tarifas", "cuanto sale", "planes"],
+  },
+  {
+    intent: "services",
+    priority: 2,
+    patterns: ["qué servicios", "que servicios", "qué ofrecen", "que ofrecen", "servicios", "tratamientos"],
+  },
+  {
+    intent: "book_appointment",
+    priority: 2,
+    patterns: ["agendar cita", "reservar cita", "quiero una cita", "necesito una cita", "sacar turno"],
+  },
+  {
+    intent: "demo_interest",
+    priority: 3,
+    patterns: ["quiero ver", "demo", "mostrame", "muéstrame", "ver cómo funciona"],
+  },
+  {
+    intent: "trial_interest",
+    priority: 3,
+    patterns: ["quiero probar", "probarlo", "prueba gratis", "trial"],
+  },
+  {
+    intent: "how_it_works",
+    priority: 3,
+    patterns: ["cómo funciona", "como funciona", "explicame", "qué es esto"],
+  },
+  {
+    intent: "confirmation",
+    priority: 4,
+    patterns: ["si", "sí", "ok", "dale", "vale", "claro", "perfecto", "está bien", "de acuerdo", "listo", "bueno"],
+    exactMatch: true,
+  },
+  {
+    intent: "denial",
+    priority: 4,
+    patterns: ["no", "no gracias", "no me interesa", "ahora no", "después"],
+    exactMatch: true,
+  },
+  {
+    intent: "more_appointments",
+    priority: 5,
+    patterns: ["más citas", "conseguir más citas", "llenar agenda", "más pacientes"],
+  },
+  {
+    intent: "faster_replies",
+    priority: 5,
+    patterns: ["responder más rápido", "contestar más rápido", "no me da tiempo"],
+  },
+  {
+    intent: "follow_up",
+    priority: 5,
+    patterns: ["seguimiento", "pacientes que no vuelven", "recordatorios"],
+  },
+  {
+    intent: "hours",
+    priority: 6,
+    patterns: ["horario", "horarios", "a qué hora abren"],
+  },
+  {
+    intent: "location",
+    priority: 6,
+    patterns: ["dónde están", "ubicación", "dirección"],
+  },
+  {
+    intent: "insurance",
+    priority: 6,
+    patterns: ["seguro", "obra social", "cobertura"],
+  },
+  {
+    intent: "gratitude",
+    priority: 8,
+    patterns: ["gracias", "muchas gracias", "te agradezco"],
+  },
+  {
+    intent: "confusion",
+    priority: 8,
+    patterns: ["no entiendo", "me perdí", "qué?"],
+  },
+  {
+    intent: "greeting",
+    priority: 9,
+    patterns: ["hola", "hey", "buenas", "buen día", "buenos días", "qué tal"],
+  },
 ];
 
-export function detectIntent(text: string): IntentResult {
-  const normalized = normalizeText(text);
-  for (const [intent, phrases] of keywordList) {
-    if (phrases.some((phrase) => normalized.includes(normalizeText(phrase)))) {
-      return { intent };
+export function detectIntent(text: string, context?: { nextExpected?: string }): IntentResult {
+  const normalized = normalizeText(text).toLowerCase().trim();
+  const words = normalized.split(/\s+/);
+  const isShortResponse = words.length <= 3;
+
+  const sortedPatterns = [...intentPatterns].sort((a, b) => a.priority - b.priority);
+
+  for (const { intent, priority, patterns, exactMatch } of sortedPatterns) {
+    for (const pattern of patterns) {
+      const normalizedPattern = normalizeText(pattern).toLowerCase();
+      if (exactMatch) {
+        if (isShortResponse && (normalized === normalizedPattern || normalized.startsWith(normalizedPattern))) {
+          return { intent, confidence: context?.nextExpected ? 0.95 : 0.8, priority };
+        }
+      } else {
+        if (normalized.includes(normalizedPattern)) {
+          return { intent, confidence: 0.9, priority };
+        }
+      }
     }
   }
-  return { intent: "unknown" };
+  return { intent: "unknown", confidence: 0.1, priority: 99 };
+}
+
+export function isHighValueIntent(intent: Intent): boolean {
+  return ["pricing", "book_appointment", "demo_interest", "trial_interest", "services"].includes(intent);
+}
+
+export function needsHumanHandoff(intent: Intent): boolean {
+  return intent === "human_handoff" || intent === "emergency";
+}
+
+export function isContinuationResponse(intent: Intent): boolean {
+  return intent === "confirmation" || intent === "denial";
 }

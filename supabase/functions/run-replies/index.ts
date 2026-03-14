@@ -1,8 +1,7 @@
-/// <reference deno-types="https://deno.land/x/types/index.d.ts" />
-
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { runConversationEngine, CX2_GREETING } from "./conversationEngine.ts";
+import { createClient, type SupabaseClient as SupabaseClientBase } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { runConversationEngine, StatePatch, ConversationResult } from "./conversationEngine.ts";
 import { executeToolAction, type ActionExecutionResult } from "./domain/actionExecutor.ts";
+import { runLlmTurn, validateLlmTurnResult, LlmTurnValidation } from "./domain/llmTurn.ts";
 
 type Json = Record<string, unknown>;
 
@@ -124,8 +123,10 @@ function isOperatorOutboundJob(job: any) {
   return source.includes("operator") || source.includes("manual") || actor === "human" || role === "operator";
 }
 
+type SupabaseClientType = SupabaseClientBase<any, "public", any>;
+
 async function loadOrgSecretsKV(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClientType,
   organizationId: string
 ) {
   const keys = ["META_PAGE_ACCESS_TOKEN", "META_PAGE_ID", "META_GRAPH_VERSION"];
@@ -147,7 +148,7 @@ async function loadOrgSecretsKV(
 }
 
 async function loadOrgSecretWithFallback(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClientType,
   organizationId: string
 ) {
   const selects = [
@@ -173,7 +174,7 @@ async function loadOrgSecretWithFallback(
 }
 
 async function claimJobsViaRpc(args: {
-  supabase: ReturnType<typeof createClient>;
+  supabase: SupabaseClientType;
   organizationId: string;
   limit: number;
   lockOwner: string;
@@ -191,11 +192,79 @@ async function claimJobsViaRpc(args: {
   return v2;
 }
 
+async function loadProductKnowledge(
+  supabase: SupabaseClientType,
+  organizationId: string
+) {
+  const topics = [
+    "implementation_steps",
+    "pricing_plans",
+    "dashboard_modules",
+    "integrations",
+    "trial_flow",
+  ];
+  const data = await supabase
+    .from("product_knowledge")
+    .select("topic, content")
+    .in("topic", topics);
+  const map: Record<string, unknown> = {};
+  if (!data.error && Array.isArray(data.data)) {
+    for (const row of data.data as any[]) {
+      const topic = safeStr(row.topic, "");
+      if (topic) map[topic] = row.content;
+    }
+  }
+  return map;
+}
+
+async function loadClinicKnowledge(
+  supabase: SupabaseClientType,
+  organizationId: string
+) {
+  const topics = [
+    "services",
+    "pricing",
+    "hours",
+    "location",
+    "appointment_policy",
+    "insurance",
+  ];
+  const data = await supabase
+    .from("clinic_knowledge")
+    .select("topic, content")
+    .in("topic", topics);
+  const map: Record<string, unknown> = {};
+  if (!data.error && Array.isArray(data.data)) {
+    for (const row of data.data as any[]) {
+      const topic = safeStr(row.topic, "");
+      if (topic) map[topic] = row.content;
+    }
+  }
+  return map;
+}
+
+function mergeCollectedStates(base: Record<string, unknown>, patch: Record<string, unknown>) {
+  const baseBooking = base.booking && typeof base.booking === "object" ? { ...(base.booking as Record<string, unknown>) } : {};
+  const patchBooking = patch.booking && typeof patch.booking === "object" ? { ...(patch.booking as Record<string, unknown>) } : {};
+  return {
+    ...base,
+    ...patch,
+    booking: {
+      ...baseBooking,
+      ...patchBooking,
+    },
+  };
+}
+
 function mergeLeadState(existing: Json | null, patch: Json | null) {
   const base = existing && typeof existing === "object" ? { ...existing } : {};
   const baseCollected = base?.collected && typeof base.collected === "object" ? { ...base.collected } : {};
   const patchCollected = patch?.collected && typeof patch.collected === "object" ? { ...patch.collected } : {};
-  const merged = { ...base, ...(patch ?? {}), collected: { ...baseCollected, ...patchCollected } };
+  const merged = {
+    ...base,
+    ...(patch ?? {}),
+    collected: mergeCollectedStates(baseCollected, patchCollected),
+  };
   return merged;
 }
 
@@ -207,10 +276,7 @@ function mergeStatePatches(primary?: Json | null, secondary?: Json | null): Json
   return {
     ...primary,
     ...secondary,
-    collected: {
-      ...primaryCollected,
-      ...secondaryCollected,
-    },
+    collected: mergeCollectedStates(primaryCollected, secondaryCollected),
   };
 }
 
@@ -225,7 +291,7 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = env("SUPABASE_URL");
     const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
     const DEFAULT_META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
-    const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ?? "clinic-demo";
+    const DEFAULT_ORG_ENV = safeStr(Deno.env.get("DEFAULT_ORG"), "");
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
       auth: { persistSession: false },
@@ -238,12 +304,27 @@ Deno.serve(async (req) => {
       ? await req.json().catch(() => ({}))
       : {};
 
-    const organization_id =
+    const organization_id_input =
       safeStr(body?.organization_id, "") ||
-      safeStr(url.searchParams.get("organization_id"), "") ||
-      DEFAULT_ORG;
+      safeStr(url.searchParams.get("organization_id"), "");
 
-    if (!organization_id) return j(400, { ok: false, error: "missing_organization_id" });
+    const organization_id = organization_id_input || DEFAULT_ORG_ENV;
+
+    if (!organization_id) {
+      console.error(JSON.stringify({
+        event: "run_replies_missing_org",
+        waterline: "resolution",
+        provided_body: organization_id_input,
+        default_org: DEFAULT_ORG_ENV,
+      }));
+      return j(400, { ok: false, error: "missing_organization_id" });
+    }
+
+    logEvent("run_replies_org_resolution", {
+      organization_id,
+      provided: Boolean(organization_id_input),
+      default_used: !organization_id_input && Boolean(DEFAULT_ORG_ENV),
+    });
 
     let pageAccessToken = normalizeSecretValue(Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "");
     let metaGraphVersion = DEFAULT_META_GRAPH_VERSION;
@@ -261,12 +342,13 @@ Deno.serve(async (req) => {
     }
 
     const limit = Math.max(1, Math.min(Number(body?.limit ?? 10) || 10, 50));
-    const lockTtlSeconds = Math.max(30, Math.min(Number(body?.lock_ttl_seconds ?? 60) || 60, 1800));
+    const lockTtlSeconds = Math.max(300, Math.min(Number(body?.lock_ttl_seconds ?? 300) || 300, 1800));
     const staleLockCutoff = new Date(Date.now() - lockTtlSeconds * 1000).toISOString();
     const reclaimRes = await supabase
       .from("reply_outbox")
       .update({
         status: "queued",
+        processing_started_at: null,
         locked_at: null,
         locked_by: null,
         claimed_at: null,
@@ -276,7 +358,7 @@ Deno.serve(async (req) => {
       })
       .eq("organization_id", organization_id)
       .eq("status", "processing")
-      .lte("locked_at", staleLockCutoff)
+      .lte("processing_started_at", staleLockCutoff)
       .select("id");
     const reclaimedCount = reclaimRes.error ? 0 : reclaimRes.data?.length ?? 0;
     const claimRes = await claimJobsViaRpc({
@@ -289,6 +371,14 @@ Deno.serve(async (req) => {
     if (claimRes.error) {
       return j(500, { ok: false, error: `claim_rpc_failed:${claimRes.error.message}` });
     }
+    const productKnowledge = await loadProductKnowledge(supabase, organization_id);
+    const clinicKnowledge = await loadClinicKnowledge(supabase, organization_id);
+    const orgSettingsRes = await supabase
+      .from("org_settings")
+      .select("llm_brain_enabled, system_prompt, business_type, brand_name")
+      .eq("organization_id", organization_id)
+      .maybeSingle();
+    const llmEnabled = Boolean((orgSettingsRes.data as any)?.llm_brain_enabled);
     const jobs = Array.isArray(claimRes.data) ? claimRes.data : [];
     logEvent("run_replies_claimed", {
       execution_id: executionId,
@@ -319,6 +409,18 @@ Deno.serve(async (req) => {
     const failures: Array<{ id: string; error: string }> = [];
     const skipped_reasons: Array<{ id: string; reason: string; details?: string }> = [];
     const sampleJobIds: string[] = [];
+    const finalizeOutboxJob = (jobId: string, updates: Record<string, unknown>) =>
+      supabase
+        .from("reply_outbox")
+        .update({
+          locked_at: null,
+          locked_by: null,
+          claimed_at: null,
+          claimed_by: null,
+          processing_started_at: null,
+          ...updates,
+        })
+        .eq("id", jobId);
 
     for (const job of jobs) {
       const jobId = safeStr(job.id);
@@ -360,6 +462,7 @@ Deno.serve(async (req) => {
           safeStr(job.inbound_provider_message_id, "") ||
           safeStr((job.payload as Json | null)?.inbound_provider_message_id, "") ||
           safeStr(((job.payload as Json | null)?.raw as any)?.message?.mid, "");
+        const inboundMessageId = safeStr(job.inbound_message_id, "");
 
         if (!recipientId) throw new Error("missing_recipient_id: channel_user_id/psid");
         const attemptBump = await supabase
@@ -377,6 +480,32 @@ Deno.serve(async (req) => {
         } else {
           currentAttemptCount += 1;
         }
+        const jobStatusRow = await supabase
+          .from("reply_outbox")
+          .select("status, sent_at")
+          .eq("id", jobId)
+          .maybeSingle();
+        if (!jobStatusRow.error && jobStatusRow.data) {
+          const statusValue = safeStr((jobStatusRow.data as any).status, "");
+          const sentAtValue = safeStr((jobStatusRow.data as any).sent_at, "");
+          if (statusValue === "sent" || sentAtValue) {
+            console.log("Skipping already sent job", jobId);
+            continue;
+          }
+        }
+        const processingStartedAt = nowIso();
+        await supabase
+          .from("reply_outbox")
+          .update({
+            status: "processing",
+            processing_started_at: processingStartedAt,
+            claimed_at: processingStartedAt,
+            claimed_by: workerId,
+            locked_at: processingStartedAt,
+            locked_by: workerId,
+            updated_at: processingStartedAt,
+          })
+          .eq("id", jobId);
         const payload = ((job.payload as Json | null) ?? {}) as Json;
         const payloadSource = safeStr(payload.source, "").toLowerCase() || "inbound";
         const operatorOutbound = isOperatorOutboundJob(job) || payloadSource === "ui_manual";
@@ -449,20 +578,87 @@ Deno.serve(async (req) => {
         let statePatch: Json = {};
         let debugNote: string | null = null;
         let actionExecution: ActionExecutionResult | null = null;
+        let engineResult: ConversationResult | null = null;
+
+        // Cargar mensajes recientes para dar contexto al LLM
+        let recentMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
+        if (leadId) {
+          const recentMsgsRes = await supabase
+            .from("messages")
+            .select("role, content, created_at")
+            .eq("lead_id", leadId)
+            .order("created_at", { ascending: false })
+            .limit(10);
+
+          if (!recentMsgsRes.error && recentMsgsRes.data) {
+            recentMessages = (recentMsgsRes.data as any[])
+              .reverse()
+              .map((m: any) => ({
+                role: m.role === "assistant" ? "assistant" : "user",
+                content: String(m.content || ""),
+                timestamp: m.created_at,
+              }));
+          }
+        }
+
+        const orgSettings = (orgSettingsRes.data as any) ?? {};
+        console.log("[DEBUG] orgSettings:", JSON.stringify({
+          llm_brain_enabled: orgSettings.llm_brain_enabled,
+          business_type: orgSettings.business_type,
+          has_system_prompt: !!orgSettings.system_prompt,
+        }));
+        console.log("[DEBUG] llmEnabled:", llmEnabled);
+        console.log("[DEBUG] resolvedInboundText:", resolvedInboundText);
+        console.log("[DEBUG] recentMessages count:", recentMessages.length);
+
+        const llmContext = {
+          organizationId: organization_id,
+          inboundText: resolvedInboundText,
+          leadState,
+          orgSettings: orgSettings,
+          recentMessages,
+        };
+
+        if (llmEnabled) {
+          console.log("[DEBUG] Entering LLM block");
+          try {
+            console.log("[DEBUG] Calling runLlmTurn...");
+            const candidate = await runLlmTurn(llmContext);
+            console.log("[DEBUG] runLlmTurn result:", candidate ? "got result" : "null");
+            const validation = validateLlmTurnResult(candidate);
+            if (validation.validation.valid && validation.result) {
+              const llmResult = validation.result;
+              const currentStage = (leadState as any)?.stage ?? "INITIAL";
+              const nextStage = (llmResult.state_patch.stage as string) ?? currentStage;
+              engineResult = {
+                replyText: llmResult.reply,
+                statePatch: llmResult.state_patch,
+                debug: { intent: "llm", stage: nextStage },
+                toolAction: undefined,
+              };
+            } else if (!validation.validation.valid) {
+              console.warn("run-replies: llm validation failed", validation.validation.errors);
+            }
+          } catch (err) {
+            console.error("run-replies: llm turn failed", err);
+          }
+        }
         if (operatorOutbound) {
           reply = manualText || resolvedInboundText || "Gracias por escribirnos.";
           debugNote = "operator_outbound";
         } else {
-          const engineResult = runConversationEngine({
-            organizationId: organization_id,
-            leadId,
-            leadState,
-            inboundText: resolvedInboundText,
-            channel,
-          });
+          if (!engineResult) {
+            engineResult = runConversationEngine({
+              organizationId: organization_id,
+              leadState,
+              inboundText: resolvedInboundText,
+              knowledge: productKnowledge,
+              clinicKnowledge,
+            });
+          }
           if (engineResult?.replyText) {
             reply = clampText(engineResult.replyText, 950);
-            statePatch = engineResult.nextStatePatch ?? {};
+            statePatch = engineResult.statePatch ?? {};
             if (engineResult.toolAction && leadId) {
               actionExecution = await executeToolAction({
                 supabase,
@@ -482,7 +678,7 @@ Deno.serve(async (req) => {
                 });
               }
             }
-            debugNote = `engine:${safeStr(engineResult.debug.phase, "") || safeStr(engineResult.debug.intent, "") || "reply"}`;
+            debugNote = `engine:${safeStr(engineResult.debug.stage, "") || safeStr(engineResult.debug.intent, "") || "reply"}`;
           } else {
             reply = "Gracias por escribirnos. Te respondo en un momento.";
             statePatch = {};
@@ -502,6 +698,7 @@ Deno.serve(async (req) => {
           actor: operatorOutbound ? "operator" : "bot",
           content: operatorOutbound ? manualText || reply : reply,
           created_at: nowIso(),
+          inbound_message_id: inboundMessageId || null,
           channel_user_id: recipientId,
         };
         try {
@@ -520,14 +717,6 @@ Deno.serve(async (req) => {
           });
         }
 
-        if (reply === CX2_GREETING) {
-          console.log("CX2_GREETING_SENT", {
-            organizationId: organization_id,
-            leadId,
-            channelUserId: recipientId,
-            replyText: reply,
-          });
-        }
         logEvent("run_replies_meta_send_attempt", {
           execution_id: executionId,
           trace_id: traceId,
@@ -537,8 +726,29 @@ Deno.serve(async (req) => {
           channel,
           endpoint: `https://graph.facebook.com/${metaGraphVersion}/me/messages`,
         });
+        const { data: existingOutbound } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("organization_id", organization_id)
+          .eq("lead_id", leadId || null)
+          .eq("inbound_message_id", inboundMessageId)
+          .eq("role", "assistant")
+          .maybeSingle();
+        if (existingOutbound?.id) {
+          console.log("[DUPLICATE_PREVENTED]", {
+            job_id: jobId,
+            inbound_message_id: inboundMessageId,
+            existing_message_id: existingOutbound.id,
+          });
+          await finalizeOutboxJob(jobId, {
+            status: "sent",
+            sent_at: nowIso(),
+            updated_at: nowIso(),
+            last_error: `duplicate_prevented:existing_outbound:${existingOutbound.id}`,
+          });
+          continue;
+        }
         const metaResp = await sendToMeta({
-          channel,
           graphVersion: metaGraphVersion,
           pageAccessToken,
           recipientId,
@@ -573,6 +783,7 @@ Deno.serve(async (req) => {
             locked_by: null,
             claimed_at: null,
             claimed_by: null,
+            processing_started_at: null,
             last_error: debugNote ? `debug:${debugNote}` : null,
             payload: {
               ...((job.payload as Json | null) ?? {}),
@@ -639,25 +850,18 @@ Deno.serve(async (req) => {
 
         failures.push({ id: safeStr(job.id), error: msg });
         failed++;
-        await supabase
-          .from("reply_outbox")
-          .update({
-            status: shouldRetry ? "queued" : terminalDead ? "dead" : "failed",
-            scheduled_for: shouldRetry ? retryAt : safeStr((job as any).scheduled_for, nowIso()),
-            last_error: msg,
-            locked_at: null,
-            locked_by: null,
-            claimed_at: null,
-            claimed_by: null,
-            updated_at: nowIso(),
-            payload: {
-              ...(((job as any).payload as Json | null) ?? {}),
-              trace_id: traceId,
-              retry_backoff_seconds: delaySec,
-              retryable: shouldRetry,
-            },
-          })
-          .eq("id", safeStr(job.id));
+        await finalizeOutboxJob(safeStr(job.id), {
+          status: shouldRetry ? "queued" : terminalDead ? "dead" : "failed",
+          scheduled_for: shouldRetry ? retryAt : safeStr((job as any).scheduled_for, nowIso()),
+          last_error: msg,
+          updated_at: nowIso(),
+          payload: {
+            ...(((job as any).payload as Json | null) ?? {}),
+            trace_id: traceId,
+            retry_backoff_seconds: delaySec,
+            retryable: shouldRetry,
+          },
+        });
         logEvent("run_replies_job_failed", {
           execution_id: executionId,
           trace_id: traceId,

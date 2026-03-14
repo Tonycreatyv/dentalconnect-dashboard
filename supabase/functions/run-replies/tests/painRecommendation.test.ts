@@ -12,6 +12,7 @@ function step(state: MockState, text: string) {
     organizationId: "creatyv-product",
     inboundText: text,
     leadState: state,
+    knowledge: {},
   });
   if (!result) throw new Error(`Engine returned null for '${text}'`);
   return { result, state: mergeLeadState(state, result.statePatch) };

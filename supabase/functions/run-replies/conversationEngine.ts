@@ -1,311 +1,212 @@
 import { normalizeText } from "./domain/normalization.ts";
-import { detectIntent, Intent, IntentResult } from "./domain/intents.ts";
-import { Stage, StageOrder, getNextStage, enforceMonotonicStage } from "./domain/state.ts";
-import { shouldSkipRepeat, repeatFallback, shouldSkipDiscovery } from "./domain/rules.ts";
-import { composeResponse } from "./domain/responses.ts";
-import { handleObjection } from "./domain/objectionHandler.ts";
-import { resolveVertical } from "./domain/verticals.ts";
-import { ToolActionExecution } from "./domain/actionExecutor.ts";
+import { detectIntent, IntentResult, isHighValueIntent, needsHumanHandoff, isContinuationResponse } from "./domain/intents.ts";
+
+export type Stage = "INITIAL" | "DISCOVERY" | "QUALIFICATION" | "VALUE" | "TRIAL_OFFER" | "ACTIVATION" | "BOOKING" | "HANDOFF" | "CLOSED";
 
 export type ConversationState = {
   stage?: Stage;
-  phase?: Stage;
   lastIntent?: string;
+  nextExpected?: string;
   collected?: Record<string, unknown>;
+  orgType?: "creatyv" | "dental" | "generic";
 };
 
 export type ConversationResult = {
   replyText: string;
+  /** Patch to merge into lead state (index and tests use statePatch). */
   statePatch: Record<string, unknown>;
-  debug: { intent: string; stage: Stage };
-  toolAction?: ToolActionExecution;
+  debug: { intent: string; phase: string; route: string };
+  toolAction?: { name: string; payload: Record<string, unknown> };
 };
+
+const RESPONSES = {
+  creatyv: {
+    greeting: ["¡Hola! 👋 Soy el asistente de Creatyv. Ayudamos a negocios a responder clientes automáticamente. ¿Qué tipo de negocio tienes?"],
+    pricing: ["El precio depende del volumen. Lo mejor es que te muestre el sistema. ¿Agendamos 15 min?"],
+    services: ["Creatyv responde mensajes 24/7, captura leads, agenda citas y envía recordatorios. ¿Qué te interesa más?"],
+    demo: ["¡Perfecto! Te muestro cómo funciona. ¿Tienes 15 minutos esta semana?"],
+    trial: ["¡Genial! El trial dura 7 días gratis. ¿Con qué canal quieres empezar?"],
+    valueMoreAppointments: ["Para conseguir más citas, este sistema responde al instante y da seguimiento automático. ¿Quieres verlo?"],
+    handoff: ["Te conecto con alguien del equipo. En breve te escriben."],
+    fallback: ["Gracias por escribir. ¿En qué te puedo ayudar?"],
+  },
+  dental: {
+    greeting: ["¡Hola! 👋 Bienvenido a la clínica. ¿En qué te puedo ayudar?"],
+    pricing: ["Los precios varían según el tratamiento. ¿Te gustaría agendar una cita de valoración sin costo?"],
+    services: ["Ofrecemos limpieza, blanqueamiento, ortodoncia, implantes y más. ¿Cuál te interesa?"],
+    bookAppointment: ["¡Claro! ¿Qué día te funciona mejor? Tenemos disponibilidad de lunes a viernes."],
+    hours: ["Nuestro horario es lunes a viernes 9am-6pm, sábados 9am-2pm. ¿Quieres agendar?"],
+    location: ["Estamos en [DIRECCIÓN]. ¿Te envío la ubicación por Maps?"],
+    emergency: ["⚠️ Para emergencias, llama directamente al [TELÉFONO]. ¿Es dolor fuerte?"],
+    handoff: ["Te comunico con alguien del equipo. En breve te contactan."],
+    fallback: ["Gracias por escribirnos. ¿Buscas agendar una cita?"],
+  },
+  generic: {
+    greeting: ["¡Hola! 👋 ¿En qué te puedo ayudar?"],
+    pricing: ["Para darte precios, ¿me cuentas qué servicio te interesa?"],
+    services: ["Con gusto te cuento sobre nuestros servicios. ¿Algo específico?"],
+    handoff: ["Te conecto con alguien del equipo."],
+    fallback: ["Gracias por tu mensaje. ¿En qué te puedo ayudar?"],
+  },
+};
+
+export const CX2_GREETING = RESPONSES.creatyv.greeting[0];
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function determineOrgType(orgId: string): "creatyv" | "dental" | "generic" {
+  const id = orgId.toLowerCase();
+  if (id.includes("creatyv") || id.includes("product")) return "creatyv";
+  if (id.includes("dental") || id.includes("clinic")) return "dental";
+  return "generic";
+}
+
+function getResponses(orgType: "creatyv" | "dental" | "generic") {
+  return RESPONSES[orgType] ?? RESPONSES.generic;
+}
 
 export function runConversationEngine(args: {
   organizationId: string;
-  inboundText: string;
+  leadId: string;
   leadState: ConversationState | null;
+  inboundText: string;
+  channel: string;
 }): ConversationResult | null {
-  if (args.organizationId !== "creatyv-product") return null;
   const text = normalizeText(args.inboundText);
   if (!text) return null;
-  const intent = detectIntent(text);
-  const rawCollected = (args.leadState?.collected as Record<string, unknown>) ?? {};
-  const { stage: collectedStage, ...restCollected } = rawCollected;
-  const collected = { ...restCollected };
-  const currentStage: Stage =
-    (args.leadState?.stage as Stage) ??
-    (args.leadState?.phase as Stage) ??
-    (collectedStage as Stage) ??
-    "DISCOVERY";
-  const businessTypeCandidate =
-    String((args.leadState?.business_type ?? collected.business_type ?? "").trim()) || undefined;
-  if (businessTypeCandidate) collected.business_type = businessTypeCandidate;
-  const businessType = businessTypeCandidate;
-  const vertical = resolveVertical(businessType);
-  const context = {
-    verticalName: vertical.name,
-    verticalFocus: vertical.focus,
-    pain: vertical.pain,
-    offer: vertical.offer,
-    trialFrame: vertical.trialFrame,
-    businessTypeAlias: businessType ?? vertical.name,
-  };
 
-  const objection = handleObjection(intent.intent, currentStage);
-  if (objection) {
-    const lastQuestion = collected.last_question as string | undefined;
-    if (shouldSkipRepeat(lastQuestion, objection.questionKey, currentStage)) {
-      return fallbackForStage(currentStage, intent.intent, context);
-    }
-    return buildResult(
-      objection.replyText,
-      currentStage,
-      objection.stage,
-      objection.questionKey,
-      intent,
-      collected,
-      { [objection.flag]: true },
-      intent.intent === "demo_interest" ? { name: "show_demo", payload: { vertical: context.verticalName } } : undefined,
-      context
-    );
-  }
+  const orgType = args.leadState?.orgType ?? determineOrgType(args.organizationId);
+  const responses = getResponses(orgType);
+  const state: ConversationState = args.leadState ?? { stage: "INITIAL", orgType, collected: {} };
+  const collected = (state.collected ?? {}) as Record<string, unknown>;
+  const intent = detectIntent(text, { nextExpected: state.nextExpected });
 
-  const storedPain = String(collected.selected_pain ?? "").trim() || undefined;
-  const valueContext = buildValueContext(storedPain ?? "more_appointments", context);
-  const activationResult = handleActivationIntent(
-    currentStage,
-    intent,
-    collected,
-    context,
-    valueContext
-  );
-  if (activationResult) return activationResult;
-  const painKey = resolvePainKey(intent.intent, storedPain);
-  if (painKey) {
-    const now = new Date().toISOString();
-    const resolvedValueContext = buildValueContext(painKey, context);
-    const responsePayload = composeResponse("VALUE", intent, resolvedValueContext);
-    const updatedCollected = {
-      ...collected,
-      selected_pain: painKey,
-      selected_pain_at: now,
+  // P1: Handoff
+  if (needsHumanHandoff(intent.intent)) {
+    return {
+      replyText: pickRandom(responses.handoff),
+      statePatch: { stage: "HANDOFF", lastIntent: intent.intent },
+      debug: { intent: intent.intent, phase: "HANDOFF", route: "priority_handoff" },
+      toolAction: { name: "request_handoff", payload: {} },
     };
-    return buildResult(
-      responsePayload.replyText,
-      currentStage,
-      "VALUE",
-      responsePayload.questionKey,
-      intent,
-      updatedCollected,
-      {},
-      { name: "capture_lead_goal", payload: { goal: painKey } },
-      resolvedValueContext
-    );
   }
 
-  if (storedPain && shouldSkipDiscovery(collected, currentStage)) {
-    const responsePayload = composeResponse("VALUE", intent, valueContext);
-    return buildResult(
-      responsePayload.replyText,
-      currentStage,
-      "VALUE",
-      responsePayload.questionKey,
-      intent,
-      collected,
-      {},
-      undefined,
-      valueContext
-    );
+  // P2: High value (pricing, services, booking)
+  if (isHighValueIntent(intent.intent)) {
+    if (intent.intent === "pricing") {
+      return {
+        replyText: pickRandom(responses.pricing),
+        statePatch: { stage: "VALUE", lastIntent: "pricing", nextExpected: "demo_interest" },
+        debug: { intent: "pricing", phase: "VALUE", route: "high_value" },
+      };
+    }
+    if (intent.intent === "services") {
+      return {
+        replyText: pickRandom(responses.services),
+        statePatch: { stage: "DISCOVERY", lastIntent: "services" },
+        debug: { intent: "services", phase: "DISCOVERY", route: "high_value" },
+      };
+    }
+    if (intent.intent === "book_appointment") {
+      const resp = orgType === "dental" ? responses.bookAppointment : responses.demo;
+      return {
+        replyText: pickRandom(resp ?? responses.fallback),
+        statePatch: { stage: "BOOKING", lastIntent: "book_appointment", nextExpected: "confirm_name" },
+        debug: { intent: "book_appointment", phase: "BOOKING", route: "booking" },
+      };
+    }
+    if (intent.intent === "demo_interest" || intent.intent === "trial_interest") {
+      const resp = intent.intent === "demo_interest" ? responses.demo : responses.trial;
+      return {
+        replyText: pickRandom(resp ?? responses.fallback),
+        statePatch: { stage: "TRIAL_OFFER", lastIntent: intent.intent },
+        debug: { intent: intent.intent, phase: "TRIAL_OFFER", route: "high_value" },
+        toolAction: { name: "schedule_demo", payload: {} },
+      };
+    }
   }
 
-  const responseContext = currentStage === "VALUE" || currentStage === "ACTIVATION" ? valueContext : context;
-  const response = composeResponse(currentStage, intent, responseContext);
-  if (shouldSkipRepeat(collected.last_question as string | undefined, response.questionKey, currentStage)) {
-    const fallbackText = repeatFallback();
-    return buildResult(
-      fallbackText,
-      currentStage,
-      currentStage,
-      "repeat_fallback",
-      intent,
-      collected,
-      {},
-      undefined,
-      context
-    );
+  // P3: Continuation (si hay nextExpected y usuario confirma)
+  if (state.nextExpected && isContinuationResponse(intent.intent)) {
+    if (intent.intent === "confirmation") {
+      const resp = responses.demo ?? responses.fallback;
+      return {
+        replyText: pickRandom(resp),
+        statePatch: { stage: "TRIAL_OFFER", lastIntent: "confirmation", collected: { ...collected, confirmed: true } },
+        debug: { intent: "confirmation", phase: "TRIAL_OFFER", route: "continuation" },
+      };
+    }
+    if (intent.intent === "denial") {
+      return {
+        replyText: "Entendido. Si cambias de opinión, aquí estoy. 👋",
+        statePatch: { lastIntent: "denial" },
+        debug: { intent: "denial", phase: state.stage ?? "DISCOVERY", route: "soft_close" },
+      };
+    }
   }
 
-  const nextStageCandidate = getNextStage(currentStage, intent.intent);
-  const stage = enforceMonotonicStage(currentStage, nextStageCandidate);
-  const toolAction = resolveToolAction(stage, intent.intent, context, args.inboundText.trim());
-  return buildResult(
-    response.replyText,
-    currentStage,
-    stage,
-    response.questionKey,
-    intent,
-    collected,
-    {},
-    toolAction,
-    context
-  );
-}
+  // P4: Other intents
+  if (intent.intent === "greeting") {
+    if (state.stage === "INITIAL" || !state.lastIntent) {
+      return {
+        replyText: pickRandom(responses.greeting),
+        statePatch: { stage: "DISCOVERY", lastIntent: "greeting", nextExpected: orgType === "dental" ? undefined : "business_type", orgType },
+        debug: { intent: "greeting", phase: "DISCOVERY", route: "initial" },
+      };
+    }
+    return {
+      replyText: "¿En qué más te puedo ayudar?",
+      statePatch: { lastIntent: "greeting" },
+      debug: { intent: "greeting", phase: state.stage ?? "DISCOVERY", route: "skip_repeat" },
+    };
+  }
 
-function fallbackForStage(stage: Stage, intentName: string, context: Record<string, string>): ConversationResult {
-  const fallback = repeatFallback();
-  return buildResult(fallback, stage, stage, "fallback_repeat", { intent: intentName }, {}, {}, undefined, context);
-}
+  if (intent.intent === "hours" && responses.hours) {
+    return {
+      replyText: pickRandom(responses.hours),
+      statePatch: { lastIntent: "hours" },
+      debug: { intent: "hours", phase: state.stage ?? "DISCOVERY", route: "info" },
+    };
+  }
 
-function buildResult(
-  replyText: string,
-  currentStage: Stage,
-  nextStage: Stage,
-  questionKey: string,
-  intent: IntentResult,
-  collected: Record<string, unknown>,
-  objectionFlags: Record<string, boolean>,
-  toolAction: ToolActionExecution | undefined,
-  context: Record<string, string>
-): ConversationResult {
-  const history = Array.isArray(collected.intent_history)
-    ? [...(collected.intent_history as string[]), intent.intent]
-    : [intent.intent];
-  const stageIndex = StageOrder.indexOf(nextStage);
-  const trialOffered = stageIndex >= StageOrder.indexOf("TRIAL_OFFER") || (collected.trial_offered as boolean) === true;
-  const onboardingStarted = stageIndex >= StageOrder.indexOf("ACTIVATION") || (collected.onboarding_started as boolean) === true;
-  const resolvedBusinessType =
-    (collected.business_type as string) ?? context.businessTypeAlias ?? context.verticalName;
+  if (intent.intent === "location" && responses.location) {
+    return {
+      replyText: pickRandom(responses.location),
+      statePatch: { lastIntent: "location" },
+      debug: { intent: "location", phase: state.stage ?? "DISCOVERY", route: "info" },
+    };
+  }
+
+  if (intent.intent === "emergency" && responses.emergency) {
+    return {
+      replyText: pickRandom(responses.emergency),
+      statePatch: { lastIntent: "emergency" },
+      debug: { intent: "emergency", phase: "HANDOFF", route: "urgent" },
+    };
+  }
+
+  if (intent.intent === "gratitude") {
+    return {
+      replyText: "¡Gracias a ti! 😊",
+      statePatch: { lastIntent: "gratitude" },
+      debug: { intent: "gratitude", phase: state.stage ?? "DISCOVERY", route: "closing" },
+    };
+  }
+
+  // Fallback
+  if (state.stage === "INITIAL") {
+    return {
+      replyText: pickRandom(responses.greeting),
+      statePatch: { stage: "DISCOVERY", lastIntent: "unknown", orgType },
+      debug: { intent: "unknown", phase: "DISCOVERY", route: "fallback_greeting" },
+    };
+  }
+
   return {
-    replyText,
-    statePatch: {
-      stage: nextStage,
-      lastIntent: intent.intent,
-      business_type: resolvedBusinessType,
-      collected: {
-        ...collected,
-        last_question: questionKey,
-        intent_history: history,
-        objection_flags: { ...(collected.objection_flags as Record<string, boolean>), ...objectionFlags },
-        trial_offered: trialOffered,
-        onboarding_started: onboardingStarted,
-        business_type: resolvedBusinessType,
-        last_offer_type: nextStage,
-      },
-    },
-    debug: { intent: intent.intent, stage: nextStage },
-    toolAction,
+    replyText: pickRandom(responses.fallback),
+    statePatch: { lastIntent: "unknown" },
+    debug: { intent: "unknown", phase: state.stage ?? "DISCOVERY", route: "fallback" },
   };
-}
-
-function resolveToolAction(stage: Stage, intent: string, context: Record<string, string>, rawText: string): ToolActionExecution | undefined {
-  if (stage === "TRIAL_OFFER" && intent === "trial_interest") {
-    return { name: "start_trial", payload: { vertical: context.verticalName } };
-  }
-  if (stage === "ACTIVATION" && intent === "onboarding_interest") {
-    return { name: "begin_onboarding", payload: { vertical: context.verticalName } };
-  }
-  if (intent === "selected_pain") {
-    return { name: "capture_lead_goal", payload: { goal: rawText } };
-  }
-  if (intent === "services") {
-    return { name: "capture_business_type", payload: { businessType: context.verticalName } };
-  }
-  if (intent === "demo_interest") {
-    return { name: "show_demo", payload: { vertical: context.verticalName } };
-  }
-  return undefined;
-}
-
-const painIntentMap: Record<string, string> = {
-  selected_pain: "more_appointments",
-  more_appointments: "more_appointments",
-  faster_replies: "faster_replies",
-  organization: "organization",
-  follow_up: "follow_up",
-  pain_selection_confirmed: "more_appointments",
-  recommendation_request: "more_appointments",
-  revenue_question: "more_appointments",
-};
-
-function resolvePainKey(intent: string, storedPain?: string): string | undefined {
-  const mapped = painIntentMap[intent];
-  if (mapped) return mapped;
-  if (intent === "product_interest" && storedPain) return storedPain;
-  if (!storedPain && intent === "recommendation_request") return "more_appointments";
-  return storedPain;
-}
-
-const narratives: Record<string, { recommendation: string; reason: string; mapping: string; close: string }> = {
-  more_appointments: {
-    recommendation: "conseguir más citas",
-    reason: "Porque cada mensaje sin responder puede ser una cita perdida y una oportunidad que nunca se concreta.",
-    mapping: "Este sistema responde rápido, organiza interesados y automatiza seguimientos para empujar más conversaciones hacia cita.",
-    close: "Si querés, podés probarlo con tu clínica y ver cómo convierte mejores mensajes en citas.",
-  },
-  faster_replies: {
-    recommendation: "responder más rápido",
-    reason: "Porque cuando un paciente escribe y no recibe respuesta, la conversación se enfría y se pierde la reserva.",
-    mapping: "El sistema sostiene la atención inicial, reitera respuestas y alerta cuando necesita seguimiento para que no dependas de contestar manualmente.",
-    close: "Si querés, podés probarlo con tu clínica para que los mensajes nunca queden sin contestar.",
-  },
-  organization: {
-    recommendation: "ordenar tus consultas y mensajes",
-    reason: "Porque cuando los leads quedan dispersos, pierden continuidad y deja de generarte resultados.",
-    mapping: "El asistente centraliza conversaciones, marca prioridades y te ayuda a seguir cada caso sin perder datos.",
-    close: "Si querés, podés probarlo con tu clínica y ver cómo mantiene todo más ordenado.",
-  },
-  follow_up: {
-    recommendation: "dar seguimiento consistente",
-    reason: "Porque muchos leads se enfrían después del primer contacto y nadie retoma la conversación.",
-    mapping: "Este sistema reaviva conversaciones, recuerda seguirups y asegura que cada interesado reciba la continuidad que necesita.",
-    close: "Si querés, podés probarlo con tu clínica y dejar el seguimiento en piloto automático.",
-  },
-};
-
-function buildValueContext(painKey: string, base: Record<string, string>): Record<string, string> {
-  const narrative = narratives[painKey] ?? narratives.more_appointments;
-  return {
-    ...base,
-    recommendation: narrative.recommendation,
-    reason: narrative.reason,
-    mapping: narrative.mapping,
-    close: narrative.close,
-  };
-}
-
-function handleActivationIntent(
-  currentStage: Stage,
-  intent: IntentResult,
-  collected: Record<string, unknown>,
-  context: Record<string, string>,
-  valueContext: Record<string, string>
-): ConversationResult | null {
-  const currentIndex = StageOrder.indexOf(currentStage);
-  const valueIndex = StageOrder.indexOf("VALUE");
-  if (currentIndex < valueIndex) return null;
-
-  const trialIntents = new Set<Intent>(["acceptance", "trial_interest"]);
-  const onboardingIntents = new Set<Intent>(["activation_interest", "onboarding_interest"]);
-  let toolAction: ToolActionExecution | undefined;
-  if (trialIntents.has(intent.intent)) {
-    toolAction = { name: "start_trial", payload: { vertical: context.verticalName } };
-  } else if (onboardingIntents.has(intent.intent)) {
-    toolAction = { name: "begin_onboarding", payload: { vertical: context.verticalName } };
-  } else {
-    return null;
-  }
-
-  const responsePayload = composeResponse("ACTIVATION", intent, valueContext);
-  return buildResult(
-    responsePayload.replyText,
-    currentStage,
-    "ACTIVATION",
-    responsePayload.questionKey,
-    intent,
-    collected,
-    { acceptance: true },
-    toolAction,
-    valueContext
-  );
 }

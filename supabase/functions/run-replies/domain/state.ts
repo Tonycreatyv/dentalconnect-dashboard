@@ -31,19 +31,15 @@ export function getNextStage(current: Stage, intent: string): Stage {
   ) {
     return "VALUE";
   }
-  if (
-    intent === "book_appointment" ||
-    intent === "services" ||
-    intent === "pricing_interest" ||
-    intent === "pricing"
-  ) {
+  const isPricingIntent = intent === "pricing" || intent === "pricing_request";
+  if (intent === "book_appointment" || intent === "services" || intent === "pricing_interest" || isPricingIntent) {
     return "SOLUTION";
   }
   if (intent === "demo_interest") return "DEMO";
   if (intent === "trial_interest") return "TRIAL_OFFER";
   if (intent === "onboarding_interest" && current === "TRIAL_OFFER") return "ACTIVATION";
   if (intent === "human_handoff" && current === "SOLUTION") return "DEMO";
-  if (intent === "pricing" && current === "SOLUTION") return "CONVERSION";
+  if (isPricingIntent && current === "SOLUTION") return "CONVERSION";
   return current;
 }
 

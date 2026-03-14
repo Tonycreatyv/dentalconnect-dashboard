@@ -31,6 +31,7 @@ Deno.test("conversation engine stage stored at top level", () => {
     organizationId: "creatyv-product",
     inboundText: "hola",
     leadState: { collected: {} },
+    knowledge: {},
   });
   assertEquals(typeof result?.statePatch?.stage, "string");
   assertEquals(result?.statePatch?.collected?.stage, undefined);

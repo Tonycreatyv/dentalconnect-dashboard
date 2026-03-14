@@ -105,8 +105,10 @@ const STAGE_OVERRIDES: Partial<Record<Stage, Partial<Record<Intent, PlaybookEntr
   },
 };
 
+const FALLBACK_ENTRY: PlaybookEntry = DEFAULT_ENTRIES["DISCOVERY"];
+
 export function getPlaybookEntry(stage: Stage, intent: Intent): PlaybookEntry {
   const overrides = STAGE_OVERRIDES[stage]?.[intent];
   if (overrides) return overrides;
-  return DEFAULT_ENTRIES[stage];
+  return DEFAULT_ENTRIES[stage] ?? FALLBACK_ENTRY;
 }
