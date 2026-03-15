@@ -205,11 +205,11 @@ export default function Tomorrow() {
   }
 
   const colorClasses: Record<string, { bg: string; text: string; border: string }> = {
-    blue: { bg: "bg-blue-50", text: "text-blue-600", border: "border-blue-100" },
-    amber: { bg: "bg-amber-50", text: "text-amber-600", border: "border-amber-100" },
-    purple: { bg: "bg-purple-50", text: "text-purple-600", border: "border-purple-100" },
-    emerald: { bg: "bg-emerald-50", text: "text-emerald-600", border: "border-emerald-100" },
-    rose: { bg: "bg-rose-50", text: "text-rose-600", border: "border-rose-100" },
+    blue: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-400/20" },
+    amber: { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-400/20" },
+    purple: { bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-400/20" },
+    emerald: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-400/20" },
+    rose: { bg: "bg-rose-500/10", text: "text-rose-400", border: "border-rose-400/20" },
   };
 
   return (
@@ -228,17 +228,17 @@ export default function Tomorrow() {
 
         {/* Quick stats */}
         <div className="flex gap-2 px-4 pb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-100">
-            <span className="text-lg font-bold text-blue-600">{appointments.length}</span>
-            <span className="text-xs text-blue-700">citas</span>
+          <div className="shrink-0 flex items-center gap-2 rounded-xl border border-blue-400/20 bg-blue-500/10 px-3 py-2">
+            <span className="text-lg font-bold text-blue-400">{appointments.length}</span>
+            <span className="text-xs text-blue-300">citas</span>
           </div>
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-100">
-            <span className="text-lg font-bold text-emerald-600">{confirmed.length}</span>
-            <span className="text-xs text-emerald-700">confirmadas</span>
+          <div className="shrink-0 flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2">
+            <span className="text-lg font-bold text-emerald-400">{confirmed.length}</span>
+            <span className="text-xs text-emerald-300">confirmadas</span>
           </div>
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-100">
-            <span className="text-lg font-bold text-amber-600">{gaps.length}</span>
-            <span className="text-xs text-amber-700">huecos</span>
+          <div className="shrink-0 flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2">
+            <span className="text-lg font-bold text-amber-400">{gaps.length}</span>
+            <span className="text-xs text-amber-300">huecos</span>
           </div>
         </div>
       </div>
@@ -285,7 +285,7 @@ export default function Tomorrow() {
                 onClick={async () => {
                   for (const a of unconfirmed) await sendConfirmation(a);
                 }}
-                className="text-sm text-blue-600 font-medium"
+                className="text-sm font-medium text-[#3CBDB9]"
               >
                 Enviar todas
               </button>
@@ -297,8 +297,8 @@ export default function Tomorrow() {
                 const isSending = sendingId === appt.id;
 
                 return (
-                  <div key={appt.id} className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 border border-amber-100">
-                    <div className="text-sm font-bold text-amber-700 w-14">{time}</div>
+                  <div key={appt.id} className="flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3">
+                    <div className="w-14 text-sm font-bold text-amber-300">{time}</div>
                     <div className="flex-1 min-w-0">
                       <div className="truncate font-medium text-white">{appt.patient_name || "Paciente"}</div>
                       <div className="truncate text-xs text-white/50">{appt.reason || "Consulta"}</div>
@@ -336,7 +336,7 @@ export default function Tomorrow() {
                     <button
                       onClick={() => offerWaitlist(gap)}
                       disabled={isSending}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-medium hover:bg-emerald-200 disabled:opacity-50 transition"
+                      className="flex items-center gap-1 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
                     >
                       <Users className="h-3 w-3" />
                       {isSending ? "..." : "Ofrecer"}
@@ -357,8 +357,8 @@ export default function Tomorrow() {
                 const iso = appointmentISO(appt);
                 const time = iso ? hourLabel(iso) : "--:--";
                 return (
-                  <div key={appt.id} className="flex items-center gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                    <div className="text-sm font-bold text-emerald-700 w-14">{time}</div>
+                  <div key={appt.id} className="flex items-center gap-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3">
+                    <div className="w-14 text-sm font-bold text-emerald-300">{time}</div>
                     <div className="flex-1 min-w-0">
                       <div className="truncate font-medium text-white">{appt.patient_name || "Paciente"}</div>
                       <div className="truncate text-xs text-white/50">{appt.reason || "Consulta"}</div>
@@ -382,10 +382,10 @@ export default function Tomorrow() {
               { text: "Revisar historial de pacientes del día", done: false },
             ].map((item, idx) => (
               <div key={idx} className={`flex items-center gap-3 rounded-xl p-3 ${item.done ? "border border-emerald-400/20 bg-emerald-500/10" : "border border-white/10 bg-white/5"}`}>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${item.done ? "bg-emerald-500 border-emerald-500" : "border-slate-300"}`}>
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${item.done ? "bg-emerald-500 border-emerald-500" : "border-white/10"}`}>
                   {item.done && <CheckCircle2 className="h-3 w-3 text-white" />}
                 </div>
-                <span className={`text-sm ${item.done ? "text-emerald-700 line-through" : "text-slate-700"}`}>
+                <span className={`text-sm ${item.done ? "text-emerald-300 line-through" : "text-white/80"}`}>
                   {item.text}
                 </span>
               </div>
@@ -395,7 +395,7 @@ export default function Tomorrow() {
 
         {/* Empty state */}
         {loading ? (
-          <div className="py-8 text-center text-sm text-slate-500">Cargando...</div>
+          <div className="py-8 text-center text-sm text-white/50">Cargando...</div>
         ) : appointments.length === 0 && gaps.length === 0 ? (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-8 text-center">
             <CalendarCheck2 className="mx-auto mb-3 h-12 w-12 text-white/30" />

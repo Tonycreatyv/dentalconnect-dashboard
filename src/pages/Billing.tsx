@@ -241,7 +241,7 @@ export default function Billing() {
                     <div key={idx} className="flex items-center gap-2">
                       <div className={`flex items-center justify-center w-5 h-5 rounded-full ${feature.included ? "bg-emerald-500/10" : "bg-white/10"}`}>
                         {feature.included ? (
-                          <Check className="h-3 w-3 text-emerald-600" />
+                          <Check className="h-3 w-3 text-emerald-400" />
                         ) : (
                           <span className="h-0.5 w-1.5 rounded-full bg-white/30" />
                         )}
@@ -274,7 +274,7 @@ export default function Billing() {
               <div className="text-2xl font-bold text-white">
                 {selectedPlanData.name} - ${selectedPlanData.price}/mes
               </div>
-              <div className="text-sm text-emerald-600 font-medium mt-1">
+              <div className="mt-1 text-sm font-medium text-emerald-400">
                 ✓ 14 días de prueba gratis incluidos
               </div>
             </div>
@@ -282,7 +282,7 @@ export default function Billing() {
             <button
               onClick={startCheckout}
               disabled={loading}
-              className="flex items-center justify-center gap-2 h-14 px-8 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-lg hover:opacity-90 disabled:opacity-50 transition shadow-lg shadow-blue-200"
+              className="flex items-center justify-center gap-2 h-14 px-8 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-lg hover:opacity-90 disabled:opacity-50 transition shadow-none shadow-blue-200"
             >
               {loading ? (
                 "Procesando..."
@@ -296,7 +296,7 @@ export default function Billing() {
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm mb-4">
+            <div className="mb-4 rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-sm text-rose-400">
               {error}
             </div>
           )}
@@ -325,7 +325,7 @@ export default function Billing() {
             const Icon = item.icon;
             return (
               <div key={idx} className="rounded-xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100 text-blue-600 mb-3">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
                   <Icon className="h-5 w-5" />
                 </div>
                 <div className="mb-1 font-semibold text-white">{item.title}</div>
@@ -348,7 +348,7 @@ export default function Billing() {
             {TESTIMONIALS.map((t, idx) => (
               <div key={idx} className="rounded-xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-start gap-3">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 font-bold">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10 font-bold text-blue-400">
                     {t.avatar}
                   </div>
                   <div>

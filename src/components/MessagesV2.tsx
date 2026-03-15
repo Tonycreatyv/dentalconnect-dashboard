@@ -34,11 +34,11 @@ export default function MessagesV2() {
   }, []);
 
   if (loading) {
-    return <p className="text-sm text-slate-400">Loading messages…</p>;
+    return <p className="text-sm text-white/40">Loading messages…</p>;
   }
 
   if (!messages.length) {
-    return <p className="text-sm text-slate-400">No messages yet.</p>;
+    return <p className="text-sm text-white/40">No messages yet.</p>;
   }
 
   return (
@@ -48,7 +48,7 @@ export default function MessagesV2() {
           key={msg.id}
           className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3"
         >
-          <div className="flex justify-between text-xs text-slate-500">
+          <div className="flex justify-between text-xs text-white/50">
             <span>{msg.platform}</span>
             <span>{new Date(msg.created_at).toLocaleString()}</span>
           </div>

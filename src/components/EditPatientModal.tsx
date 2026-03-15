@@ -102,7 +102,7 @@ export function EditPatientModal({
             Cancelar
           </button>
           <button
-            className="rounded-xl bg-white px-4 py-2 font-semibold text-black hover:bg-white/90 disabled:opacity-50"
+            className="rounded-xl bg-[#3CBDB9] px-4 py-2 font-semibold text-white hover:bg-[#35a9a5] disabled:opacity-50"
             onClick={save}
             disabled={saving}
           >

@@ -86,42 +86,42 @@ function statusBadge(statusRaw: string | null | undefined) {
   if (s === "confirmed") {
     return {
       label: "CONFIRMADA",
-      className: "border-[#E5E7EB] bg-[#F4F5F7] text-blue-700",
+      className: "border-blue-400/20 bg-blue-500/10 text-blue-400",
       dot: "bg-blue-600",
     };
   }
   if (s === "cancelled") {
     return {
       label: "CANCELADA",
-      className: "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700",
+      className: "border-white/10 bg-white/5 text-white/80",
       dot: "bg-slate-400",
     };
   }
   if (s === "no_show") {
     return {
       label: "NO-SHOW",
-      className: "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700",
+      className: "border-[#E5E7EB] bg-[#F4F5F7] text-white/80",
       dot: "bg-slate-400",
     };
   }
   if (s === "completed") {
     return {
       label: "ATENDIDA",
-      className: "border-[#E5E7EB] bg-[#F4F5F7] text-blue-700",
+      className: "border-blue-400/20 bg-blue-500/10 text-blue-400",
       dot: "bg-blue-600",
     };
   }
   if (s === "requested") {
     return {
       label: "SOLICITADA",
-      className: "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700",
+      className: "border-[#E5E7EB] bg-[#F4F5F7] text-white/80",
       dot: "bg-slate-400",
     };
   }
 
   return {
     label: "PENDIENTE",
-    className: "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700",
+    className: "border-white/10 bg-white/5 text-white/80",
     dot: "bg-slate-400",
   };
 }

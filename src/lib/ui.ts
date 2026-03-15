@@ -6,7 +6,7 @@ export const panelHover =
   "rounded-2xl border border-slate-800 bg-slate-950/35 hover:bg-slate-950/45 transition-colors";
 
 export const panelHeader =
-  "px-4 py-3 text-xs font-semibold tracking-widest text-slate-400 border-b border-slate-800";
+  "px-4 py-3 text-xs font-semibold tracking-widest text-white/40 border-b border-slate-800";
 
 export const kpiCard =
   "rounded-2xl border border-slate-800 bg-slate-950/35 px-4 py-4";
@@ -21,7 +21,7 @@ export const btnPrimary =
   "inline-flex items-center gap-2 rounded-xl border border-emerald-700/40 bg-emerald-600/15 px-3 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed";
 
 export const inputBase =
-  "w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-600/40 focus:ring-2 focus:ring-emerald-700/20";
+  "w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 placeholder:text-white/50 outline-none focus:border-emerald-600/40 focus:ring-2 focus:ring-emerald-700/20";
 
 export const selectBase =
   "w-full rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-600/40 focus:ring-2 focus:ring-emerald-700/20";

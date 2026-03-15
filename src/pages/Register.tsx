@@ -234,7 +234,7 @@ export default function Register() {
                 <button
                   type="submit"
                   disabled={!canSubmit}
-                  className="mt-1 h-12 rounded-2xl bg-white text-black font-semibold tracking-[0.06em] hover:bg-white/90 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                  className="mt-1 h-12 rounded-2xl bg-[#3CBDB9] text-white font-semibold tracking-[0.06em] hover:bg-[#35a9a5] disabled:opacity-60 disabled:cursor-not-allowed transition"
                 >
                   {busy ? "Creando..." : "Crear cuenta"}
                 </button>

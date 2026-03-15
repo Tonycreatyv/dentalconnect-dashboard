@@ -110,7 +110,7 @@ export default function Integrations() {
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-100">Integraciones</h1>
-          <p className="text-sm text-slate-400">Conecta tus canales para recibir y responder mensajes.</p>
+          <p className="text-sm text-white/40">Conecta tus canales para recibir y responder mensajes.</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -142,7 +142,7 @@ export default function Integrations() {
             <div key={p.key} className={panelHover}>
               <div className={panelHeader}>
                 <div className="flex items-center justify-between">
-                  <div className="text-xs text-slate-400">{p.hint}</div>
+                  <div className="text-xs text-white/40">{p.hint}</div>
                   <span className={`rounded-full border px-2 py-1 text-[11px] ${badge(status)}`}>
                     {label(status)}
                   </span>
@@ -153,7 +153,7 @@ export default function Integrations() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-lg font-semibold text-slate-100">{p.label}</div>
-                    <div className="mt-1 text-sm text-slate-400">{p.desc}</div>
+                    <div className="mt-1 text-sm text-white/40">{p.desc}</div>
 
                     {lastError ? (
                       <div className="mt-3 rounded-xl border border-rose-900/60 bg-rose-950/20 px-3 py-2 text-xs text-rose-200">
@@ -216,7 +216,7 @@ export default function Integrations() {
 
       <div className="rounded-2xl border border-slate-800 bg-slate-950/55 px-4 py-4 text-sm text-slate-300">
         <div className="font-semibold text-slate-100">Nota</div>
-        <div className="mt-1 text-slate-400">
+        <div className="mt-1 text-white/40">
           Para WhatsApp/Messenger/Instagram, la conexión debe pasar por Edge Function (tokens y secretos no se guardan en el navegador).
         </div>
       </div>

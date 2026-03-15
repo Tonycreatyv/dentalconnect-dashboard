@@ -142,36 +142,36 @@ export default function ReportsDashboard() {
         lastActivityLabel={lastActivityLabel}
       >
         <Link to="/conversations" className={kpiCard}>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-2 text-xs text-white/40">
             <MessageSquare className="h-4 w-4" />
             MENSAJES HOY
           </div>
           <div className="mt-2 text-3xl font-semibold text-slate-100">
             {loading ? "—" : kpis.messagesToday}
           </div>
-          <div className="mt-1 text-sm text-slate-400">Entradas de hoy.</div>
+          <div className="mt-1 text-sm text-white/40">Entradas de hoy.</div>
         </Link>
 
         <Link to="/appointments" className={kpiCard}>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-2 text-xs text-white/40">
             <CalendarDays className="h-4 w-4" />
             CITAS 7 DÍAS
           </div>
           <div className="mt-2 text-3xl font-semibold text-slate-100">
             {loading ? "—" : kpis.appts7d}
           </div>
-          <div className="mt-1 text-sm text-slate-400">Próximas en 7 días.</div>
+          <div className="mt-1 text-sm text-white/40">Próximas en 7 días.</div>
         </Link>
 
         <Link to="/patients" className={kpiCard}>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-2 text-xs text-white/40">
             <Users className="h-4 w-4" />
             LEADS
           </div>
           <div className="mt-2 text-3xl font-semibold text-slate-100">
             {loading ? "—" : kpis.leadsTotal}
           </div>
-          <div className="mt-1 text-sm text-slate-400">Total registrados.</div>
+          <div className="mt-1 text-sm text-white/40">Total registrados.</div>
         </Link>
       </LobbyHero>
 
@@ -186,7 +186,7 @@ export default function ReportsDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-lg font-semibold text-slate-100">Resumen</div>
-              <div className="text-sm text-slate-400">Actividad reciente y accesos rápidos.</div>
+              <div className="text-sm text-white/40">Actividad reciente y accesos rápidos.</div>
             </div>
 
             <button type="button" className={btnGhost} onClick={load} disabled={loading}>
@@ -199,21 +199,21 @@ export default function ReportsDashboard() {
         <div className="px-4 py-4">
           <div className="grid gap-3 md:grid-cols-3">
             <Link to="/conversations" className={kpiCard}>
-              <div className="text-xs text-slate-400">CHATS</div>
+              <div className="text-xs text-white/40">CHATS</div>
               <div className="mt-2 text-sm text-slate-200">
                 Ver chats y responder por canal.
               </div>
             </Link>
 
             <Link to="/appointments" className={kpiCard}>
-              <div className="text-xs text-slate-400">CITAS</div>
+              <div className="text-xs text-white/40">CITAS</div>
               <div className="mt-2 text-sm text-slate-200">
                 Abrir agenda y próximas citas.
               </div>
             </Link>
 
             <Link to="/settings" className={kpiCard}>
-              <div className="text-xs text-slate-400">AJUSTES</div>
+              <div className="text-xs text-white/40">AJUSTES</div>
               <div className="mt-2 text-sm text-slate-200">
                 Configuración de clínica y prompts.
               </div>

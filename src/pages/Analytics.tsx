@@ -104,7 +104,7 @@ const Analytics = () => {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-slate-100">Analytics</h2>
-        <p className="mt-2 text-sm text-slate-400">Performance across messaging and scheduling.</p>
+        <p className="mt-2 text-sm text-white/40">Performance across messaging and scheduling.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -121,21 +121,21 @@ const Analytics = () => {
 
       <SectionCard title="Appointment conversion" description="Requested vs confirmed appointments.">
         {loading ? (
-          <p className="text-sm text-slate-400">Loading appointment analytics...</p>
+          <p className="text-sm text-white/40">Loading appointment analytics...</p>
         ) : appointments.length === 0 ? (
           <EmptyState title="No appointment data" message="Conversion metrics will appear here." />
         ) : (
           <div className="grid gap-4 md:grid-cols-3">
             <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Requested</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/50">Requested</p>
               <p className="mt-3 text-2xl font-semibold text-slate-100">{appointmentStats.requested}</p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Confirmed</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/50">Confirmed</p>
               <p className="mt-3 text-2xl font-semibold text-slate-100">{appointmentStats.confirmed}</p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Cancelled</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/50">Cancelled</p>
               <p className="mt-3 text-2xl font-semibold text-slate-100">{appointmentStats.cancelled}</p>
             </div>
           </div>

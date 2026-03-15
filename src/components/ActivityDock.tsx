@@ -35,7 +35,7 @@ export function ActivityDock() {
       {!open ? (
         <button
           onClick={() => setOpen(true)}
-          className="group flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950/70 px-3 py-2 text-xs text-slate-200 shadow-lg backdrop-blur hover:bg-slate-950"
+          className="group flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950/70 px-3 py-2 text-xs text-slate-200 shadow-none backdrop-blur hover:bg-slate-950"
         >
           <span className="relative inline-flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
@@ -53,7 +53,7 @@ export function ActivityDock() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <div className="text-xs font-semibold text-slate-100">Activity</div>
-                  <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                  <span className="inline-flex items-center gap-1 text-[11px] text-white/40">
                     <span className="relative inline-flex h-2 w-2">
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-35" />
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
@@ -61,7 +61,7 @@ export function ActivityDock() {
                     Live
                   </span>
                 </div>
-                <div className="truncate text-[11px] text-slate-400">
+                <div className="truncate text-[11px] text-white/40">
                   {hasEvents ? `${events.length} eventos` : "Esperando eventos…"}
                 </div>
               </div>
@@ -90,7 +90,7 @@ export function ActivityDock() {
           {/* Body */}
           <div className="max-h-[280px] overflow-auto px-2 py-2">
             {!hasEvents ? (
-              <div className="px-2 py-6 text-center text-xs text-slate-400">
+              <div className="px-2 py-6 text-center text-xs text-white/40">
                 Todavía no hay eventos. Cuando entren mensajes o se envíen respuestas, aparecerán aquí.
               </div>
             ) : (
@@ -117,14 +117,14 @@ export function ActivityDock() {
                             {e.title}
                           </div>
                           {e.detail ? (
-                            <div className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">
+                            <div className="mt-0.5 line-clamp-2 text-[11px] text-white/40">
                               {e.detail}
                             </div>
                           ) : null}
                         </div>
                       </div>
 
-                      <div className="shrink-0 text-[11px] text-slate-500">
+                      <div className="shrink-0 text-[11px] text-white/50">
                         {fmtTime(e.ts)}
                       </div>
                     </div>
@@ -135,7 +135,7 @@ export function ActivityDock() {
           </div>
 
           {/* Footer hint */}
-          <div className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-500">
+          <div className="border-t border-slate-800 px-3 py-2 text-[11px] text-white/50">
             Tip: esto muestra acciones del sistema (inbox, envíos, errores). No afecta performance.
           </div>
         </div>

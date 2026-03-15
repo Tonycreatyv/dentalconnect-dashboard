@@ -183,7 +183,7 @@ export default function Patients() {
         {loading ? (
           <div className="text-sm text-white/60">Cargando…</div>
         ) : error ? (
-          <div className="text-sm text-rose-600">{error}</div>
+          <div className="text-sm text-rose-400">{error}</div>
         ) : patients.length === 0 ? (
           <EmptyState title="Sin pacientes" message="Cuando registres citas con paciente, aparecerán aquí." />
         ) : (
@@ -207,7 +207,7 @@ export default function Patients() {
                   </div>
                   <div className="flex items-center gap-2">
                     {p.nextVisitISO ? (
-                      <span className="rounded-full border border-emerald-300/50 bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                      <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-400">
                         Próxima cita
                       </span>
                     ) : null}

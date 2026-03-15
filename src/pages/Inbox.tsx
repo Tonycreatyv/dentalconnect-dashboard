@@ -312,8 +312,8 @@ export default function Inbox() {
             </div>
           </div>
           {selectedLead && selectedLead.status !== "attended" && (
-            <button onClick={(e) => markAsHandled(selectedLead.id, e)} className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-100 hover:bg-emerald-200 transition" title="Marcar atendido">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+            <button onClick={(e) => markAsHandled(selectedLead.id, e)} className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 transition" title="Marcar atendido">
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
             </button>
           )}
         </div>
@@ -391,7 +391,7 @@ export default function Inbox() {
                             <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                               <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/50">{channelLabel}</span>
                               {isAttended && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
                                   <CheckCircle2 className="h-2.5 w-2.5" /> Atendido
                                 </span>
                               )}
@@ -564,10 +564,10 @@ export default function Inbox() {
                   </div>
 
                   {/* Status */}
-                  {sendState === "sent" && <div className="mt-2 text-xs text-emerald-600">✓ Enviado</div>}
+                  {sendState === "sent" && <div className="mt-2 text-xs text-emerald-400">✓ Enviado</div>}
                   {sendError && <div className="mt-2 text-xs text-rose-500">{sendError}</div>}
                   {sendState === "failed" && retryDraft && (
-                    <button onClick={() => { setComposer(retryDraft); setSendError(null); setSendState("idle"); }} className="mt-2 text-xs font-medium text-amber-600 hover:text-amber-700">
+                    <button onClick={() => { setComposer(retryDraft); setSendError(null); setSendState("idle"); }} className="mt-2 text-xs font-medium text-amber-400 hover:text-amber-300">
                       Reintentar
                     </button>
                   )}

@@ -60,7 +60,7 @@ export function NotificationsDropdown({
       </div>
 
       {total === 0 ? (
-        <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-400">
+        <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-white/40">
           Sin notificaciones por ahora.
         </div>
       ) : (
@@ -103,7 +103,7 @@ export function NotificationsDropdown({
         </div>
       )}
 
-      <div className="mt-3 px-1 text-[11px] text-slate-500">
+      <div className="mt-3 px-1 text-[11px] text-white/50">
         Tip: esto combina inbox, citas y outbox en un panel rápido.
       </div>
     </div>

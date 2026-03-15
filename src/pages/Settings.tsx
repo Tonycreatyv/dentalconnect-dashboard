@@ -376,7 +376,7 @@ export default function Settings() {
 
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
         {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`shrink-0 px-4 py-2 rounded-xl text-sm font-medium ${tab === t.key ? "bg-white text-[#0B1117]" : "bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"}`}>{t.label}</button>
+          <button key={t.key} onClick={() => setTab(t.key)} className={`shrink-0 px-4 py-2 rounded-xl text-sm font-medium ${tab === t.key ? "bg-white/10 text-white" : "bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"}`}>{t.label}</button>
         ))}
       </div>
 

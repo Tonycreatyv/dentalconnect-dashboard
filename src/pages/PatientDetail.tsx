@@ -86,11 +86,11 @@ const PatientDetail = () => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Patient profile</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-white/50">Patient profile</p>
           <h2 className="mt-2 text-2xl font-semibold text-slate-100">
             {patient?.full_name ?? "Unnamed patient"}
           </h2>
-          <p className="mt-1 text-sm text-slate-400">{patient?.phone ?? "No phone on file"}</p>
+          <p className="mt-1 text-sm text-white/40">{patient?.phone ?? "No phone on file"}</p>
         </div>
         <Link to="/patients" className="text-sm text-teal-300 hover:text-teal-200">
           Back to patients
@@ -99,7 +99,7 @@ const PatientDetail = () => {
 
       <SectionCard title="Conversation history" description="Read-only message timeline.">
         {loading ? (
-          <p className="text-sm text-slate-400">Loading messages...</p>
+          <p className="text-sm text-white/40">Loading messages...</p>
         ) : messages.length === 0 ? (
           <EmptyState
             title="No messages"
@@ -117,9 +117,9 @@ const PatientDetail = () => {
                     <p className="text-sm font-medium text-slate-100">
                       {message.role ?? "patient"}
                     </p>
-                    <p className="text-xs text-slate-500">{message.channel ?? "unknown"}</p>
+                    <p className="text-xs text-white/50">{message.channel ?? "unknown"}</p>
                   </div>
-                  <p className="text-xs text-slate-500">{formatDateTime(message.created_at)}</p>
+                  <p className="text-xs text-white/50">{formatDateTime(message.created_at)}</p>
                 </div>
                 <p className="mt-2 text-sm text-slate-300">{message.message ?? "(no content)"}</p>
               </div>
@@ -130,13 +130,13 @@ const PatientDetail = () => {
 
       <SectionCard title="Appointments" description="Requests and scheduled visits.">
         {loading ? (
-          <p className="text-sm text-slate-400">Loading appointments...</p>
+          <p className="text-sm text-white/40">Loading appointments...</p>
         ) : appointments.length === 0 ? (
           <EmptyState title="No appointments" message="No appointments linked to this patient." />
         ) : (
           <div className="overflow-hidden rounded-xl border border-slate-800">
             <table className="min-w-full divide-y divide-slate-800 text-sm">
-              <thead className="bg-slate-950/60 text-xs uppercase tracking-[0.2em] text-slate-500">
+              <thead className="bg-slate-950/60 text-xs uppercase tracking-[0.2em] text-white/50">
                 <tr>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Date</th>

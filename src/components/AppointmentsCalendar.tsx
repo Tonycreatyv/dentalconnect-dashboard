@@ -130,10 +130,10 @@ export function AppointmentsCalendar({ loading, appointments, onCreate }: Props)
         <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4 text-slate-400" />
+              <CalendarDays className="h-4 w-4 text-white/40" />
               <div className="truncate text-lg font-semibold text-slate-100">Agenda</div>
             </div>
-            <div className="mt-1 text-sm text-slate-400">{rangeLabel}</div>
+            <div className="mt-1 text-sm text-white/40">{rangeLabel}</div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -165,7 +165,7 @@ export function AppointmentsCalendar({ loading, appointments, onCreate }: Props)
 
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-950 hover:opacity-95"
+              className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-slate-950 hover:opacity-95"
               onClick={onCreate}
             >
               <Plus className="h-4 w-4" />
@@ -193,7 +193,7 @@ export function AppointmentsCalendar({ loading, appointments, onCreate }: Props)
                     : "border-slate-800 bg-slate-950/30 hover:bg-slate-950/50 hover:border-slate-700",
                 ].join(" ")}
               >
-                <div className="text-xs text-slate-400">{formatDayLabel(d).toUpperCase()}</div>
+                <div className="text-xs text-white/40">{formatDayLabel(d).toUpperCase()}</div>
                 <div className="mt-1 text-lg font-semibold text-slate-100">{formatDayNum(d)}</div>
 
                 {count > 0 ? (
@@ -210,13 +210,13 @@ export function AppointmentsCalendar({ loading, appointments, onCreate }: Props)
         <div className="border-t border-slate-800 px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm text-slate-400">Día seleccionado</div>
+              <div className="text-sm text-white/40">Día seleccionado</div>
               <div className="text-lg font-semibold text-slate-100">
                 {selectedDate.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
               </div>
             </div>
 
-            <div className="text-xs text-slate-400">
+            <div className="text-xs text-white/40">
               {loading ? "Cargando…" : list.length ? `${list.length} cita(s)` : "Sin citas"}
             </div>
           </div>
@@ -231,11 +231,11 @@ export function AppointmentsCalendar({ loading, appointments, onCreate }: Props)
             ) : list.length === 0 ? (
               <div className="rounded-2xl border border-slate-800 bg-slate-950/30 px-4 py-6">
                 <div className="text-sm font-semibold text-slate-100">Aún no hay citas este día.</div>
-                <div className="mt-1 text-sm text-slate-400">Crea una cita o simula una para demo.</div>
+                <div className="mt-1 text-sm text-white/40">Crea una cita o simula una para demo.</div>
                 <button
                   type="button"
                   onClick={onCreate}
-                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-950"
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-slate-950"
                 >
                   <Plus className="h-4 w-4" />
                   Crear cita
@@ -265,7 +265,7 @@ export function AppointmentsCalendar({ loading, appointments, onCreate }: Props)
                           </div>
 
                           {a.notes ? (
-                            <div className="mt-2 text-sm text-slate-400 line-clamp-2">{a.notes}</div>
+                            <div className="mt-2 text-sm text-white/40 line-clamp-2">{a.notes}</div>
                           ) : null}
                         </div>
 

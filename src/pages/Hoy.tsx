@@ -182,8 +182,8 @@ export default function Hoy() {
       </div>
 
       <div className="flex gap-2">
-        <button onClick={() => setView("day")} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${view === "day" ? "bg-white text-[#0B1117]" : "bg-white/5 border border-white/10 text-white/70"}`}>Día</button>
-        <button onClick={() => setView("week")} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${view === "week" ? "bg-white text-[#0B1117]" : "bg-white/5 border border-white/10 text-white/70"}`}>Semana</button>
+        <button onClick={() => setView("day")} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${view === "day" ? "bg-white/10 text-white" : "bg-white/5 border border-white/10 text-white/70"}`}>Día</button>
+        <button onClick={() => setView("week")} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${view === "week" ? "bg-white/10 text-white" : "bg-white/5 border border-white/10 text-white/70"}`}>Semana</button>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>

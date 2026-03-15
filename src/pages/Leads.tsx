@@ -64,11 +64,11 @@ function formatRelativeTime(dateStr: string | null): string {
 // Status badge component
 function StatusBadge({ status }: { status: string | null }) {
   const statusConfig: Record<string, { label: string; bg: string; text: string }> = {
-    new: { label: "Nuevo", bg: "bg-blue-100", text: "text-blue-700" },
-    contacted: { label: "Contactado", bg: "bg-amber-100", text: "text-amber-700" },
-    qualified: { label: "Calificado", bg: "bg-purple-100", text: "text-purple-700" },
-    attended: { label: "Atendido", bg: "bg-emerald-100", text: "text-emerald-700" },
-    lost: { label: "Perdido", bg: "bg-slate-100", text: "text-slate-500" },
+    new: { label: "Nuevo", bg: "bg-blue-500/10", text: "text-blue-400" },
+    contacted: { label: "Contactado", bg: "bg-amber-500/10", text: "text-amber-400" },
+    qualified: { label: "Calificado", bg: "bg-purple-500/10", text: "text-purple-400" },
+    attended: { label: "Atendido", bg: "bg-emerald-500/10", text: "text-emerald-400" },
+    lost: { label: "Perdido", bg: "bg-white/5", text: "text-white/50" },
   };
   const config = statusConfig[status || "new"] || statusConfig.new;
   return (
@@ -158,19 +158,19 @@ export default function Leads() {
           </button>
           <button
             onClick={() => setFilterStatus("new")}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "new" ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700"}`}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "new" ? "bg-blue-500/10 text-blue-300" : "bg-white/5 text-white/50 hover:bg-blue-500/10 hover:text-blue-300"}`}
           >
             Nuevos ({stats.new})
           </button>
           <button
             onClick={() => setFilterStatus("contacted")}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "contacted" ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700"}`}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "contacted" ? "bg-amber-500/10 text-amber-300" : "bg-white/5 text-white/50 hover:bg-amber-500/10 hover:text-amber-300"}`}
           >
             Contactados ({stats.contacted})
           </button>
           <button
             onClick={() => setFilterStatus("attended")}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "attended" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700"}`}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "attended" ? "bg-emerald-500/10 text-emerald-300" : "bg-white/5 text-white/50 hover:bg-emerald-500/10 hover:text-emerald-300"}`}
           >
             Atendidos ({stats.attended})
           </button>
@@ -247,7 +247,7 @@ export default function Leads() {
                       </div>
 
                       {/* Contact info */}
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mb-2">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/50 mb-2">
                         {lead.phone && (
                           <span className="flex items-center gap-1">
                             <Phone className="h-3 w-3" />
@@ -265,7 +265,7 @@ export default function Leads() {
                       {/* Preview message - NOW VISIBLE IN VERTICAL MODE */}
                       {lead.last_message_preview && (
                         <div
-                          className="text-xs text-slate-600 leading-relaxed mb-2"
+                          className="text-xs text-white/60 leading-relaxed mb-2"
                           style={{
                             display: "-webkit-box",
                             WebkitLineClamp: 2,
@@ -280,7 +280,7 @@ export default function Leads() {
                       {/* Tags row */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <StatusBadge status={lead.status} />
-                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                        <span className="inline-flex rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-white/50">
                           {channelLabel}
                         </span>
                       </div>
