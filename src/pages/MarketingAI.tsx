@@ -269,22 +269,22 @@ export default function MarketingAI() {
         <SectionCard title="1. Objetivo" description="Definí qué querés lograr esta semana.">
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-medium text-slate-700">Objetivo</label>
+              <label className="text-xs font-medium text-white/80">Objetivo</label>
               <input
                 value={objective}
                 onChange={(e) => setObjective(e.target.value)}
-                className="mt-2 h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                 placeholder="Ej: aumentar citas de limpieza"
               />
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div>
-                <label className="text-xs font-medium text-slate-700">Tono</label>
+                <label className="text-xs font-medium text-white/80">Tono</label>
                 <select
                   value={tone}
                   onChange={(e) => setTone(e.target.value)}
-                  className="mt-2 h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                 >
                   {TONE_OPTIONS.map((t) => (
                     <option key={t.value} value={t.value}>
@@ -294,23 +294,23 @@ export default function MarketingAI() {
                 </select>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700">Ciudad</label>
+                <label className="text-xs font-medium text-white/80">Ciudad</label>
                 <input
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
-                  className="mt-2 h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                   placeholder="Ej: Tegucigalpa"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-slate-700">Servicios a destacar</label>
+              <label className="text-xs font-medium text-white/80">Servicios a destacar</label>
               <div className="mt-2 flex flex-wrap gap-2">
                 {services.map((service) => (
                   <span
                     key={service}
-                    className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-1 text-xs text-slate-700"
+                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
                   >
                     {service}
                   </span>
@@ -320,13 +320,13 @@ export default function MarketingAI() {
                 <input
                   value={serviceInput}
                   onChange={(e) => setServiceInput(e.target.value)}
-                  className="h-11 flex-1 rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                  className="h-11 flex-1 rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                   placeholder="Agregar servicio"
                 />
                 <button
                   type="button"
                   onClick={addService}
-                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
+                  className="rounded-2xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-white hover:bg-white/10"
                 >
                   Agregar
                 </button>
@@ -337,7 +337,7 @@ export default function MarketingAI() {
               type="button"
               onClick={generateCampaign}
               disabled={generating || !objective.trim()}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7] disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#3CBDB9] px-5 py-3 text-sm font-semibold text-white hover:bg-[#35a9a5] disabled:opacity-60"
             >
               <Sparkles className="h-4 w-4" />
               {generating ? "Generando…" : "Generar contenido"}
@@ -347,21 +347,21 @@ export default function MarketingAI() {
 
         <SectionCard title="2. Contenido" description="Revisá y ajustá el texto de cada publicación.">
           {loading ? (
-            <div className="text-sm text-slate-700">Cargando…</div>
+            <div className="text-sm text-white/60">Cargando…</div>
           ) : activeItems.length === 0 ? (
             <EmptyState title="Sin contenido" message="Genera una campaña para ver las publicaciones." />
           ) : (
             <div className="space-y-4">
               {activeItems.map((item, idx) => (
-                <div key={item.id} className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                <div key={item.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-slate-900">Día {idx + 1}</div>
-                    <span className="text-xs text-slate-500">{item.platform ?? "instagram"}</span>
+                    <div className="text-sm font-semibold text-white">Día {idx + 1}</div>
+                    <span className="text-xs text-white/50">{item.platform ?? "instagram"}</span>
                   </div>
                   <textarea
                     value={item.caption ?? ""}
                     onChange={(e) => updateItem(item.id, { caption: e.target.value })}
-                    className="mt-3 min-h-[110px] w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300"
+                    className="mt-3 min-h-[110px] w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                   />
                 </div>
               ))}
@@ -375,13 +375,13 @@ export default function MarketingAI() {
           ) : (
             <div className="space-y-3">
               {activeItems.map((item, idx) => (
-                <div key={item.id} className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
-                  <div className="text-sm font-semibold text-slate-900">Día {idx + 1}</div>
+                <div key={item.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-sm font-semibold text-white">Día {idx + 1}</div>
                   <input
                     type="datetime-local"
                     value={item.scheduled_at ? item.scheduled_at.slice(0, 16) : ""}
                     onChange={(e) => updateItem(item.id, { scheduled_at: e.target.value })}
-                    className="mt-3 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                    className="mt-3 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                   />
                 </div>
               ))}
@@ -391,25 +391,25 @@ export default function MarketingAI() {
 
         <SectionCard title="4. Vista previa" description="Cómo se verá tu publicación destacada.">
           <div className="flex flex-col gap-4 md:flex-row md:items-start">
-            <div className="h-48 w-full overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] md:w-64">
+            <div className="h-48 w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 md:w-64">
               {activeItems[0]?.image_url ? (
                 <img src={activeItems[0].image_url as string} alt="Preview" className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full items-center justify-center text-xs text-slate-500">
+                <div className="flex h-full items-center justify-center text-xs text-white/50">
                   Imagen pendiente
                 </div>
               )}
             </div>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-slate-900">Texto principal</div>
-              <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">
+              <div className="text-sm font-semibold text-white">Texto principal</div>
+              <div className="mt-2 whitespace-pre-wrap text-sm text-white/60">
                 {activeItems[0]?.caption ?? "Generá contenido para ver la vista previa."}
               </div>
               {activeItems.length > 0 ? (
                 <button
                   type="button"
                   onClick={generateImages}
-                  className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
+                  className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
                 >
                   <Image className="h-4 w-4" />
                   Actualizar imagen
@@ -421,52 +421,52 @@ export default function MarketingAI() {
 
         <SectionCard title="5. Activar" description="Listo para comenzar con Marketing IA.">
           <div className="space-y-4">
-            <div className="flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+            <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Respuestas en comentarios</div>
-                <div className="text-xs text-slate-700">Respondé consultas frecuentes automáticamente.</div>
+                <div className="text-sm font-semibold text-white">Respuestas en comentarios</div>
+                <div className="text-xs text-white/60">Respondé consultas frecuentes automáticamente.</div>
               </div>
               <button
                 type="button"
                 onClick={() => setAutoReplyEnabled((prev) => !prev)}
-                className={`h-8 w-14 rounded-full border transition ${autoReplyEnabled ? "bg-blue-600 border-blue-600" : "border-[#E5E7EB] bg-[#F4F5F7]"}`}
+                className={`h-8 w-14 rounded-full border transition ${autoReplyEnabled ? "border-[#3CBDB9] bg-[#3CBDB9]" : "border-white/10 bg-white/5"}`}
               >
                 <span
-                  className={`block h-6 w-6 rounded-full bg-white transition ${autoReplyEnabled ? "translate-x-6" : "translate-x-1"}`}
+                  className={`block h-6 w-6 rounded-full bg-white/80 transition ${autoReplyEnabled ? "translate-x-6" : "translate-x-1"}`}
                 />
               </button>
             </div>
 
-            <div className="flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+            <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Revisión manual</div>
-                <div className="text-xs text-slate-700">Aprobá respuestas antes de publicar.</div>
+                <div className="text-sm font-semibold text-white">Revisión manual</div>
+                <div className="text-xs text-white/60">Aprobá respuestas antes de publicar.</div>
               </div>
               <button
                 type="button"
                 onClick={() => setAutoReplyReview((prev) => !prev)}
-                className={`h-8 w-14 rounded-full border transition ${autoReplyReview ? "bg-blue-600 border-blue-600" : "border-[#E5E7EB] bg-[#F4F5F7]"}`}
+                className={`h-8 w-14 rounded-full border transition ${autoReplyReview ? "border-[#3CBDB9] bg-[#3CBDB9]" : "border-white/10 bg-white/5"}`}
               >
                 <span
-                  className={`block h-6 w-6 rounded-full bg-white transition ${autoReplyReview ? "translate-x-6" : "translate-x-1"}`}
+                  className={`block h-6 w-6 rounded-full bg-white/80 transition ${autoReplyReview ? "translate-x-6" : "translate-x-1"}`}
                 />
               </button>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-slate-700">Límite diario de respuestas</label>
+              <label className="text-xs font-medium text-white/80">Límite diario de respuestas</label>
               <input
                 type="number"
                 value={autoReplyLimit}
                 onChange={(e) => setAutoReplyLimit(Number(e.target.value))}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
               />
             </div>
 
             <button
               type="button"
               onClick={saveBrandProfile}
-              className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+              className="rounded-2xl bg-[#3CBDB9] px-5 py-3 text-sm font-semibold text-white hover:bg-[#35a9a5]"
             >
               Activar Marketing IA
             </button>

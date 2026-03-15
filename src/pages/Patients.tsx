@@ -181,7 +181,7 @@ export default function Patients() {
 
       <SectionCard title="Pacientes" description="Listado generado desde tus citas registradas.">
         {loading ? (
-          <div className="text-sm text-slate-700">Cargando…</div>
+          <div className="text-sm text-white/60">Cargando…</div>
         ) : error ? (
           <div className="text-sm text-rose-600">{error}</div>
         ) : patients.length === 0 ? (
@@ -193,15 +193,15 @@ export default function Patients() {
                 key={p.key}
                 type="button"
                 onClick={() => setActivePatient(p)}
-                className="w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-left transition hover:bg-[#F4F5F7] focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-slate-500" />
-                      <div className="truncate text-sm font-semibold text-slate-900">{p.name}</div>
+                      <User className="h-4 w-4 text-white/50" />
+                      <div className="truncate text-sm font-semibold text-white">{p.name}</div>
                     </div>
-                    <div className="mt-1 text-xs text-slate-700">
+                    <div className="mt-1 text-xs text-white/60">
                       Última visita: {formatDateTime(p.lastVisitISO)} · {p.appointments.length} cita(s)
                     </div>
                   </div>
@@ -211,7 +211,7 @@ export default function Patients() {
                         Próxima cita
                       </span>
                     ) : null}
-                    <div className="inline-flex items-center gap-2 rounded-xl border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-2 text-xs font-semibold text-slate-700">
+                    <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/70">
                       Ver historial
                     </div>
                   </div>

@@ -27,7 +27,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F4F5F7] flex items-center justify-center text-sm text-slate-600">
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1117] text-sm text-white/60">
         Cargando…
       </div>
     );

@@ -136,16 +136,16 @@ export default function Billing() {
   const selectedPlanData = PLANS.find(p => p.id === selectedPlan)!;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+    <div className="min-h-screen bg-[#0B1117] text-white">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-white/80 backdrop-blur-lg border-b border-slate-200 safe-area-top">
+      <div className="sticky top-0 z-20 border-b border-white/10 bg-[#0B1117]/90 backdrop-blur-lg safe-area-top">
         <div className="flex items-center gap-3 px-4 py-4 max-w-5xl mx-auto">
-          <button onClick={() => navigate("/overview")} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 transition">
-            <ArrowLeft className="h-5 w-5 text-slate-700" />
+          <button onClick={() => navigate("/overview")} className="flex items-center justify-center w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 transition">
+            <ArrowLeft className="h-5 w-5 text-white/80" />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-slate-900">Elige tu plan</h1>
-            <p className="text-sm text-slate-500">Prueba gratis por 14 días</p>
+            <h1 className="text-xl font-bold text-white">Elige tu plan</h1>
+            <p className="text-sm text-white/50">Prueba gratis por 14 días</p>
           </div>
         </div>
       </div>
@@ -180,10 +180,10 @@ export default function Billing() {
 
         {/* Value proposition */}
         <div className="text-center py-4">
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">
+          <h2 className="mb-2 text-2xl font-bold text-white">
             La recepcionista que nunca duerme
           </h2>
-          <p className="text-slate-600 max-w-xl mx-auto">
+          <p className="mx-auto max-w-xl text-white/60">
             Automatiza respuestas, reduce no-shows y llena tu agenda sin esfuerzo.
             Únete a +100 clínicas que ya confían en nosotros.
           </p>
@@ -202,9 +202,9 @@ export default function Billing() {
                 className={`relative text-left rounded-2xl border-2 p-5 transition-all ${
                   isSelected
                     ? plan.highlight
-                      ? "border-blue-500 bg-blue-50 shadow-lg shadow-blue-100"
-                      : "border-slate-900 bg-white shadow-lg"
-                    : "border-slate-200 bg-white hover:border-slate-300"
+                      ? "border-blue-400/20 bg-blue-500/10 shadow-none"
+                      : "border-white/10 bg-white/5 shadow-none"
+                    : "border-white/10 bg-white/5 hover:bg-white/10"
                 }`}
               >
                 {/* Badge */}
@@ -220,33 +220,33 @@ export default function Billing() {
                 {/* Current badge */}
                 {isCurrent && (
                   <div className="absolute top-3 right-3">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-semibold">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
                       Actual
                     </span>
                   </div>
                 )}
 
                 <div className="mb-4">
-                  <div className="text-lg font-bold text-slate-900">{plan.name}</div>
-                  <div className="text-sm text-slate-500">{plan.description}</div>
+                  <div className="text-lg font-bold text-white">{plan.name}</div>
+                  <div className="text-sm text-white/50">{plan.description}</div>
                 </div>
 
                 <div className="mb-4">
-                  <span className="text-3xl font-bold text-slate-900">${plan.price}</span>
-                  <span className="text-slate-500">/{plan.period}</span>
+                  <span className="text-3xl font-bold text-white">${plan.price}</span>
+                  <span className="text-white/50">/{plan.period}</span>
                 </div>
 
                 <div className="space-y-2">
                   {plan.features.map((feature, idx) => (
                     <div key={idx} className="flex items-center gap-2">
-                      <div className={`flex items-center justify-center w-5 h-5 rounded-full ${feature.included ? "bg-emerald-100" : "bg-slate-100"}`}>
+                      <div className={`flex items-center justify-center w-5 h-5 rounded-full ${feature.included ? "bg-emerald-500/10" : "bg-white/10"}`}>
                         {feature.included ? (
                           <Check className="h-3 w-3 text-emerald-600" />
                         ) : (
-                          <span className="w-1.5 h-0.5 bg-slate-300 rounded-full" />
+                          <span className="h-0.5 w-1.5 rounded-full bg-white/30" />
                         )}
                       </div>
-                      <span className={`text-sm ${feature.included ? "text-slate-700" : "text-slate-400"}`}>
+                      <span className={`text-sm ${feature.included ? "text-white/80" : "text-white/40"}`}>
                         {feature.text}
                       </span>
                     </div>
@@ -256,8 +256,8 @@ export default function Billing() {
                 {/* Selection indicator */}
                 <div className={`mt-4 flex items-center justify-center h-10 rounded-xl font-medium text-sm transition ${
                   isSelected
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-600"
+                    ? "bg-[#3CBDB9] text-white"
+                    : "bg-white/10 text-white/50"
                 }`}>
                   {isSelected ? "Seleccionado" : "Seleccionar"}
                 </div>
@@ -267,11 +267,11 @@ export default function Billing() {
         </div>
 
         {/* Summary and CTA */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-none">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
-              <div className="text-sm text-slate-500 mb-1">Plan seleccionado</div>
-              <div className="text-2xl font-bold text-slate-900">
+              <div className="mb-1 text-sm text-white/50">Plan seleccionado</div>
+              <div className="text-2xl font-bold text-white">
                 {selectedPlanData.name} - ${selectedPlanData.price}/mes
               </div>
               <div className="text-sm text-emerald-600 font-medium mt-1">
@@ -302,11 +302,11 @@ export default function Billing() {
           )}
 
           {/* Trust badges */}
-          <div className="flex items-center justify-center gap-6 pt-4 border-t border-slate-100">
+          <div className="flex items-center justify-center gap-6 border-t border-white/10 pt-4">
             {TRUST_BADGES.map((badge, idx) => {
               const Icon = badge.icon;
               return (
-                <div key={idx} className="flex items-center gap-2 text-slate-500 text-sm">
+                <div key={idx} className="flex items-center gap-2 text-sm text-white/50">
                   <Icon className="h-4 w-4" />
                   <span>{badge.text}</span>
                 </div>
@@ -324,37 +324,37 @@ export default function Billing() {
           ].map((item, idx) => {
             const Icon = item.icon;
             return (
-              <div key={idx} className="bg-white rounded-xl border border-slate-200 p-4">
+              <div key={idx} className="rounded-xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-100 text-blue-600 mb-3">
                   <Icon className="h-5 w-5" />
                 </div>
-                <div className="font-semibold text-slate-900 mb-1">{item.title}</div>
-                <div className="text-sm text-slate-500">{item.description}</div>
+                <div className="mb-1 font-semibold text-white">{item.title}</div>
+                <div className="text-sm text-white/50">{item.description}</div>
               </div>
             );
           })}
         </div>
 
         {/* Testimonials */}
-        <div className="bg-slate-50 rounded-2xl p-6">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-center mb-6">
             <div className="flex items-center justify-center gap-1 mb-2">
               {[1,2,3,4,5].map(i => <Star key={i} className="h-5 w-5 text-amber-400 fill-amber-400" />)}
             </div>
-            <div className="text-sm text-slate-600">+100 clínicas confían en nosotros</div>
+            <div className="text-sm text-white/60">+100 clínicas confían en nosotros</div>
           </div>
 
           <div className="grid md:grid-cols-2 gap-4">
             {TESTIMONIALS.map((t, idx) => (
-              <div key={idx} className="bg-white rounded-xl border border-slate-200 p-4">
+              <div key={idx} className="rounded-xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-start gap-3">
                   <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 font-bold">
                     {t.avatar}
                   </div>
                   <div>
-                    <div className="font-semibold text-slate-900">{t.name}</div>
-                    <div className="text-xs text-slate-500 mb-2">{t.clinic}</div>
-                    <div className="text-sm text-slate-700">"{t.text}"</div>
+                    <div className="font-semibold text-white">{t.name}</div>
+                    <div className="mb-2 text-xs text-white/50">{t.clinic}</div>
+                    <div className="text-sm text-white/80">"{t.text}"</div>
                   </div>
                 </div>
               </div>
@@ -364,18 +364,18 @@ export default function Billing() {
 
         {/* FAQ */}
         <div className="space-y-4">
-          <h3 className="text-lg font-bold text-slate-900 text-center">Preguntas frecuentes</h3>
+          <h3 className="text-center text-lg font-bold text-white">Preguntas frecuentes</h3>
           {[
             { q: "¿Puedo cancelar cuando quiera?", a: "Sí, puedes cancelar en cualquier momento. Sin contratos ni penalidades." },
             { q: "¿Qué pasa después de los 14 días?", a: "Se cobra el plan elegido. Si cancelas antes, no se cobra nada." },
             { q: "¿Necesito tarjeta de crédito para la prueba?", a: "Sí, pero no se hace ningún cobro hasta que termine la prueba." },
           ].map((faq, idx) => (
-            <details key={idx} className="bg-white rounded-xl border border-slate-200 p-4 group">
-              <summary className="font-medium text-slate-900 cursor-pointer list-none flex items-center justify-between">
+            <details key={idx} className="group rounded-xl border border-white/10 bg-white/5 p-4">
+              <summary className="flex cursor-pointer list-none items-center justify-between font-medium text-white">
                 {faq.q}
-                <ChevronRight className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90" />
+                <ChevronRight className="h-4 w-4 text-white/40 transition-transform group-open:rotate-90" />
               </summary>
-              <p className="text-sm text-slate-600 mt-2">{faq.a}</p>
+              <p className="mt-2 text-sm text-white/60">{faq.a}</p>
             </details>
           ))}
         </div>
@@ -385,12 +385,12 @@ export default function Billing() {
           <button
             onClick={startCheckout}
             disabled={loading}
-            className="inline-flex items-center justify-center gap-2 h-14 px-8 rounded-xl bg-slate-900 text-white font-semibold text-lg hover:bg-slate-800 disabled:opacity-50 transition"
+            className="inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-[#3CBDB9] px-8 text-lg font-semibold text-white transition hover:bg-[#35a9a5] disabled:opacity-50"
           >
             <Sparkles className="h-5 w-5" />
             Comenzar ahora
           </button>
-          <p className="text-sm text-slate-500 mt-3">
+          <p className="mt-3 text-sm text-white/50">
             Sin riesgos. Cancela cuando quieras.
           </p>
         </div>

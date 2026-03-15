@@ -132,19 +132,19 @@ export default function Leads() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50">
+    <div className="flex min-h-screen flex-col bg-[#0B1117]">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-white border-b border-slate-200 safe-area-top">
+      <div className="safe-area-top sticky top-0 z-20 border-b border-white/10 bg-[#0B1117]/90 backdrop-blur-lg">
         <div className="flex items-center gap-3 px-4 py-3">
           <button
             onClick={() => navigate("/overview")}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 transition lg:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 transition hover:bg-white/10 lg:hidden"
           >
-            <ArrowLeft className="h-5 w-5 text-slate-700" />
+            <ArrowLeft className="h-5 w-5 text-white/80" />
           </button>
           <div className="flex-1">
-            <h1 className="text-lg font-bold text-slate-900">Leads</h1>
-            <p className="text-xs text-slate-500">{stats.total} contactos</p>
+            <h1 className="text-lg font-bold text-white">Leads</h1>
+            <p className="text-xs text-white/50">{stats.total} contactos</p>
           </div>
         </div>
 
@@ -152,7 +152,7 @@ export default function Leads() {
         <div className="flex gap-2 px-4 pb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
           <button
             onClick={() => setFilterStatus("all")}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${filterStatus === "all" ? "bg-white/15 text-white" : "bg-white/5 text-white/60"}`}
           >
             Todos ({stats.total})
           </button>
@@ -179,13 +179,13 @@ export default function Leads() {
         {/* Search */}
         <div className="px-4 pb-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar por nombre, teléfono o email..."
-              className="w-full h-10 pl-10 pr-4 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-blue-300 focus:bg-white transition"
+              className="h-10 w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
             />
           </div>
         </div>
@@ -195,15 +195,15 @@ export default function Leads() {
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="text-sm text-slate-500">Cargando leads...</div>
+            <div className="text-sm text-white/50">Cargando leads...</div>
           </div>
         ) : filteredLeads.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <MessageCircle className="h-12 w-12 text-slate-300 mb-3" />
-            <div className="text-sm font-medium text-slate-700">
+            <MessageCircle className="mb-3 h-12 w-12 text-white/30" />
+            <div className="text-sm font-medium text-white/80">
               {searchQuery ? "Sin resultados" : "Sin leads"}
             </div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="mt-1 text-xs text-white/50">
               {searchQuery ? "Intenta con otra búsqueda" : "Los leads aparecerán aquí"}
             </div>
           </div>
@@ -218,7 +218,7 @@ export default function Leads() {
                 <button
                   key={lead.id}
                   onClick={() => navigate(`/inbox/${lead.id}`)}
-                  className="w-full bg-white rounded-2xl border border-slate-200 p-4 text-left hover:border-slate-300 hover:shadow-sm transition"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 text-left transition hover:bg-white/10"
                 >
                   <div className="flex gap-3">
                     {/* Avatar */}
@@ -227,7 +227,7 @@ export default function Leads() {
                         <img
                           src={lead.avatar_url}
                           alt={displayName}
-                          className="h-12 w-12 rounded-full border border-slate-200 object-cover"
+                          className="h-12 w-12 rounded-full border border-white/10 object-cover"
                         />
                       ) : (
                         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-sm font-bold text-white">
@@ -240,8 +240,8 @@ export default function Leads() {
                     <div className="flex-1 min-w-0">
                       {/* Name + time row */}
                       <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="font-semibold text-slate-900 truncate">{displayName}</span>
-                        <span className="text-[11px] text-slate-400 shrink-0">
+                        <span className="truncate font-semibold text-white">{displayName}</span>
+                        <span className="shrink-0 text-[11px] text-white/40">
                           {formatRelativeTime(lead.last_message_at || lead.created_at)}
                         </span>
                       </div>

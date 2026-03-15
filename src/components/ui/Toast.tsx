@@ -11,9 +11,9 @@ type Props = {
 };
 
 const KIND_STYLES: Record<ToastKind, string> = {
-  success: "border-[#E5E7EB] bg-white text-slate-700",
-  error: "border-[#E5E7EB] bg-white text-slate-700",
-  info: "border-[#E5E7EB] bg-white text-slate-700",
+  success: "border-emerald-400/20 bg-emerald-500/10 text-emerald-400",
+  error: "border-rose-400/20 bg-rose-500/10 text-rose-400",
+  info: "border-blue-400/20 bg-blue-500/10 text-blue-400",
 };
 
 export function Toast({ open, kind = "info", message, onClose, durationMs = 2800 }: Props) {
@@ -27,7 +27,7 @@ export function Toast({ open, kind = "info", message, onClose, durationMs = 2800
 
   return (
     <div className="fixed right-4 top-4 z-[60] w-[min(92vw,360px)]">
-      <div className={`rounded-2xl border px-4 py-3 text-sm shadow-lg ${KIND_STYLES[kind]}`}>
+      <div className={`rounded-2xl border px-4 py-3 text-sm shadow-none backdrop-blur-xl ${KIND_STYLES[kind]}`}>
         {message}
       </div>
     </div>

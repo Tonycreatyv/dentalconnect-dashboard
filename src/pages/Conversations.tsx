@@ -221,15 +221,15 @@ export default function Conversations() {
       <div className="col-span-12 lg:col-span-5 min-w-0">
         <SectionCard title="Leads" description="Conversaciones activas, actualizadas automáticamente.">
           {uiError ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-400">
               {uiError}
             </div>
           ) : null}
 
           {loadingLeads ? (
-            <div className="text-sm text-slate-700">Cargando…</div>
+            <div className="text-sm text-white/60">Cargando…</div>
           ) : leads.length === 0 ? (
-            <div className="text-sm text-slate-700">
+            <div className="text-sm text-white/60">
               No hay leads visibles.
             </div>
           ) : (
@@ -243,20 +243,20 @@ export default function Conversations() {
                     className={[
                       "w-full rounded-2xl border px-4 py-3 text-left transition",
                       active
-                        ? "border-blue-200 bg-blue-50"
-                        : "border-[#E5E7EB] bg-white hover:bg-[#F4F5F7]",
+                        ? "border-blue-400/20 bg-blue-500/10"
+                        : "border-white/10 bg-white/5 hover:bg-white/10",
                     ].join(" ")}
                   >
                     <div className="flex items-center justify-between gap-3 min-w-0">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-900">
+                        <div className="truncate text-sm font-semibold text-white">
                           {l.full_name || "Sin nombre"}
                         </div>
-                        <div className="truncate text-xs text-slate-500">
+                        <div className="truncate text-xs text-white/50">
                           {l.last_message_preview || "—"}
                         </div>
                       </div>
-                      <div className="shrink-0 text-[11px] text-slate-500">
+                      <div className="shrink-0 text-[11px] text-white/50">
                         {l.last_message_at ? new Date(l.last_message_at).toLocaleString() : ""}
                       </div>
                     </div>
@@ -276,14 +276,14 @@ export default function Conversations() {
           }
         >
           {!leadId ? (
-            <div className="text-sm text-slate-700">Elegí un lead de la izquierda.</div>
+            <div className="text-sm text-white/60">Elegí un lead de la izquierda.</div>
           ) : loadingThread ? (
-            <div className="text-sm text-slate-700">Cargando mensajes…</div>
+            <div className="text-sm text-white/60">Cargando mensajes…</div>
           ) : (
             <div className="relative overflow-hidden">
               <div className="max-h-[520px] overflow-y-auto pr-1">
                 {thread.length === 0 ? (
-                  <div className="text-sm text-slate-700">
+                  <div className="text-sm text-white/60">
                     No hay mensajes visibles.
                   </div>
                 ) : (
@@ -295,7 +295,7 @@ export default function Conversations() {
                           key={messageKey(m)}
                           className={[
                             "max-w-[78%] rounded-2xl px-4 py-3 text-sm break-words whitespace-pre-wrap",
-                            isUser ? "ml-auto bg-[#F4F5F7] text-slate-900" : "mr-auto bg-slate-900 text-white",
+                            isUser ? "ml-auto bg-white/10 text-white" : "mr-auto bg-[#0894C1] text-white",
                           ].join(" ")}
                         >
                           <div>{m.content}</div>
@@ -309,14 +309,14 @@ export default function Conversations() {
                 )}
               </div>
 
-              <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-white p-3">
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3">
                 <div className="flex flex-wrap gap-2">
                   {quickReplies.map((reply) => (
                     <button
                       key={reply.label}
                       type="button"
                       onClick={() => setComposer(reply.text)}
-                      className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70 hover:bg-white/10"
                     >
                       {reply.label}
                     </button>
@@ -329,7 +329,7 @@ export default function Conversations() {
                     onChange={(e) => setComposer(e.target.value)}
                     placeholder="Escribí una respuesta…"
                     rows={2}
-                    className="w-full resize-none rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-500"
+                    className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                   />
                   <button
                     onClick={sendReply}
@@ -337,8 +337,8 @@ export default function Conversations() {
                     className={[
                       "shrink-0 rounded-2xl px-4 py-2 text-sm font-semibold",
                       sending || !composer.trim()
-                        ? "bg-[#F4F5F7] text-slate-500"
-                        : "bg-blue-600 text-white hover:bg-blue-700",
+                        ? "bg-white/10 text-white/40"
+                        : "bg-[#3CBDB9] text-white hover:bg-[#35a9a5]",
                     ].join(" ")}
                   >
                     {sending ? "Enviando…" : "Responder"}

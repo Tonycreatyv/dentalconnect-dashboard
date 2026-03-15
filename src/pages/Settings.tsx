@@ -386,7 +386,7 @@ export default function Settings() {
       {tab === "servicios" && renderServicios()}
       {tab === "faqs" && renderFaqs()}
 
-      <Modal open={guideOpen !== null} title="Guía de integración" description="Pasos para conectar." onClose={() => setGuideOpen(null)} actions={<button onClick={() => setGuideOpen(null)} className="px-4 py-2 rounded-xl bg-white text-black text-sm font-medium">Entendido</button>}>
+      <Modal open={guideOpen !== null} title="Guía de integración" description="Pasos para conectar." onClose={() => setGuideOpen(null)} actions={<button onClick={() => setGuideOpen(null)} className="rounded-xl bg-[#3CBDB9] px-4 py-2 text-sm font-medium text-white hover:bg-[#35a9a5]">Entendido</button>}>
         <div className="space-y-3 text-sm text-white/70">
           <div className="flex items-start gap-3"><Globe className="h-4 w-4 mt-0.5" /><span>Confirma los datos de tu clínica.</span></div>
           <div className="flex items-start gap-3"><PhoneCall className="h-4 w-4 mt-0.5" /><span>Ten a mano el canal principal.</span></div>

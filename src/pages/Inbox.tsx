@@ -291,24 +291,24 @@ export default function Inbox() {
 
   // ============ RENDER ============
   return (
-    <div className="flex flex-col h-[100dvh] lg:h-auto lg:min-h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#0B1117] lg:h-auto lg:min-h-screen">
       {/* MOBILE HEADER - Only when viewing conversation */}
       {leadId && (
-        <div className="lg:hidden flex items-center gap-3 px-4 py-3 border-b border-slate-200 bg-white safe-area-top">
-          <button onClick={() => navigate("/inbox")} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 transition">
-            <ArrowLeft className="h-5 w-5 text-slate-700" />
+        <div className="safe-area-top flex items-center gap-3 border-b border-white/10 bg-white/5 px-4 py-3 lg:hidden">
+          <button onClick={() => navigate("/inbox")} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 transition hover:bg-white/10">
+            <ArrowLeft className="h-5 w-5 text-white/80" />
           </button>
           <div className="flex-1 min-w-0 flex items-center gap-3">
             {selectedLead?.avatar_url ? (
-              <img src={selectedLead.avatar_url} alt="" className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
+              <img src={selectedLead.avatar_url} alt="" className="h-10 w-10 rounded-full border border-white/10 object-cover" />
             ) : (
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-sm font-bold text-white">
                 {selectedLead ? getBestDisplayName(selectedLead).slice(0, 1).toUpperCase() : "?"}
               </div>
             )}
             <div className="min-w-0">
-              <div className="font-semibold text-slate-900 truncate">{selectedLead ? getBestDisplayName(selectedLead) : "Conversación"}</div>
-              <div className="text-xs text-slate-500 truncate">{selectedLead?.phone || selectedLead?.channel?.toUpperCase() || ""}</div>
+              <div className="truncate font-semibold text-white">{selectedLead ? getBestDisplayName(selectedLead) : "Conversación"}</div>
+              <div className="truncate text-xs text-white/50">{selectedLead?.phone || selectedLead?.channel?.toUpperCase() || ""}</div>
             </div>
           </div>
           {selectedLead && selectedLead.status !== "attended" && (
@@ -321,9 +321,9 @@ export default function Inbox() {
 
       {/* DESKTOP/LIST HEADER */}
       {!leadId && (
-        <div className="px-4 pt-4 pb-2 bg-white border-b border-slate-200 lg:bg-transparent lg:border-0">
-          <h1 className="text-xl font-bold text-slate-900">Inbox</h1>
-          <p className="text-sm text-slate-500">Conversaciones activas</p>
+        <div className="border-b border-white/10 bg-white/5 px-4 pt-4 pb-2 lg:border-0 lg:bg-transparent">
+          <h1 className="text-xl font-bold text-white">Inbox</h1>
+          <p className="text-sm text-white/50">Conversaciones activas</p>
         </div>
       )}
 
@@ -337,13 +337,13 @@ export default function Inbox() {
               <div className="p-4 lg:p-0 space-y-2">
                 {loadingLeads ? (
                   <div className="flex items-center justify-center py-12">
-                    <div className="text-sm text-slate-500">Cargando…</div>
+                    <div className="text-sm text-white/50">Cargando…</div>
                   </div>
                 ) : leads.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <MessageCircle className="h-12 w-12 text-slate-300 mb-3" />
-                    <div className="text-sm font-medium text-slate-700">Sin conversaciones</div>
-                    <div className="text-xs text-slate-500 mt-1">Los mensajes aparecerán aquí</div>
+                    <MessageCircle className="mb-3 h-12 w-12 text-white/30" />
+                    <div className="text-sm font-medium text-white/80">Sin conversaciones</div>
+                    <div className="mt-1 text-xs text-white/50">Los mensajes aparecerán aquí</div>
                   </div>
                 ) : (
                   leads.map((l) => {
@@ -360,36 +360,36 @@ export default function Inbox() {
                       <button
                         key={l.id}
                         onClick={() => navigate(`/inbox/${l.id}`)}
-                        className={["w-full rounded-2xl border p-3 text-left transition relative group", active ? "border-blue-300 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"].join(" ")}
+                        className={["group relative w-full rounded-2xl border p-3 text-left transition", active ? "border-blue-400/20 bg-blue-500/10" : "border-white/10 bg-white/5 hover:bg-white/10"].join(" ")}
                       >
                         <div className="flex gap-3">
                           {/* Avatar */}
                           <div className="relative shrink-0">
                             {l.avatar_url ? (
-                              <img src={l.avatar_url} alt={displayName} className="h-12 w-12 rounded-full border border-slate-200 object-cover" />
+                              <img src={l.avatar_url} alt={displayName} className="h-12 w-12 rounded-full border border-white/10 object-cover" />
                             ) : (
                               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-sm font-bold text-white">
                                 {avatarFallback}
                               </div>
                             )}
-                            {unread && <div className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-rose-500 rounded-full border-2 border-white" />}
+                            {unread && <div className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#0B1117] bg-rose-500" />}
                           </div>
 
                           {/* Content */}
                           <div className="flex-1 min-w-0 py-0.5">
                             <div className="flex items-center justify-between gap-2 mb-1">
-                              <span className={["font-semibold truncate text-sm", unread ? "text-slate-900" : "text-slate-700"].join(" ")}>{displayName}</span>
-                              <span className="text-[11px] text-slate-400 shrink-0">{formatRelativeTime(l.last_message_at)}</span>
+                              <span className={["truncate text-sm font-semibold", unread ? "text-white" : "text-white/80"].join(" ")}>{displayName}</span>
+                              <span className="shrink-0 text-[11px] text-white/40">{formatRelativeTime(l.last_message_at)}</span>
                             </div>
 
                             {/* Preview - 2 lines visible in vertical mobile */}
-                            <div className={["text-xs leading-relaxed", unread ? "text-slate-700 font-medium" : "text-slate-500"].join(" ")} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            <div className={["text-xs leading-relaxed", unread ? "font-medium text-white/80" : "text-white/50"].join(" ")} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                               {l.last_message_preview || "Sin mensajes"}
                             </div>
 
                             {/* Tags */}
                             <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                              <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{channelLabel}</span>
+                              <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/50">{channelLabel}</span>
                               {isAttended && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
                                   <CheckCircle2 className="h-2.5 w-2.5" /> Atendido
@@ -402,7 +402,7 @@ export default function Inbox() {
                           {!isAttended && (
                             <button
                               onClick={(e) => markAsHandled(l.id, e)}
-                              className="shrink-0 self-center p-2 rounded-full hover:bg-emerald-100 transition opacity-60 group-hover:opacity-100"
+                              className="shrink-0 self-center rounded-full p-2 opacity-60 transition hover:bg-emerald-500/10 group-hover:opacity-100"
                               title="Marcar como atendido"
                             >
                               <CheckCircle2 className="h-5 w-5 text-emerald-500" />
@@ -420,27 +420,27 @@ export default function Inbox() {
           {/* RIGHT: CONVERSATION */}
           <div className={["col-span-12 lg:col-span-7 xl:col-span-8 flex flex-col overflow-hidden", leadId ? "flex" : "hidden lg:flex"].join(" ")}>
             {!leadId ? (
-              <div className="flex-1 flex items-center justify-center bg-white lg:rounded-2xl lg:border lg:border-slate-200">
+              <div className="flex flex-1 items-center justify-center bg-white/5 lg:rounded-2xl lg:border lg:border-white/10">
                 <div className="text-center py-12">
-                  <MessageCircle className="h-16 w-16 text-slate-200 mx-auto mb-4" />
-                  <div className="text-sm text-slate-500">Selecciona una conversación</div>
+                  <MessageCircle className="mx-auto mb-4 h-16 w-16 text-white/20" />
+                  <div className="text-sm text-white/50">Selecciona una conversación</div>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col h-full bg-white lg:rounded-2xl lg:border lg:border-slate-200 overflow-hidden">
+              <div className="flex h-full flex-col overflow-hidden bg-white/5 lg:rounded-2xl lg:border lg:border-white/10">
                 {/* Desktop conversation header */}
-                <div className="hidden lg:flex items-center justify-between px-4 py-3 border-b border-slate-200">
+                <div className="hidden items-center justify-between border-b border-white/10 px-4 py-3 lg:flex">
                   <div className="flex items-center gap-3 min-w-0">
                     {selectedLead?.avatar_url ? (
-                      <img src={selectedLead.avatar_url} alt="" className="h-10 w-10 rounded-full border border-slate-200 object-cover" />
+                      <img src={selectedLead.avatar_url} alt="" className="h-10 w-10 rounded-full border border-white/10 object-cover" />
                     ) : (
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-sm font-bold text-white">
                         {selectedLead ? getBestDisplayName(selectedLead).slice(0, 1).toUpperCase() : "?"}
                       </div>
                     )}
                     <div className="min-w-0">
-                      <div className="font-semibold text-slate-900 truncate">{selectedLead ? getBestDisplayName(selectedLead) : ""}</div>
-                      <div className="text-xs text-slate-500 flex items-center gap-2">
+                      <div className="truncate font-semibold text-white">{selectedLead ? getBestDisplayName(selectedLead) : ""}</div>
+                      <div className="flex items-center gap-2 text-xs text-white/50">
                         {selectedLead?.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedLead.phone}</span>}
                         <span>{selectedLead?.channel?.toUpperCase() || "MESSENGER"}</span>
                       </div>
@@ -448,14 +448,14 @@ export default function Inbox() {
                   </div>
                   <div className="flex items-center gap-2">
                     {selectedLead && selectedLead.status !== "attended" && (
-                      <button onClick={(e) => markAsHandled(selectedLead.id, e)} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition">
+                      <button onClick={(e) => markAsHandled(selectedLead.id, e)} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20">
                         <CheckCircle2 className="h-4 w-4" /> Atendido
                       </button>
                     )}
-                    <button onClick={() => navigate("/agenda")} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition">
+                    <button onClick={() => navigate("/agenda")} className="inline-flex items-center gap-2 rounded-xl bg-[#3CBDB9] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#35a9a5]">
                       <CalendarPlus className="h-4 w-4" /> Crear cita
                     </button>
-                    <button onClick={() => navigate("/patients")} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">
+                    <button onClick={() => navigate("/patients")} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10">
                       <UserRound className="h-4 w-4" /> Paciente
                     </button>
                   </div>
@@ -463,9 +463,9 @@ export default function Inbox() {
 
                 {/* Meta chips */}
                 {leadMetaChips.length > 0 && (
-                  <div className="flex flex-wrap gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100">
+                  <div className="flex flex-wrap gap-2 border-b border-white/10 bg-white/5 px-4 py-2">
                     {leadMetaChips.map((chip) => (
-                      <span key={chip.key} className="rounded-full bg-white border border-slate-200 px-2.5 py-0.5 text-[10px] font-medium text-slate-600">{chip.label}</span>
+                      <span key={chip.key} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[10px] font-medium text-white/60">{chip.label}</span>
                     ))}
                   </div>
                 )}
@@ -473,11 +473,11 @@ export default function Inbox() {
                 {/* Messages thread */}
                 <div ref={threadScrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
                   {loadingThread ? (
-                    <div className="flex items-center justify-center py-12"><div className="text-sm text-slate-500">Cargando mensajes…</div></div>
+                    <div className="flex items-center justify-center py-12"><div className="text-sm text-white/50">Cargando mensajes…</div></div>
                   ) : threadError ? (
                     <div className="text-sm text-rose-500 text-center py-12">{threadError}</div>
                   ) : thread.length === 0 ? (
-                    <div className="text-sm text-slate-500 text-center py-12">No hay mensajes</div>
+                    <div className="py-12 text-center text-sm text-white/50">No hay mensajes</div>
                   ) : (
                     thread.map((m) => {
                       const normalizedRole = (m.role ?? "").toLowerCase();
@@ -494,8 +494,8 @@ export default function Inbox() {
                             isInbound
                               ? "ml-auto bg-blue-600 text-white rounded-br-md"
                               : isHuman
-                              ? "mr-auto bg-emerald-100 text-emerald-900 rounded-bl-md border border-emerald-200"
-                              : "mr-auto bg-slate-100 text-slate-900 rounded-bl-md",
+                              ? "mr-auto rounded-bl-md border border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+                              : "mr-auto rounded-bl-md bg-white/10 text-white",
                           ].join(" ")}
                         >
                           {!isInbound && (
@@ -504,7 +504,7 @@ export default function Inbox() {
                             </div>
                           )}
                           {m.content ?? "—"}
-                          <div className={["mt-1.5 text-[10px]", isInbound ? "text-white/70" : "text-slate-400"].join(" ")}>
+                          <div className={["mt-1.5 text-[10px]", isInbound ? "text-white/70" : "text-white/40"].join(" ")}>
                             {new Date(m.created_at).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
                           </div>
                         </div>
@@ -514,18 +514,18 @@ export default function Inbox() {
                 </div>
 
                 {/* Composer */}
-                <div className="border-t border-slate-200 bg-white p-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}>
+                <div className="border-t border-white/10 bg-white/5 p-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}>
                   {/* Actions toggle */}
                   <div className="mb-2">
-                    <button onClick={() => setActionsOpen((v) => !v)} className="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700 transition">
+                    <button onClick={() => setActionsOpen((v) => !v)} className="flex items-center gap-2 text-xs font-medium text-white/50 transition hover:text-white/80">
                       {actionsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       Acciones rápidas
                     </button>
                     {actionsOpen && (
                       <div className="mt-2 grid grid-cols-3 gap-2">
-                        <button onClick={() => navigate("/agenda")} className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition">Agendar</button>
-                        <button onClick={() => setComposer("Te confirmo tu cita. ¿Mantenemos este horario?")} className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition">Confirmar</button>
-                        <button onClick={() => setComposer("Podemos reagendar sin problema. ¿Qué día y hora te conviene?")} className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 transition">Reagendar</button>
+                        <button onClick={() => navigate("/agenda")} className="h-9 rounded-xl border border-white/10 bg-white/5 px-2 text-xs font-medium text-white/80 transition hover:bg-white/10">Agendar</button>
+                        <button onClick={() => setComposer("Te confirmo tu cita. ¿Mantenemos este horario?")} className="h-9 rounded-xl border border-white/10 bg-white/5 px-2 text-xs font-medium text-white/80 transition hover:bg-white/10">Confirmar</button>
+                        <button onClick={() => setComposer("Podemos reagendar sin problema. ¿Qué día y hora te conviene?")} className="h-9 rounded-xl border border-white/10 bg-white/5 px-2 text-xs font-medium text-white/80 transition hover:bg-white/10">Reagendar</button>
                       </div>
                     )}
                   </div>
@@ -533,7 +533,7 @@ export default function Inbox() {
                   {/* Quick replies */}
                   <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
                     {quickReplies.map((reply) => (
-                      <button key={reply.label} onClick={() => setComposer(reply.text)} className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition">
+                      <button key={reply.label} onClick={() => setComposer(reply.text)} className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/60 transition hover:bg-white/10">
                         {reply.label}
                       </button>
                     ))}
@@ -552,12 +552,12 @@ export default function Inbox() {
                       }}
                       placeholder="Escribe un mensaje…"
                       rows={1}
-                      className="flex-1 min-h-[44px] max-h-[120px] resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-300 focus:bg-white transition"
+                      className="flex-1 min-h-[44px] max-h-[120px] resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 transition focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                     />
                     <button
                       onClick={sendReply}
                       disabled={!selectedLead || sending || !composer.trim()}
-                      className={["h-11 shrink-0 rounded-2xl px-5 text-sm font-semibold transition", sending || !composer.trim() ? "bg-slate-100 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"].join(" ")}
+                      className={["h-11 shrink-0 rounded-2xl px-5 text-sm font-semibold transition", sending || !composer.trim() ? "bg-white/10 text-white/40" : "bg-[#3CBDB9] text-white hover:bg-[#35a9a5]"].join(" ")}
                     >
                       {sending ? "…" : "Enviar"}
                     </button>

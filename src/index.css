@@ -39,22 +39,36 @@
 
 * { box-sizing: border-box; }
 
-html, body { height: 100%; }
+html, body, #root {
+  background-color: #0B1117;
+  color: white;
+  min-height: 100vh;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
 
 body {
   margin: 0;
   font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: rgb(var(--dc-bg));
-  color: rgb(var(--text));
+  background: #0B1117;
+  color: white;
 }
-
-#root { min-height: 100%; }
 
 ::selection { background: rgba(var(--accent), 0.18); }
 
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.35); border-radius: 999px; }
-*::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.06); }
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
 
 @layer utilities {
   .dc-bg {
@@ -108,7 +122,6 @@ body {
 }
 
 @layer base {
-  .bg-white,
   .bg-\[\#F4F5F7\] {
     background-color: rgba(255, 255, 255, 0.05) !important;
   }
@@ -117,7 +130,6 @@ body {
     border-color: rgba(255, 255, 255, 0.1) !important;
   }
 
-  .text-slate-900 { color: rgba(255, 255, 255, 0.92) !important; }
   .text-slate-700 { color: rgba(255, 255, 255, 0.72) !important; }
   .text-slate-600 { color: rgba(255, 255, 255, 0.72) !important; }
   .text-slate-500 { color: rgba(255, 255, 255, 0.65) !important; }

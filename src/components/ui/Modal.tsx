@@ -13,17 +13,17 @@ export function Modal({ open, title, description, onClose, children, actions }: 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-      <div className="w-full max-w-xl rounded-3xl border border-[#E5E7EB] bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.18)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/5 p-6 text-white shadow-none backdrop-blur-xl">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-lg font-semibold text-slate-900">{title}</div>
-            {description ? <div className="text-sm text-slate-700">{description}</div> : null}
+            <div className="text-lg font-semibold text-white">{title}</div>
+            {description ? <div className="text-sm text-white/60">{description}</div> : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-slate-700 hover:bg-[#F4F5F7]"
+            className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80 hover:bg-white/10"
           >
             Cerrar
           </button>

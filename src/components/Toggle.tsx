@@ -15,7 +15,7 @@ export function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (nex
       <span
         className={cn(
           "inline-block h-6 w-6 transform rounded-full transition shadow-[0_2px_8px_rgba(0,0,0,0.35)]",
-          enabled ? "bg-[#59E0B8]" : "bg-white/90",
+          enabled ? "bg-[#59E0B8]" : "bg-white/70",
           enabled ? "translate-x-6" : "translate-x-1"
         )}
       />

@@ -214,15 +214,15 @@ function AppointmentModal({
 
           <div className="hidden items-center justify-between md:flex">
           <div>
-            <div className="text-lg font-semibold text-slate-900">
+            <div className="text-lg font-semibold text-white">
               {mode === "create" ? "Nueva cita" : "Editar cita"}
             </div>
-            <div className="text-sm text-slate-700">Actualiza detalles del paciente y la cita.</div>
+            <div className="text-sm text-white/60">Actualiza detalles del paciente y la cita.</div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-2 text-xs text-slate-700 hover:bg-[#F4F5F7]"
+            className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70 hover:bg-white/10"
           >
             Cerrar
           </button>
@@ -233,43 +233,43 @@ function AppointmentModal({
           <div className="grid gap-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="text-xs font-medium text-slate-700">Paciente</label>
+              <label className="text-xs font-medium text-white/80">Paciente</label>
               <input
                 value={form.patient_name}
                 onChange={(e) => onChange({ ...form, patient_name: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                 placeholder="Nombre del paciente"
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700">Motivo</label>
+              <label className="text-xs font-medium text-white/80">Motivo</label>
               <input
                 value={form.reason}
                 onChange={(e) => onChange({ ...form, reason: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
                 placeholder="Ej: limpieza, control, urgencia"
               />
             </div>
           </div>
 
           <div>
-            <label className="text-xs font-medium text-slate-700">Título</label>
+            <label className="text-xs font-medium text-white/80">Título</label>
             <input
               value={form.title}
               onChange={(e) => onChange({ ...form, title: e.target.value })}
-              className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+              className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
               placeholder="Ej: Evaluación, Limpieza, Control"
             />
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
-              <label className="text-xs font-medium text-slate-700">Fecha</label>
+              <label className="text-xs font-medium text-white/80">Fecha</label>
               <div className="relative mt-2">
                 <button
                   type="button"
                   onClick={() => setCalendarOpen((v) => !v)}
-                  className="flex h-11 w-full items-center justify-between rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm text-slate-700"
+                  className="flex h-11 w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white/70"
                 >
                   {form.date}
                   <ChevronDown className="h-4 w-4" />
@@ -317,11 +317,11 @@ function AppointmentModal({
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700">Hora</label>
+              <label className="text-xs font-medium text-white/80">Hora</label>
               <select
                 value={form.time}
                 onChange={(e) => onChange({ ...form, time: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
+                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
               >
                 <option value="">{loadingAvailability ? "Cargando horarios..." : "Seleccionar hora"}</option>
                 {availableTimes.map((slot) => (
@@ -333,11 +333,11 @@ function AppointmentModal({
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700">Estado</label>
+              <label className="text-xs font-medium text-white/80">Estado</label>
               <select
                 value={form.status}
                 onChange={(e) => onChange({ ...form, status: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
               >
                 {STATUS_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -349,11 +349,11 @@ function AppointmentModal({
           </div>
 
           <div>
-            <label className="text-xs font-medium text-slate-700">Notas</label>
+            <label className="text-xs font-medium text-white/80">Notas</label>
             <textarea
               value={form.notes}
               onChange={(e) => onChange({ ...form, notes: e.target.value })}
-              className="mt-2 min-h-[110px] w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-300"
+              className="mt-2 min-h-[110px] w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
               placeholder="Detalles clínicos o preferencias del paciente"
             />
           </div>
@@ -384,7 +384,7 @@ function AppointmentModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="h-11 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                className="h-11 rounded-2xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-white/70 hover:bg-white/10"
                 disabled={saving}
               >
                 Cancelar
@@ -923,20 +923,20 @@ export default function CalendarBoard() {
       />
 
       {error ? (
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-4 text-sm text-slate-700">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
           {error}
         </div>
       ) : null}
 
-      <div className="rounded-3xl border border-[#E5E7EB] bg-white overflow-hidden">
-        <div className="flex flex-col gap-3 px-6 py-4 border-b border-[#E5E7EB] md:flex-row md:items-center md:justify-between">
+      <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
+        <div className="flex flex-col gap-3 border-b border-white/10 px-6 py-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="text-slate-900 font-semibold">Agenda</div>
-            <div className="text-sm text-slate-700">{fmtRangeLabel(rangeStart, rangeEnd)}</div>
+            <div className="font-semibold text-white">Agenda</div>
+            <div className="text-sm text-white/60">{fmtRangeLabel(rangeStart, rangeEnd)}</div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-1">
+            <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-white/5 p-1">
               {(["month", "week", "day"] as ViewMode[]).map((k) => {
                 const active = view === k;
                 return (
@@ -946,7 +946,7 @@ export default function CalendarBoard() {
                     onClick={() => setView(k)}
                     className={[
                       "rounded-2xl px-3 py-2 text-sm font-semibold transition",
-                      active ? "bg-[#F4F5F7] text-slate-900" : "text-slate-700 hover:bg-[#F4F5F7] hover:text-slate-900",
+                      active ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/10 hover:text-white",
                     ].join(" ")}
                   >
                     {k === "month" ? "Mes" : k === "week" ? "Semana" : "Día"}
@@ -989,7 +989,7 @@ export default function CalendarBoard() {
             <button
               type="button"
               onClick={() => setSelected(toStartOfDay(new Date()))}
-              className="inline-flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/70 hover:bg-white/10"
             >
               <CalendarDays className="h-4 w-4" />
               Hoy
@@ -998,7 +998,7 @@ export default function CalendarBoard() {
             <button
               type="button"
               onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              className="inline-flex items-center gap-2 rounded-2xl bg-[#3CBDB9] px-4 py-2 text-sm font-semibold text-white hover:bg-[#35a9a5]"
             >
               <Plus className="h-4 w-4" />
               Nueva cita
@@ -1009,21 +1009,21 @@ export default function CalendarBoard() {
         {view === "month" ? (
           <div className="px-6 py-6">
             <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold text-slate-900">
+              <div className="text-lg font-semibold text-white">
                 {selected.toLocaleDateString("es", { month: "long", year: "numeric" })}
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setSelected(toStartOfDay(new Date(selected.getFullYear(), selected.getMonth() - 1, 1)))}
-                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white/70 hover:bg-white/10"
                 >
                   ←
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelected(toStartOfDay(new Date(selected.getFullYear(), selected.getMonth() + 1, 1)))}
-                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
+                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white/70 hover:bg-white/10"
                 >
                   →
                 </button>
@@ -1032,7 +1032,7 @@ export default function CalendarBoard() {
 
             <div className="mt-4 grid grid-cols-7 gap-2">
               {["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"].map((d) => (
-                <div key={d} className="text-xs tracking-[0.18em] text-slate-500 text-center">
+                <div key={d} className="text-center text-xs tracking-[0.18em] text-white/50">
                   {d}
                 </div>
               ))}
@@ -1053,20 +1053,20 @@ export default function CalendarBoard() {
                     }}
                     className={[
                       "rounded-2xl border p-3 text-left transition min-h-[86px]",
-                      active ? "border-[#E5E7EB] bg-[#F4F5F7]" : "border-[#E5E7EB] bg-[#F4F5F7] hover:bg-[#F4F5F7]",
+                      active ? "border-white/10 bg-white/10" : "border-white/10 bg-white/5 hover:bg-white/10",
                     ].join(" ")}
                   >
                     <div className="flex items-start justify-between">
-                      <div className={["text-sm font-semibold", inMonth ? "text-slate-900" : "text-slate-500"].join(" ")}>
+                      <div className={["text-sm font-semibold", inMonth ? "text-white" : "text-white/40"].join(" ")}>
                         {d.getDate()}
                       </div>
                       {c > 0 ? (
-                        <div className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-2 py-0.5 text-[11px] text-slate-700">
+                        <div className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-white/70">
                           {c}
                         </div>
                       ) : null}
                     </div>
-                    <div className="mt-2 text-xs text-slate-500">{c > 0 ? `${c} cita(s)` : "—"}</div>
+                    <div className="mt-2 text-xs text-white/50">{c > 0 ? `${c} cita(s)` : "—"}</div>
                   </button>
                 );
               })}
@@ -1076,7 +1076,7 @@ export default function CalendarBoard() {
 
         {view === "week" ? (
           <>
-            <div className="px-6 py-4 border-b border-[#E5E7EB]">
+            <div className="border-b border-white/10 px-6 py-4">
               <div className="flex gap-3 overflow-x-auto pb-1">
                 {week.map((d) => {
                   const active = toStartOfDay(d).getTime() === toStartOfDay(selected).getTime();
@@ -1089,14 +1089,14 @@ export default function CalendarBoard() {
                       onClick={() => setSelected(toStartOfDay(d))}
                       className={[
                         "min-w-[92px] rounded-2xl border px-4 py-3 text-left transition",
-                        active ? "border-[#E5E7EB] bg-[#F4F5F7]" : "border-[#E5E7EB] bg-[#F4F5F7] hover:bg-[#F4F5F7]",
+                        active ? "border-white/10 bg-white/10" : "border-white/10 bg-white/5 hover:bg-white/10",
                       ].join(" ")}
                     >
-                      <div className="text-[11px] tracking-[0.18em] uppercase text-slate-700">{fmtDayLabel(d)}</div>
+                      <div className="text-[11px] tracking-[0.18em] uppercase text-white/70">{fmtDayLabel(d)}</div>
                       <div className="mt-1 flex items-center justify-between">
-                        <div className="text-lg font-semibold text-slate-900">{fmtDayNum(d)}</div>
+                        <div className="text-lg font-semibold text-white">{fmtDayNum(d)}</div>
                         {c > 0 ? (
-                          <div className="rounded-full border border-[#E5E7EB] bg-[#F4F5F7] px-2 py-0.5 text-[11px] text-slate-700">
+                          <div className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-white/70">
                             {c}
                           </div>
                         ) : null}
@@ -1110,29 +1110,29 @@ export default function CalendarBoard() {
             <div className="px-6 py-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-xs text-slate-500">Día seleccionado</div>
-                  <div className="text-lg font-semibold text-slate-900">
+                  <div className="text-xs text-white/50">Día seleccionado</div>
+                  <div className="text-lg font-semibold text-white">
                     {selected.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "short" })}
                   </div>
                 </div>
-                <div className="text-sm text-slate-700">{dayAppts.length} cita(s)</div>
+                <div className="text-sm text-white/60">{dayAppts.length} cita(s)</div>
               </div>
 
               <div className="mt-4 space-y-3">
                 {busy ? (
                   <div className="space-y-3">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="h-20 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] animate-pulse" />
+                      <div key={i} className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
                     ))}
                   </div>
                 ) : dayAppts.length === 0 ? (
-                  <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-6">
-                    <div className="text-slate-900 font-semibold">No hay citas este día.</div>
-                    <div className="mt-1 text-sm text-slate-700">Crea una cita para comenzar la agenda.</div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                    <div className="font-semibold text-white">No hay citas este día.</div>
+                    <div className="mt-1 text-sm text-white/60">Crea una cita para comenzar la agenda.</div>
                     <button
                       type="button"
                       onClick={openCreate}
-                      className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                      className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-[#3CBDB9] px-4 py-2 text-sm font-semibold text-white hover:bg-[#35a9a5]"
                     >
                       <Plus className="h-4 w-4" />
                       Crear cita
@@ -1152,17 +1152,17 @@ export default function CalendarBoard() {
                         key={appointmentKey(a)}
                         type="button"
                         onClick={() => openEdit(a)}
-                        className="w-full rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-5 py-4 text-left transition hover:bg-[#F4F5F7] focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold text-slate-900 truncate">{title}</div>
-                            <div className="mt-1 text-xs text-slate-700 truncate">{subtitle}</div>
+                            <div className="truncate text-sm font-semibold text-white">{title}</div>
+                            <div className="mt-1 truncate text-xs text-white/60">{subtitle}</div>
                           </div>
 
                           <div className="shrink-0">
                             <div className="flex items-center gap-3">
-                              <div className="inline-flex items-center gap-2 text-xs text-slate-700">
+                              <div className="inline-flex items-center gap-2 text-xs text-white/60">
                                 <Clock className="h-3.5 w-3.5" />
                                 {time}
                               </div>
@@ -1180,11 +1180,11 @@ export default function CalendarBoard() {
                         </div>
 
                         {a.notes?.trim() ? (
-                          <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{a.notes}</div>
+                          <div className="mt-3 whitespace-pre-wrap text-sm text-white/60">{a.notes}</div>
                         ) : null}
 
                         <div className="mt-4 flex items-center justify-between gap-2">
-                          <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                          <div className="inline-flex items-center gap-2 text-xs font-semibold text-white/70">
                             <PencilLine className="h-4 w-4" />
                             Editar cita
                           </div>
@@ -1213,8 +1213,8 @@ export default function CalendarBoard() {
           <div className="px-6 py-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs text-slate-500">Día</div>
-                <div className="text-lg font-semibold text-slate-900">
+                <div className="text-xs text-white/50">Día</div>
+                <div className="text-lg font-semibold text-white">
                   {selected.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "short" })}
                 </div>
               </div>
@@ -1235,7 +1235,7 @@ export default function CalendarBoard() {
                 >
                   →
                 </button>
-                <div className="text-sm text-slate-700">{dayAppts.length} cita(s)</div>
+                <div className="text-sm text-white/60">{dayAppts.length} cita(s)</div>
               </div>
             </div>
 
@@ -1243,13 +1243,13 @@ export default function CalendarBoard() {
               {busy ? (
                 <div className="space-y-3">
                   {[1, 2].map((i) => (
-                    <div key={i} className="h-20 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] animate-pulse" />
+                    <div key={i} className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
                   ))}
                 </div>
               ) : dayAppts.length === 0 ? (
-                <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-6">
-                  <div className="text-slate-900 font-semibold">No hay citas este día.</div>
-                  <div className="mt-1 text-sm text-slate-700">Crea una cita para comenzar la agenda.</div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                  <div className="font-semibold text-white">No hay citas este día.</div>
+                  <div className="mt-1 text-sm text-white/60">Crea una cita para comenzar la agenda.</div>
                 </div>
               ) : (
                 dayAppts.map((a) => {
@@ -1265,17 +1265,17 @@ export default function CalendarBoard() {
                       key={appointmentKey(a)}
                       type="button"
                       onClick={() => openEdit(a)}
-                      className="w-full rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-5 py-4 text-left transition hover:bg-[#F4F5F7] focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-slate-900 truncate">{title}</div>
-                          <div className="mt-1 text-xs text-slate-700 truncate">{subtitle}</div>
+                          <div className="truncate text-sm font-semibold text-white">{title}</div>
+                          <div className="mt-1 truncate text-xs text-white/60">{subtitle}</div>
                         </div>
 
                         <div className="shrink-0">
                           <div className="flex items-center gap-3">
-                            <div className="inline-flex items-center gap-2 text-xs text-slate-700">
+                            <div className="inline-flex items-center gap-2 text-xs text-white/60">
                               <Clock className="h-3.5 w-3.5" />
                               {time}
                             </div>
@@ -1293,11 +1293,11 @@ export default function CalendarBoard() {
                       </div>
 
                       {a.notes?.trim() ? (
-                        <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{a.notes}</div>
+                        <div className="mt-3 whitespace-pre-wrap text-sm text-white/60">{a.notes}</div>
                       ) : null}
 
                       <div className="mt-4 flex items-center justify-between gap-2">
-                        <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                        <div className="inline-flex items-center gap-2 text-xs font-semibold text-white/70">
                           <PencilLine className="h-4 w-4" />
                           Editar cita
                         </div>
