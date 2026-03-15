@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bell, CalendarDays, Clock3, MessageCircle, SendHorizonal, ChevronLeft, ChevronRight } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { SectionCard } from "../components/SectionCard";
@@ -76,11 +76,9 @@ function formatDateHeader(date: Date) {
 
 export default function Hoy() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { clinic } = useClinic();
   const orgId = clinic?.organization_id ?? DEFAULT_ORG;
 
-  const [view, setView] = useState<"day" | "week">(searchParams.get("view") === "week" ? "week" : "day");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [newMessages, setNewMessages] = useState(0);
@@ -163,8 +161,8 @@ export default function Hoy() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-white">Agenda</h1>
-          <p className="text-sm text-white/60 capitalize">{weekdayLabel}</p>
+          <h1 className="text-2xl font-semibold text-white">{clinic?.name ?? "Clínica"}</h1>
+          <p className="text-sm text-white/60 capitalize">Hoy · {weekdayLabel}</p>
         </div>
         <button onClick={() => navigate("/settings?tab=integraciones")} className="relative flex items-center justify-center w-11 h-11 rounded-2xl border border-white/15 bg-white/5 text-white/80 hover:bg-white/10">
           <Bell className="h-5 w-5" />
@@ -179,11 +177,6 @@ export default function Hoy() {
           {!isToday && <button onClick={() => setSelectedDate(new Date())} className="ml-2 text-xs text-[#3CBDB9] hover:underline">Ir a hoy</button>}
         </div>
         <button onClick={() => setSelectedDate(new Date(selectedDate.getTime() + 86400000))} className="p-2 rounded-xl hover:bg-white/10 text-white/70"><ChevronRight className="h-5 w-5" /></button>
-      </div>
-
-      <div className="flex gap-2">
-        <button onClick={() => setView("day")} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${view === "day" ? "bg-white/10 text-white" : "bg-white/5 border border-white/10 text-white/70"}`}>Día</button>
-        <button onClick={() => setView("week")} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${view === "week" ? "bg-white/10 text-white" : "bg-white/5 border border-white/10 text-white/70"}`}>Semana</button>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
@@ -274,10 +267,9 @@ export default function Hoy() {
         )}
       </SectionCard>
 
-      <SectionCard>
+      <SectionCard title="Mañana" description="Vista rápida del siguiente día.">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-white">Mañana</h3>
             <p className="text-xs text-white/50">{tomorrowCount} citas programadas</p>
           </div>
           <button onClick={() => navigate("/tomorrow")} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-xs font-medium text-white/80 hover:bg-white/10">
