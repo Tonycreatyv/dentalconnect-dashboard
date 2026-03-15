@@ -130,6 +130,25 @@ export default function Leads() {
     contacted: leads.filter((l) => l.status === "contacted").length,
     attended: leads.filter((l) => l.status === "attended").length,
   };
+  const filterButtonBase = "shrink-0 rounded-full px-4 py-1.5 text-sm font-medium border transition-colors";
+  const filterStyles = {
+    todos: {
+      active: "bg-white/10 text-white border-white/20",
+      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-white/10 hover:text-white/70",
+    },
+    nuevos: {
+      active: "bg-blue-500/15 text-blue-300 border-blue-400/30",
+      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-blue-500/10 hover:text-blue-300",
+    },
+    contactados: {
+      active: "bg-amber-500/15 text-amber-300 border-amber-400/30",
+      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-amber-500/10 hover:text-amber-300",
+    },
+    atendidos: {
+      active: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
+      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-emerald-500/10 hover:text-emerald-300",
+    },
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-[#0B1117]">
@@ -152,25 +171,25 @@ export default function Leads() {
         <div className="flex gap-2 px-4 pb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
           <button
             onClick={() => setFilterStatus("all")}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${filterStatus === "all" ? "bg-white/15 text-white" : "bg-white/5 text-white/60"}`}
+            className={`${filterButtonBase} ${filterStatus === "all" ? filterStyles.todos.active : filterStyles.todos.inactive}`}
           >
             Todos ({stats.total})
           </button>
           <button
             onClick={() => setFilterStatus("new")}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "new" ? "bg-blue-500/10 text-blue-300" : "bg-white/5 text-white/50 hover:bg-blue-500/10 hover:text-blue-300"}`}
+            className={`${filterButtonBase} ${filterStatus === "new" ? filterStyles.nuevos.active : filterStyles.nuevos.inactive}`}
           >
             Nuevos ({stats.new})
           </button>
           <button
             onClick={() => setFilterStatus("contacted")}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "contacted" ? "bg-amber-500/10 text-amber-300" : "bg-white/5 text-white/50 hover:bg-amber-500/10 hover:text-amber-300"}`}
+            className={`${filterButtonBase} ${filterStatus === "contacted" ? filterStyles.contactados.active : filterStyles.contactados.inactive}`}
           >
             Contactados ({stats.contacted})
           </button>
           <button
             onClick={() => setFilterStatus("attended")}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition ${filterStatus === "attended" ? "bg-emerald-500/10 text-emerald-300" : "bg-white/5 text-white/50 hover:bg-emerald-500/10 hover:text-emerald-300"}`}
+            className={`${filterButtonBase} ${filterStatus === "attended" ? filterStyles.atendidos.active : filterStyles.atendidos.inactive}`}
           >
             Atendidos ({stats.attended})
           </button>
