@@ -56,6 +56,28 @@ function fmtRangeLabel(a: Date, b: Date) {
   return `${left} — ${right}`;
 }
 
+function fmtViewTitle(view: ViewMode, selected: Date, week: Date[]) {
+  if (view === "day") {
+    return selected.toLocaleDateString("es-HN", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  }
+  if (view === "month") {
+    return selected.toLocaleDateString("es-HN", {
+      month: "long",
+      year: "numeric",
+    });
+  }
+  const weekStart = week[0];
+  const weekEnd = week[6];
+  const left = weekStart.toLocaleDateString("es-HN", { day: "numeric", month: "short" });
+  const right = weekEnd.toLocaleDateString("es-HN", { day: "numeric", month: "short" });
+  return `${left} — ${right} ${weekEnd.getFullYear()}`;
+}
+
 function fmtTimeFromISO(iso: string) {
   return new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
 }
@@ -494,6 +516,7 @@ export default function CalendarBoard() {
   }, [selected]);
 
   const month = useMemo(() => monthGrid(selected), [selected]);
+  const viewTitle = useMemo(() => fmtViewTitle(view, selected, week), [view, selected, week]);
 
   function prevPeriod() {
     if (view === "day") {
@@ -932,7 +955,7 @@ export default function CalendarBoard() {
         <div className="flex flex-col gap-3 border-b border-white/10 px-6 py-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="font-semibold text-white">Agenda</div>
-            <div className="text-sm text-white/60">{fmtRangeLabel(rangeStart, rangeEnd)}</div>
+            <div className="text-sm text-white/60 capitalize">{viewTitle}</div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
