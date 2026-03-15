@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, Sparkles, CreditCard, UserRound } from "lucide-react";
+import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, Sparkles, CreditCard, UserRound, Shield } from "lucide-react";
 import BrandMark from "./BrandMark";
 import { useClinic } from "../context/ClinicContext";
 
@@ -34,13 +34,34 @@ function NavItem({
 }
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { clinic } = useClinic();
+  const { clinic, isAdmin, availableOrgs, activeOrgId, setActiveOrgId } = useClinic();
 
   return (
     <aside className="rounded-3xl border border-white/10 bg-[#0B0D12] p-4 text-white">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <BrandMark clinicName={clinic?.name ?? "Clínica"} />
       </div>
+
+      {/* ADMIN ONLY: Selector de organización */}
+      {isAdmin && availableOrgs.length > 1 && (
+        <div className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
+            <Shield className="h-3 w-3" />
+            <span>Admin Mode</span>
+          </div>
+          <select
+            value={activeOrgId ?? ""}
+            onChange={(e) => setActiveOrgId(e.target.value)}
+            className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white outline-none"
+          >
+            {availableOrgs.map((org) => (
+              <option key={org.organization_id} value={org.organization_id}>
+                {org.organization_id}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-2">
         <NavItem to="/hoy" icon={LayoutDashboard} label="Hoy" onNavigate={onNavigate} />

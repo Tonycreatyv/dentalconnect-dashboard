@@ -1,1496 +1,328 @@
-// src/pages/Settings.tsx
+// src/pages/Settings.tsx - DARK THEME
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import {
-  BadgeCheck,
-  CalendarDays,
-  Globe,
-  Instagram,
-  MessageCircle,
-  MessagesSquare,
-  PhoneCall,
-} from "lucide-react";
+import { BadgeCheck, CalendarDays, Globe, Instagram, MessageCircle, MessagesSquare, PhoneCall, Check, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { Toggle } from "../components/Toggle";
 import { Modal } from "../components/ui/Modal";
 import { Toast, type ToastKind } from "../components/ui/Toast";
-import PageHeader from "../components/PageHeader";
 import { startMetaOAuth } from "../components/integrations/ConnectMessengerButton";
 import StatusChip from "../components/ui/StatusChip";
-
-const GOOGLE_CAL_CONNECT_URL = "";
-const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
-const META_REDIRECT_URI = `${APP_URL}/auth/meta/callback`;
+import PageHeader from "../components/PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
 
-type ServiceItem = {
-  name: string;
-  price_from?: number | null;
-  price_to?: number | null;
-  currency?: string;
-  duration_min?: number | null;
-  notes?: string;
-};
-
+type ServiceItem = { name: string; price_from?: number | null; price_to?: number | null; currency?: string; duration_min?: number | null; notes?: string };
 type FaqItem = { q: string; a: string };
 type DayHours = { closed: boolean; open?: string; close?: string };
 type HoursMap = Record<string, DayHours>;
 
-type ClinicSettingsRow = {
-  clinic_id: string;
-  phone: string | null;
-  address: string | null;
-  google_maps_url: string | null;
-  hours: any | null;
-  services: ServiceItem[] | null;
-  faqs: FaqItem[] | null;
-  emergency: string | null;
-  policies: any | null;
-  updated_at: string | null;
-  specialties: any | null;
-};
+type ClinicSettingsRow = { clinic_id: string; phone: string | null; address: string | null; google_maps_url: string | null; hours: any; services: ServiceItem[] | null; faqs: FaqItem[] | null; emergency: string | null; policies: any; updated_at: string | null; specialties: any };
 
-type IntegrationRequestRow = {
-  id: string;
-  organization_id: string | null;
-  channel: string;
-  status: string | null;
-  payload: any | null;
-  created_at: string | null;
-};
-
-type OrgIntegrationState = {
-  meta_page_id: string | null;
-  messenger_enabled: boolean | null;
-  meta_connected_at: string | null;
-  meta_last_error: string | null;
-  waitlist_offer_mode: "manual" | "semi_auto" | "auto";
-};
+type OrgIntegrationState = { meta_page_id: string | null; messenger_enabled: boolean | null; meta_connected_at: string | null; meta_last_error: string | null };
 
 const SPECIALTIES = [
   { value: "general", label: "Clínica general" },
-  { value: "ortho", label: "Ortodoncia (brackets / alineadores)" },
-  { value: "pediatric", label: "Odontopediatría (niños)" },
-  { value: "endo", label: "Endodoncia (conducto)" },
+  { value: "ortho", label: "Ortodoncia" },
+  { value: "pediatric", label: "Odontopediatría" },
+  { value: "endo", label: "Endodoncia" },
   { value: "implants", label: "Implantes" },
   { value: "aesthetic", label: "Estética dental" },
 ];
 
-const currencyDefault = "HNL";
+const TEMPLATE_SERVICES: ServiceItem[] = [
+  { name: "Consulta / valoración", price_from: 400, currency: "HNL", duration_min: 30, notes: "Diagnóstico inicial." },
+  { name: "Limpieza dental", price_from: 700, currency: "HNL", duration_min: 45, notes: "Incluye evaluación." },
+  { name: "Resina", price_from: 900, currency: "HNL", duration_min: 60, notes: "Varía por tamaño." },
+  { name: "Extracción simple", price_from: 900, currency: "HNL", duration_min: 45, notes: "" },
+  { name: "Blanqueamiento", price_from: 1800, currency: "HNL", duration_min: 60, notes: "Requiere evaluación." },
+];
 
-const TEMPLATE_BY_SPECIALTY: Record<
-  string,
-  {
-    services: ServiceItem[];
-    faqs: FaqItem[];
-    policies: { cancelacion: string; deposito: string };
-    emergency: string;
-  }
-> = {
-  general: {
-    services: [
-      {
-        name: "Consulta / valoración",
-        price_from: 400,
-        currency: "HNL",
-        duration_min: 30,
-        notes: "Diagnóstico inicial + plan recomendado.",
-      },
-      {
-        name: "Limpieza dental",
-        price_from: 700,
-        currency: "HNL",
-        duration_min: 45,
-        notes: "Incluye evaluación básica.",
-      },
-      {
-        name: "Resina (restauración)",
-        price_from: 900,
-        currency: "HNL",
-        duration_min: 60,
-        notes: "Varía por tamaño.",
-      },
-      {
-        name: "Extracción simple",
-        price_from: 900,
-        currency: "HNL",
-        duration_min: 45,
-        notes: "No incluye extracción quirúrgica.",
-      },
-      {
-        name: "Blanqueamiento (sesión)",
-        price_from: 1800,
-        currency: "HNL",
-        duration_min: 60,
-        notes: "Recomendamos evaluación previa.",
-      },
-    ],
-    faqs: [
-      { q: "¿Tienen disponibilidad hoy?", a: "Sí, podemos revisar disponibilidad. ¿Qué día y hora te conviene?" },
-      { q: "¿Cuánto cuesta una limpieza?", a: "La limpieza inicia desde L 700. Puede variar según evaluación." },
-      { q: "¿Dónde están ubicados?", a: "Te comparto la ubicación y una referencia. ¿Vienes en carro o en taxi?" },
-      { q: "¿Atienden urgencias?", a: "Sí. Para urgencias priorizamos según disponibilidad. ¿Qué síntomas presentas y desde cuándo?" },
-    ],
-    policies: {
-      cancelacion: "Si necesitas reprogramar, avísanos con al menos 2 horas de anticipación.",
-      deposito: "En algunos tratamientos se solicita un depósito para reservar el cupo.",
-    },
-    emergency:
-      "Si es una urgencia (dolor fuerte, inflamación o sangrado), cuéntanos síntomas y desde cuándo para priorizarte.",
-  },
-  ortho: {
-    services: [
-      {
-        name: "Evaluación de ortodoncia",
-        price_from: 500,
-        currency: "HNL",
-        duration_min: 30,
-        notes: "Incluye plan y opciones.",
-      },
-      {
-        name: "Brackets metálicos (cuota inicial)",
-        price_from: 4500,
-        currency: "HNL",
-        duration_min: 60,
-        notes: "Mensualidad aparte.",
-      },
-      {
-        name: "Control mensual (ortodoncia)",
-        price_from: 900,
-        currency: "HNL",
-        duration_min: 20,
-        notes: "Ajuste y seguimiento.",
-      },
-      {
-        name: "Alineadores (evaluación)",
-        price_from: 800,
-        currency: "HNL",
-        duration_min: 30,
-        notes: "Escaneo y plan según caso.",
-      },
-    ],
-    faqs: [
-      { q: "¿Cuánto dura el tratamiento?", a: "Depende del caso. En promedio 12 a 24 meses. Se confirma tras evaluación." },
-      { q: "¿Cuánto cuestan los brackets?", a: "Inician desde L 4,500 + mensualidad desde L 900 (según plan)." },
-      { q: "¿Puedo pagar por cuotas?", a: "Sí, tenemos opciones de pago mensual." },
-    ],
-    policies: {
-      cancelacion: "Reprogramaciones con al menos 24 horas para no perder el control.",
-      deposito: "Para iniciar el tratamiento se solicita cuota inicial.",
-    },
-    emergency: "Si se soltó un bracket o te lastima un alambre, agendamos ajuste prioritario.",
-  },
-  pediatric: {
-    services: [
-      {
-        name: "Consulta infantil",
-        price_from: 450,
-        currency: "HNL",
-        duration_min: 30,
-        notes: "Evaluación + recomendaciones.",
-      },
-      {
-        name: "Limpieza infantil",
-        price_from: 600,
-        currency: "HNL",
-        duration_min: 40,
-        notes: "Según edad y cooperación.",
-      },
-      { name: "Sellantes", price_from: 450, currency: "HNL", duration_min: 30, notes: "Prevención de caries." },
-      { name: "Fluorización", price_from: 350, currency: "HNL", duration_min: 20, notes: "Prevención y refuerzo." },
-    ],
-    faqs: [
-      { q: "¿Desde qué edad atienden?", a: "Atendemos desde temprana edad. Dime la edad del niño y te guío." },
-      { q: "¿Cómo preparo a mi niño?", a: "Explícale con calma y trae su cepillo si pueden." },
-    ],
-    policies: {
-      cancelacion: "Recomendamos reprogramar con anticipación para reservar cupo infantil.",
-      deposito: "Tratamientos especiales pueden requerir confirmación previa.",
-    },
-    emergency: "Si hubo golpe/trauma dental, te damos prioridad. ¿Qué pasó y hace cuánto?",
-  },
-  endo: {
-    services: [
-      {
-        name: "Valoración endodoncia",
-        price_from: 600,
-        currency: "HNL",
-        duration_min: 30,
-        notes: "Se evalúa con radiografía si aplica.",
-      },
-      {
-        name: "Conducto (1 canal)",
-        price_from: 2500,
-        currency: "HNL",
-        duration_min: 90,
-        notes: "Depende de complejidad.",
-      },
-      {
-        name: "Conducto (2+ canales)",
-        price_from: 3500,
-        currency: "HNL",
-        duration_min: 120,
-        notes: "Varía por pieza.",
-      },
-    ],
-    faqs: [
-      { q: "¿Duele un conducto?", a: "Se realiza con anestesia. Puede haber sensibilidad leve después." },
-      { q: "¿Cuánto cuesta un conducto?", a: "Inicia desde L 2,500 según pieza y complejidad." },
-    ],
-    policies: {
-      cancelacion: "Reprograma con anticipación (procedimiento largo).",
-      deposito: "En procedimientos largos puede solicitarse confirmación.",
-    },
-    emergency: "Dolor intenso: te orientamos y buscamos cita prioritaria. ¿Qué tan fuerte es el dolor (1–10)?",
-  },
-  implants: {
-    services: [
-      {
-        name: "Evaluación implantes",
-        price_from: 800,
-        currency: "HNL",
-        duration_min: 45,
-        notes: "Plan + opciones según caso.",
-      },
-      {
-        name: "Implante (procedimiento)",
-        price_from: 18000,
-        currency: "HNL",
-        duration_min: 120,
-        notes: "Varía por marca y complejidad.",
-      },
-    ],
-    faqs: [
-      { q: "¿Cuánto cuesta un implante?", a: "Depende del caso y componentes. Inicia desde L 18,000. Se confirma en evaluación." },
-      { q: "¿Cuánto dura el proceso?", a: "Suele ser por fases. Te explicamos el plan tras evaluación." },
-    ],
-    policies: {
-      cancelacion: "Reprograma con anticipación para reservar tiempo clínico.",
-      deposito: "Puede requerirse depósito para reservar componentes y fecha.",
-    },
-    emergency: "Si tienes dolor o inflamación post-procedimiento, te atendemos prioritario.",
-  },
-  aesthetic: {
-    services: [
-      {
-        name: "Carillas (evaluación)",
-        price_from: 800,
-        currency: "HNL",
-        duration_min: 45,
-        notes: "Plan estético según sonrisa.",
-      },
-      {
-        name: "Carilla (por unidad)",
-        price_from: 4500,
-        currency: "HNL",
-        duration_min: 90,
-        notes: "Varía por material.",
-      },
-      {
-        name: "Blanqueamiento (sesión)",
-        price_from: 1800,
-        currency: "HNL",
-        duration_min: 60,
-        notes: "Con evaluación previa.",
-      },
-    ],
-    faqs: [
-      { q: "¿Carillas o blanqueamiento?", a: "Depende de tu objetivo. Te guiamos con evaluación rápida." },
-      { q: "¿Cuánto duran las carillas?", a: "Con buen cuidado duran años. Te explicamos mantenimiento." },
-    ],
-    policies: {
-      cancelacion: "Avisar con anticipación para reservar cupo estético.",
-      deposito: "Puede requerirse depósito por laboratorio/materiales.",
-    },
-    emergency: "Si se desprende una carilla o hay sensibilidad fuerte, te damos prioridad.",
-  },
-};
+const TEMPLATE_FAQS: FaqItem[] = [
+  { q: "¿Tienen disponibilidad hoy?", a: "Podemos revisar disponibilidad. ¿Qué hora te conviene?" },
+  { q: "¿Cuánto cuesta una limpieza?", a: "La limpieza inicia desde L 700." },
+  { q: "¿Dónde están ubicados?", a: "Te comparto la ubicación." },
+  { q: "¿Atienden urgencias?", a: "Sí. ¿Qué síntomas presentas?" },
+];
 
 function defaultHours(): HoursMap {
-  return {
-    mon: { closed: false, open: "08:00", close: "17:00" },
-    tue: { closed: false, open: "08:00", close: "17:00" },
-    wed: { closed: false, open: "08:00", close: "17:00" },
-    thu: { closed: false, open: "08:00", close: "17:00" },
-    fri: { closed: false, open: "08:00", close: "17:00" },
-    sat: { closed: false, open: "09:00", close: "13:00" },
-    sun: { closed: true },
-  };
+  return { mon: { closed: false, open: "08:00", close: "17:00" }, tue: { closed: false, open: "08:00", close: "17:00" }, wed: { closed: false, open: "08:00", close: "17:00" }, thu: { closed: false, open: "08:00", close: "17:00" }, fri: { closed: false, open: "08:00", close: "17:00" }, sat: { closed: false, open: "09:00", close: "13:00" }, sun: { closed: true } };
 }
 
-function uniqueByName(items: ServiceItem[]) {
-  const seen = new Set<string>();
-  const out: ServiceItem[] = [];
-  for (const it of items) {
-    const k = (it.name ?? "").trim().toLowerCase();
-    if (!k) continue;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(it);
-  }
-  return out;
-}
-
-function uniqueFaq(items: FaqItem[]) {
-  const seen = new Set<string>();
-  const out: FaqItem[] = [];
-  for (const it of items) {
-    const k = `${(it.q ?? "").trim().toLowerCase()}::${(it.a ?? "").trim().toLowerCase()}`;
-    if (!k) continue;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(it);
-  }
-  return out;
-}
-
-function mergeTemplates(selected: string[]) {
-  const safe = selected.length ? selected : ["general"];
-  const services = uniqueByName(safe.flatMap((k) => TEMPLATE_BY_SPECIALTY[k]?.services ?? []));
-
-  const includeGeneralFaq = safe.includes("general") || safe.length === 0;
-  const faqSources = [
-    ...(includeGeneralFaq ? (TEMPLATE_BY_SPECIALTY.general?.faqs ?? []) : []),
-    ...safe.flatMap((k) => TEMPLATE_BY_SPECIALTY[k]?.faqs ?? []),
-  ];
-  const faqs = uniqueFaq(faqSources);
-
-  const first = safe[0] ?? "general";
-  const base = TEMPLATE_BY_SPECIALTY[first] ?? TEMPLATE_BY_SPECIALTY.general;
-
-  return {
-    services,
-    faqs,
-    policies: base.policies,
-    emergency: base.emergency,
-  };
-}
-
-const dayLabels: Record<string, string> = {
-  mon: "Lunes",
-  tue: "Martes",
-  wed: "Miércoles",
-  thu: "Jueves",
-  fri: "Viernes",
-  sat: "Sábado",
-  sun: "Domingo",
-};
+const dayLabels: Record<string, string> = { mon: "Lunes", tue: "Martes", wed: "Miércoles", thu: "Jueves", fri: "Viernes", sat: "Sábado", sun: "Domingo" };
 
 type TabKey = "integraciones" | "clinica" | "horario" | "servicios" | "faqs";
 
-type IntegrationChannel = "messenger" | "instagram" | "whatsapp" | "google_calendar";
-
 const INTEGRATIONS = [
-  {
-    key: "messenger" as const,
-    name: "Messenger",
-    description: "Centralizá los mensajes del inbox de Facebook en tu equipo.",
-    icon: MessagesSquare,
-  },
-  {
-    key: "instagram" as const,
-    name: "Instagram",
-    description: "Respondé consultas desde Instagram sin perder clientes potenciales.",
-    icon: Instagram,
-  },
-  {
-    key: "whatsapp" as const,
-    name: "WhatsApp",
-    description: "Conectá tu línea para confirmar y agendar citas rápidamente.",
-    icon: MessageCircle,
-  },
-  {
-    key: "google_calendar" as const,
-    name: "Google Calendar",
-    description: "Sincronizá citas y confirmaciones con tu calendario.",
-    icon: CalendarDays,
-  },
+  { key: "messenger" as const, name: "Messenger", description: "Centraliza mensajes de Facebook.", icon: MessagesSquare },
+  { key: "instagram" as const, name: "Instagram", description: "Responde desde Instagram.", icon: Instagram },
+  { key: "whatsapp" as const, name: "WhatsApp", description: "Conecta para confirmar citas.", icon: MessageCircle },
+  { key: "google_calendar" as const, name: "Google Calendar", description: "Sincroniza citas.", icon: CalendarDays },
 ];
 
 export default function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { clinic, clinicId, activeOrgId, isAdmin, availableOrgs, setActiveOrgId } = useClinic();
-
+  const { clinic, clinicId, activeOrgId } = useClinic();
   const ORG = activeOrgId ?? clinic?.organization_id ?? DEFAULT_ORG;
 
   const [tab, setTab] = useState<TabKey>("integraciones");
-  const [openSection, setOpenSection] = useState<TabKey | null>("integraciones");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
-
   const [localClinicId, setLocalClinicId] = useState<string | null>(null);
 
   const [clinicName, setClinicName] = useState("Clínica Sonrisas");
-
   const [specialties, setSpecialties] = useState<string[]>(["general"]);
-  const [useTemplate, setUseTemplate] = useState(true);
-
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [mapsUrl, setMapsUrl] = useState("");
-
-  const [advancedPerDay, setAdvancedPerDay] = useState(false);
   const [hours, setHours] = useState<HoursMap>(defaultHours());
+  const [services, setServices] = useState<ServiceItem[]>(TEMPLATE_SERVICES);
+  const [faqs, setFaqs] = useState<FaqItem[]>(TEMPLATE_FAQS);
+  const [emergency, setEmergency] = useState("Si es urgencia, cuéntanos síntomas.");
+  const [policiesCancel, setPoliciesCancel] = useState("Avisa con 2 horas de anticipación.");
+  const [policiesDeposit, setPoliciesDeposit] = useState("Algunos tratamientos requieren depósito.");
 
-  const [services, setServices] = useState<ServiceItem[]>(mergeTemplates(["general"]).services);
-  const [faqs, setFaqs] = useState<FaqItem[]>(mergeTemplates(["general"]).faqs);
-  const [emergency, setEmergency] = useState(mergeTemplates(["general"]).emergency);
-  const [policiesCancel, setPoliciesCancel] = useState(mergeTemplates(["general"]).policies.cancelacion ?? "");
-  const [policiesDeposit, setPoliciesDeposit] = useState(mergeTemplates(["general"]).policies.deposito ?? "");
-
-  const [integrationRequests, setIntegrationRequests] = useState<IntegrationRequestRow[]>([]);
-  const [orgIntegration, setOrgIntegration] = useState<OrgIntegrationState>({
-    meta_page_id: null,
-    messenger_enabled: false,
-    meta_connected_at: null,
-    meta_last_error: null,
-    waitlist_offer_mode: "semi_auto",
-  });
-
-  const [guideOpen, setGuideOpen] = useState<IntegrationChannel | null>(null);
-  const [requestOpen, setRequestOpen] = useState<IntegrationChannel | null>(null);
+  const [orgIntegration, setOrgIntegration] = useState<OrgIntegrationState>({ meta_page_id: null, messenger_enabled: false, meta_connected_at: null, meta_last_error: null });
+  const [guideOpen, setGuideOpen] = useState<string | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
-  const [fixWarningOpen, setFixWarningOpen] = useState(false);
-  const [diagBusy, setDiagBusy] = useState(false);
-  const [diagResult, setDiagResult] = useState<string | null>(null);
-  const [pendingOutbox, setPendingOutbox] = useState<number | null>(null);
-
-  async function loadOrgIntegration(targetOrgId = ORG) {
-    let orgRes = await supabase
-      .from("org_settings")
-      .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error, waitlist_offer_mode")
-      .eq("organization_id", targetOrgId)
-      .limit(1);
-
-    if (orgRes.error && orgRes.error.message.toLowerCase().includes("waitlist_offer_mode")) {
-      orgRes = await supabase
-        .from("org_settings")
-        .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error")
-        .eq("organization_id", targetOrgId)
-        .limit(1);
-    }
-
-    if (orgRes.error) return;
-
-    const orgSettingsData = orgRes.data as any;
-    if (import.meta.env.DEV) {
-      console.log("org_settings raw", orgSettingsData);
-    }
-    const s = Array.isArray(orgSettingsData) ? orgSettingsData[0] : orgSettingsData;
-
-    setOrgIntegration({
-      meta_page_id: s?.meta_page_id ?? null,
-      messenger_enabled: s?.messenger_enabled ?? false,
-      meta_connected_at: s?.meta_connected_at ?? null,
-      meta_last_error: s?.meta_last_error ?? null,
-      waitlist_offer_mode:
-        s?.waitlist_offer_mode === "manual" || s?.waitlist_offer_mode === "auto"
-          ? s.waitlist_offer_mode
-          : "semi_auto",
-    });
-
-    const pendingRes = await supabase
-      .from("reply_outbox")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", targetOrgId)
-      .in("status", ["pending", "queued", "processing"]);
-    if (!pendingRes.error) {
-      setPendingOutbox(pendingRes.count ?? 0);
-    }
-  }
+  const [waitlistEmail, setWaitlistEmail] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const connected = params.get("connected");
-    const orgParam = String(params.get("org") ?? "").trim();
-    const tabParam = params.get("tab");
-    if (tabParam === "integraciones") {
-      setOpenSection("integraciones");
-      setTab("integraciones");
+    if (params.get("connected") === "1") {
+      setToast({ kind: "success", message: "Messenger conectado correctamente." });
+      void loadOrgIntegration();
+      params.delete("connected");
+      params.delete("org");
+      navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
     }
-    if (connected === "1") {
-      void (async () => {
-        if (orgParam && isAdmin && orgParam !== ORG) {
-          await setActiveOrgId(orgParam);
-        }
-        setOpenSection("integraciones");
-        setNotice("Messenger se conectó correctamente.");
-        await loadOrgIntegration(orgParam || ORG);
-        params.delete("connected");
-        params.delete("org");
-        navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
-      })();
-    }
-  }, [location.pathname, location.search, navigate, ORG, isAdmin, setActiveOrgId]);
+    if (params.get("tab") === "integraciones") setTab("integraciones");
+  }, [location.pathname, location.search, navigate]);
 
-  const [requestForm, setRequestForm] = useState({
-    business: "",
-    phone: "",
-    handle: "",
-  });
-
-  const [waitlistEmail, setWaitlistEmail] = useState("");
-
-  const showTechnicalDetails = false;
-
-  function toggleSpecialty(value: string) {
-    setSpecialties((prev) => {
-      const has = prev.includes(value);
-      const next = has ? prev.filter((x) => x !== value) : [...prev, value];
-      const safe = next.length ? next : ["general"];
-
-      if (useTemplate) {
-        const merged = mergeTemplates(safe);
-        setServices(merged.services);
-        setFaqs(merged.faqs);
-        setEmergency(merged.emergency);
-        setPoliciesCancel(merged.policies.cancelacion ?? "");
-        setPoliciesDeposit(merged.policies.deposito ?? "");
-      }
-      return safe;
-    });
-  }
-
-  async function connectMeta() {
-    setError(null);
-    setNotice(null);
-
-    try {
-      await startMetaOAuth(ORG);
-    } catch (e: any) {
-      setError(String(e?.message ?? e) || "No se pudo iniciar la conexión segura con Meta.");
-      return;
-    }
-  }
-
-  async function disconnectMessenger() {
-    const confirmed = window.confirm("¿Desconectar Messenger de esta organización?");
-    if (!confirmed) return;
-
-    setError(null);
-    const now = new Date().toISOString();
-    const res = await supabase
-      .from("org_settings")
-      .update({
-        messenger_enabled: false,
-        meta_page_id: null,
-        meta_connected_at: null,
-        meta_last_error: null,
-        updated_at: now,
-      })
-      .eq("organization_id", ORG);
-
-    if (res.error) {
-      setToast({ kind: "error", message: "No se pudo desconectar Messenger." });
-      return;
-    }
-
-    setToast({ kind: "success", message: "Messenger desconectado." });
-    await loadOrgIntegration();
-  }
-
-  async function setWaitlistOfferMode(mode: "manual" | "semi_auto" | "auto") {
-    setOrgIntegration((prev) => ({ ...prev, waitlist_offer_mode: mode }));
-    const now = new Date().toISOString();
-    const upsertRes = await supabase
-      .from("org_settings")
-      .upsert(
-        {
-          organization_id: ORG,
-          waitlist_offer_mode: mode,
-          updated_at: now,
-        },
-        { onConflict: "organization_id" }
-      );
-    if (upsertRes.error) {
-      setToast({ kind: "error", message: "No se pudo actualizar modo de waitlist." });
-      await loadOrgIntegration();
-      return;
-    }
-    setToast({ kind: "success", message: "Modo de waitlist actualizado." });
-  }
-
-  async function runRepliesDiagnostic() {
-    setDiagBusy(true);
-    setDiagResult(null);
-    try {
-      const baseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-      const runRepliesSecret = import.meta.env.VITE_RUN_REPLIES_SECRET as string | undefined;
-      if (!baseUrl) throw new Error("missing_VITE_SUPABASE_URL");
-      if (!runRepliesSecret) throw new Error("missing_VITE_RUN_REPLIES_SECRET");
-      if (!import.meta.env.DEV) {
-        const ok = window.confirm("Esto ejecutará run-replies para la org activa. ¿Continuar?");
-        if (!ok) return;
-      }
-
-      const r = await fetch(`${baseUrl}/functions/v1/run-replies`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-run-replies-secret": runRepliesSecret,
-        },
-        body: JSON.stringify({ organization_id: ORG, limit: 5 }),
-      });
-
-      const j = await r.json().catch(() => ({}));
-      await loadOrgIntegration();
-      setDiagResult(r.ok ? `OK: ${JSON.stringify(j)}` : `${r.status} ${String(j?.error ?? "error")}`);
-    } catch (e: any) {
-      setDiagResult(`error: ${String(e?.message ?? e)}`);
-    } finally {
-      setDiagBusy(false);
+  async function loadOrgIntegration() {
+    const res = await supabase.from("org_settings").select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error").eq("organization_id", ORG).limit(1);
+    if (!res.error && res.data?.[0]) {
+      const s = res.data[0] as any;
+      setOrgIntegration({ meta_page_id: s.meta_page_id ?? null, messenger_enabled: s.messenger_enabled ?? false, meta_connected_at: s.meta_connected_at ?? null, meta_last_error: s.meta_last_error ?? null });
     }
   }
 
   async function ensureClinic(): Promise<string | null> {
     if (clinicId) return clinicId;
     if (localClinicId) return localClinicId;
-
-    const find = await supabase
-      .from("clinics")
-      .select("id, name, domain, organization_id")
-      .eq("organization_id", ORG)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (find.data?.id) {
-      setLocalClinicId(find.data.id);
-      setClinicName(find.data.name ?? "Clínica");
-      return find.data.id;
-    }
-
-    const created = await supabase
-      .from("clinics")
-      .insert({ name: clinicName.trim() || "Clínica", domain: null, organization_id: ORG })
-      .select("id, name, domain, organization_id")
-      .maybeSingle();
-
-    if (created.error || !created.data?.id) {
-      setError("No se pudo crear la clínica. Verifica tus permisos.");
-      return null;
-    }
-
-    setLocalClinicId(created.data.id);
-    setClinicName(created.data.name ?? clinicName);
-    return created.data.id;
-  }
-
-  async function loadIntegrationRequests() {
-    const q = await supabase
-      .from("integration_requests")
-      .select("id, organization_id, channel, status, payload, created_at")
-      .eq("organization_id", ORG)
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    if (q.error) {
-      setIntegrationRequests([]);
-      return;
-    }
-
-    setIntegrationRequests((q.data as any) ?? []);
+    const find = await supabase.from("clinics").select("id, name").eq("organization_id", ORG).limit(1).maybeSingle();
+    if (find.data?.id) { setLocalClinicId(find.data.id); setClinicName(find.data.name ?? "Clínica"); return find.data.id; }
+    const created = await supabase.from("clinics").insert({ name: clinicName.trim() || "Clínica", organization_id: ORG }).select("id, name").maybeSingle();
+    if (created.data?.id) { setLocalClinicId(created.data.id); return created.data.id; }
+    return null;
   }
 
   useEffect(() => {
     let mounted = true;
-
     async function load() {
       setLoading(true);
-      setError(null);
-      setNotice(null);
-
       const id = await ensureClinic();
+      if (!mounted || !id) { setLoading(false); return; }
+      const s = await supabase.from("clinic_settings").select("*").eq("clinic_id", id).maybeSingle();
       if (!mounted) return;
-
-      if (!id) {
-        const merged = mergeTemplates(["general"]);
-        setServices(merged.services);
-        setFaqs(merged.faqs);
-        setEmergency(merged.emergency);
-        setPoliciesCancel(merged.policies.cancelacion ?? "");
-        setPoliciesDeposit(merged.policies.deposito ?? "");
-        setLoading(false);
-        return;
+      const row = s.data as ClinicSettingsRow | null;
+      if (row) {
+        setPhone(row.phone ?? "");
+        setAddress(row.address ?? "");
+        setMapsUrl(row.google_maps_url ?? "");
+        setHours((row.hours as HoursMap) ?? defaultHours());
+        setEmergency(row.emergency ?? emergency);
+        const pol = row.policies ?? {};
+        setPoliciesCancel(pol.cancelacion ?? policiesCancel);
+        setPoliciesDeposit(pol.deposito ?? policiesDeposit);
+        if (row.services?.length) setServices(row.services);
+        if (row.faqs?.length) setFaqs(row.faqs);
+        if (Array.isArray(row.specialties) && row.specialties.length) setSpecialties(row.specialties);
       }
-
-      const s = await supabase
-        .from("clinic_settings")
-        .select("clinic_id, phone, address, google_maps_url, hours, services, emergency, policies, updated_at, specialties, faqs")
-        .eq("clinic_id", id)
-        .maybeSingle();
-
-      if (!mounted) return;
-
-      const settingsRow = (s.data as ClinicSettingsRow) ?? null;
-
-      const dbSpecialtiesRaw = settingsRow?.specialties;
-      const dbSpecialties = Array.isArray(dbSpecialtiesRaw) ? (dbSpecialtiesRaw as string[]) : null;
-
-      const initialSpecialties = dbSpecialties?.length ? dbSpecialties : ["general"];
-      setSpecialties(initialSpecialties);
-
-      const templateMerged = mergeTemplates(initialSpecialties);
-
-      setPhone(settingsRow?.phone ?? "");
-      setAddress(settingsRow?.address ?? "");
-      setMapsUrl(settingsRow?.google_maps_url ?? "");
-
-      setHours((settingsRow?.hours as HoursMap) ?? defaultHours());
-      setEmergency(settingsRow?.emergency ?? templateMerged.emergency);
-
-      const pol = settingsRow?.policies ?? null;
-      setPoliciesCancel(pol?.cancelacion ?? templateMerged.policies.cancelacion ?? "");
-      setPoliciesDeposit(pol?.deposito ?? templateMerged.policies.deposito ?? "");
-
-      setServices(settingsRow?.services?.length ? settingsRow.services : templateMerged.services);
-      setFaqs(settingsRow?.faqs?.length ? settingsRow.faqs : templateMerged.faqs);
-
-      await loadIntegrationRequests();
-
       await loadOrgIntegration();
-
       setLoading(false);
     }
-
     load();
-    return () => {
-      mounted = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { mounted = false; };
   }, [clinicId, ORG]);
 
-  const settingsSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        clinicName,
-        specialties,
-        phone,
-        address,
-        mapsUrl,
-        hours,
-        services,
-        faqs,
-        emergency,
-        policiesCancel,
-        policiesDeposit,
-      }),
-    [clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, emergency, policiesCancel, policiesDeposit]
-  );
-
+  const settingsSnapshot = useMemo(() => JSON.stringify({ clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, emergency, policiesCancel, policiesDeposit }), [clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, emergency, policiesCancel, policiesDeposit]);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!loading) {
-      setInitialSnapshot(settingsSnapshot);
-    }
-  }, [loading, settingsSnapshot]);
-
-  const isDirty = useMemo(() => {
-    if (!initialSnapshot) return false;
-    return initialSnapshot !== settingsSnapshot;
-  }, [initialSnapshot, settingsSnapshot]);
+  useEffect(() => { if (!loading) setInitialSnapshot(settingsSnapshot); }, [loading, settingsSnapshot]);
+  const isDirty = initialSnapshot !== null && initialSnapshot !== settingsSnapshot;
 
   async function save() {
     if (!isDirty) return;
-
     setSaving(true);
-    setError(null);
-    setNotice(null);
-
     const id = await ensureClinic();
-    if (!id) {
-      setSaving(false);
-      return;
-    }
-
-    const payload: ClinicSettingsRow = {
-      clinic_id: id,
-      phone: phone.trim() || null,
-      address: address.trim() || null,
-      google_maps_url: mapsUrl.trim() || null,
-      hours,
-      services,
-      faqs,
-      emergency: emergency.trim() || null,
-      policies: {
-        cancelacion: policiesCancel.trim() || "",
-        deposito: policiesDeposit.trim() || "",
-      },
-      specialties,
-      updated_at: new Date().toISOString(),
-    };
-
+    if (!id) { setToast({ kind: "error", message: "No se pudo guardar." }); setSaving(false); return; }
+    const payload: ClinicSettingsRow = { clinic_id: id, phone: phone.trim() || null, address: address.trim() || null, google_maps_url: mapsUrl.trim() || null, hours, services, faqs, emergency: emergency.trim() || null, policies: { cancelacion: policiesCancel.trim(), deposito: policiesDeposit.trim() }, specialties, updated_at: new Date().toISOString() };
     const res = await supabase.from("clinic_settings").upsert(payload, { onConflict: "clinic_id" });
-    if (res.error) {
-      setError("No se pudo guardar. Intenta nuevamente.");
-      setToast({ kind: "error", message: "No se pudieron guardar los cambios." });
-      setSaving(false);
-      return;
-    }
-
-    setNotice("Guardado.");
-    setToast({ kind: "success", message: "Cambios guardados correctamente." });
-    setInitialSnapshot(settingsSnapshot);
+    if (res.error) { setToast({ kind: "error", message: "Error al guardar." }); } else { setToast({ kind: "success", message: "Guardado." }); setInitialSnapshot(settingsSnapshot); }
     setSaving(false);
   }
 
-  function statusFor(channel: IntegrationChannel) {
-    if (channel === "google_calendar") {
-      return { label: "DESHABILITADO", status: "disconnected" as const, primary: "Unirme a lista de espera", disabled: true };
-    }
-
-    if (channel === "messenger") {
-      const s = orgIntegration;
-      const isConnected = !!s?.meta_page_id && s?.messenger_enabled === true;
-      return {
-        label: isConnected ? "CONECTADO" : "NO CONECTADO",
-        status: isConnected ? ("connected" as const) : ("disconnected" as const),
-        primary: isConnected ? "Disconnect" : "Connect",
-        disabled: false,
-      };
-    }
-
-    const latest = integrationRequests.find((req) => req.channel === channel);
-
-    if (latest?.status === "connected") {
-      return { label: "CONECTADO", status: "connected" as const, primary: "Reconfigurar", disabled: false };
-    }
-
-    if (latest?.status === "pending") {
-      return { label: "REQUIERE ACCION", status: "warning" as const, primary: "Revisar", disabled: false };
-    }
-
-    return { label: "NO CONECTADO", status: "disconnected" as const, primary: "Conectar", disabled: false };
+  async function connectMeta() {
+    try { await startMetaOAuth(ORG); } catch { setToast({ kind: "error", message: "No se pudo conectar." }); }
   }
 
-  async function submitIntegrationRequest(channel: IntegrationChannel) {
-    const payload = {
-      business_name: requestForm.business.trim(),
-      phone: requestForm.phone.trim(),
-      handle: requestForm.handle.trim(),
-    };
-
-    const res = await supabase.from("integration_requests").insert({
-      organization_id: ORG,
-      channel,
-      payload,
-      status: "pending",
-    });
-
-    if (res.error) {
-      setToast({ kind: "error", message: "No se pudo enviar la solicitud." });
-      return;
-    }
-
-    setToast({ kind: "success", message: "Solicitud enviada. Te contactaremos." });
-    setRequestForm({ business: "", phone: "", handle: "" });
-    setRequestOpen(null);
-    await loadIntegrationRequests();
+  async function disconnectMessenger() {
+    if (!window.confirm("¿Desconectar Messenger?")) return;
+    await supabase.from("org_settings").update({ messenger_enabled: false, meta_page_id: null, meta_connected_at: null, meta_last_error: null }).eq("organization_id", ORG);
+    setToast({ kind: "success", message: "Desconectado." });
+    await loadOrgIntegration();
   }
 
   async function submitWaitlist() {
     if (!waitlistEmail.trim()) return;
-
-    const res = await supabase.from("waitlist").insert({
-      organization_id: ORG,
-      email: waitlistEmail.trim(),
-      source: "google_calendar",
-      status: "pending",
-    });
-
-    if (res.error) {
-      setToast({ kind: "error", message: "No se pudo registrar tu email." });
-      return;
-    }
-
-    setToast({ kind: "success", message: "Te avisaremos cuando esté disponible." });
-    setWaitlistEmail("");
-    setWaitlistOpen(false);
+    const res = await supabase.from("waitlist").insert({ organization_id: ORG, email: waitlistEmail.trim(), source: "google_calendar", status: "pending" });
+    if (res.error) { setToast({ kind: "error", message: "No se pudo registrar." }); } else { setToast({ kind: "success", message: "Te avisaremos." }); setWaitlistEmail(""); setWaitlistOpen(false); }
   }
 
-  const tabs = useMemo(
-    () => [
-      { key: "integraciones" as const, label: "Integraciones" },
-      { key: "clinica" as const, label: "Clínica" },
-      { key: "horario" as const, label: "Horario" },
-      { key: "servicios" as const, label: "Servicios" },
-      { key: "faqs" as const, label: "FAQs y políticas" },
-    ],
-    []
-  );
+  function statusFor(channel: string) {
+    if (channel === "google_calendar") return { label: "Próximamente", status: "disconnected" as const, disabled: true };
+    if (channel === "messenger") {
+      const connected = !!orgIntegration.meta_page_id && orgIntegration.messenger_enabled;
+      return { label: connected ? "Conectado" : "No conectado", status: connected ? "connected" as const : "disconnected" as const, disabled: false };
+    }
+    return { label: "No conectado", status: "disconnected" as const, disabled: false };
+  }
+
+  const tabs = [
+    { key: "integraciones" as const, label: "Integraciones" },
+    { key: "clinica" as const, label: "Clínica" },
+    { key: "horario" as const, label: "Horario" },
+    { key: "servicios" as const, label: "Servicios" },
+    { key: "faqs" as const, label: "FAQs" },
+  ];
 
   const renderIntegrations = () => (
-    <div className="grid grid-cols-1 gap-6">
-      <div className="rounded-3xl border border-[#E5E7EB] bg-white p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Org activa</span>
-            <span className="inline-flex items-center rounded-full border border-[#D1D5DB] bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
-              {ORG}
-            </span>
-          </div>
-          {isAdmin ? (
-            <label className="flex items-center gap-2 text-xs text-slate-600">
-              <span className="font-semibold uppercase tracking-[0.16em]">Cambiar org</span>
-              <select
-                value={ORG}
-                onChange={(e) => void setActiveOrgId(e.target.value)}
-                className="h-9 rounded-xl border border-[#D1D5DB] bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#0894C1]"
-              >
-                {availableOrgs.map((org) => (
-                  <option key={org.organization_id} value={org.organization_id}>
-                    {org.organization_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-        </div>
-        <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            Waitlist offers
-          </div>
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-slate-700">
-              Define si la oferta de huecos es manual, semi-auto (CTA) o automática.
-            </p>
-            <select
-              value={orgIntegration.waitlist_offer_mode}
-              onChange={(e) =>
-                void setWaitlistOfferMode(e.target.value as "manual" | "semi_auto" | "auto")
-              }
-              className="h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#0894C1]"
-            >
-              <option value="manual">manual</option>
-              <option value="semi_auto">semi_auto</option>
-              <option value="auto">auto</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div className="space-y-4">
       {INTEGRATIONS.map((integration) => {
         const status = statusFor(integration.key);
         const Icon = integration.icon;
-        const isDisabled = integration.key === "google_calendar";
         const isMessenger = integration.key === "messenger";
-        const shouldShowInternalWarning = isMessenger && orgIntegration.meta_last_error && import.meta.env.DEV;
-        const showFriendlyPendingNote =
-          isMessenger &&
-          !import.meta.env.DEV &&
-          (orgIntegration.meta_last_error ?? "").includes("org_secrets_schema_mismatch");
-        const showWarningRow = isMessenger && Boolean(orgIntegration.meta_last_error);
-
+        const isDisabled = integration.key === "google_calendar";
         return (
-          <div
-            key={integration.key}
-            className={
-              isMessenger
-                ? "rounded-3xl border border-white/10 bg-[#0B1117] p-6 shadow-[0_18px_40px_rgba(0,0,0,0.35)]"
-                : "rounded-3xl border border-[#E5E7EB] bg-white p-6"
-            }
-          >
-            <div className="flex items-start justify-between gap-4">
+          <div key={integration.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-start justify-between gap-3 mb-3">
               <div className="flex items-start gap-3">
-                <div
-                  className={
-                    isMessenger
-                      ? "flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/5"
-                      : "flex h-10 w-10 items-center justify-center rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7]"
-                  }
-                >
-                  <Icon className={`h-5 w-5 ${isMessenger ? "text-white/85" : "text-slate-700"}`} />
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/5 border border-white/10">
+                  <Icon className="h-5 w-5 text-white/70" />
                 </div>
                 <div>
-                  <div className={`text-sm font-semibold ${isMessenger ? "text-white/95" : "text-slate-900"}`}>{integration.name}</div>
-                  <div className={`mt-1 text-sm ${isMessenger ? "text-white/65" : "text-slate-700"}`}>{integration.description}</div>
+                  <div className="font-semibold text-white">{integration.name}</div>
+                  <div className="text-sm text-white/50">{integration.description}</div>
                 </div>
               </div>
-
               <StatusChip status={status.status} label={status.label} />
             </div>
-
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <button
-                type="button"
-                disabled={status.disabled}
-                onClick={() => {
-                  if (integration.key === "messenger") {
-                    if (status.status === "connected") {
-                      void disconnectMessenger();
-                    } else {
-                      void connectMeta();
-                    }
-                    return;
-                  }
-                  if (integration.key === "google_calendar") {
-                    return;
-                  }
-                  setRequestOpen(integration.key);
-                }}
-                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                  status.disabled
-                    ? "border border-[#E5E7EB] bg-white text-slate-500"
-                    : isMessenger && status.status === "connected"
-                    ? "border border-[#1dd1a1] bg-transparent text-[#7fffd4] hover:shadow-[0_0_12px_rgba(29,209,161,0.25)]"
-                    : isMessenger
-                    ? "border border-white/25 bg-transparent text-white/85 hover:bg-white/10"
-                    : status.status === "connected"
-                    ? "border border-emerald-300/70 bg-transparent text-emerald-700 hover:border-emerald-400 hover:text-emerald-800"
-                    : "border border-[#D1D5DB] bg-white text-slate-700 hover:border-slate-400 hover:text-slate-900"
-                }`}
-              >
-                {isDisabled ? "Conectar" : status.primary}
-              </button>
-
-              {isDisabled ? (
-                <button
-                  type="button"
-                  onClick={() => setWaitlistOpen(true)}
-                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                >
-                  Unirme a lista de espera
-                </button>
-              ) : !isMessenger ? (
-                <button
-                  type="button"
-                  onClick={() => setGuideOpen(integration.key)}
-                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                >
-                  Ver guía
-                </button>
-              ) : null}
+            <div className="flex flex-wrap gap-2">
+              {isMessenger && status.status === "connected" ? (
+                <button onClick={disconnectMessenger} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Desconectar</button>
+              ) : isMessenger ? (
+                <button onClick={connectMeta} className="px-4 py-2 rounded-xl bg-[#3CBDB9] text-[#0B1117] text-sm font-semibold hover:bg-[#3CBDB9]/90">Conectar</button>
+              ) : isDisabled ? (
+                <button onClick={() => setWaitlistOpen(true)} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Lista de espera</button>
+              ) : (
+                <button onClick={() => setGuideOpen(integration.key)} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Ver guía</button>
+              )}
             </div>
-
-            {isDisabled ? (
-              <button
-                type="button"
-                onClick={() => setGuideOpen(integration.key)}
-                className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-slate-700 hover:text-slate-900"
-              >
-                Ver guía
-              </button>
-            ) : null}
-
-            {isDisabled ? (
-              <div className="mt-3 flex items-center gap-2 text-xs text-slate-700">
-                <BadgeCheck className="h-4 w-4 text-slate-500" />
-                Inscribite para recibir acceso prioritario cuando esté disponible.
-              </div>
-            ) : null}
-
-            {showTechnicalDetails ? (
-              <details className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4 text-xs text-slate-700">
-                <summary className="cursor-pointer text-sm text-slate-700">Detalles técnicos</summary>
-                <div className="mt-3 space-y-2">
-                  <div>Identificador de conexión:</div>
-                  <div className="break-all text-slate-500">{META_REDIRECT_URI}</div>
-                </div>
-              </details>
-            ) : null}
-
-            {shouldShowInternalWarning ? (
-              <div className="mt-3 text-xs text-rose-300">
-                {orgIntegration.meta_last_error}
-              </div>
-            ) : null}
-
-            {showFriendlyPendingNote ? (
-              <div className="mt-3 text-xs text-white/60">Conectado · Configuración avanzada pendiente</div>
-            ) : null}
-
-            {showWarningRow ? (
-              <div
-                className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
-                title={orgIntegration.meta_last_error ?? ""}
-              >
-                <span>Advertencia de configuración detectada.</span>
-                <button
-                  type="button"
-                  onClick={() => setFixWarningOpen(true)}
-                  className="rounded-lg border border-amber-300/35 px-2 py-1 font-semibold text-amber-100 hover:bg-amber-500/10"
-                >
-                  Fix now
-                </button>
-              </div>
-            ) : null}
-
-            {integration.key === "messenger" && import.meta.env.DEV ? (
-              <div className="mt-2 text-[11px] text-slate-500">
-                {`enabled=${String(orgIntegration.messenger_enabled ?? null)} page=${orgIntegration.meta_page_id ?? "null"}`}
-              </div>
-            ) : null}
-
-            {isMessenger ? (
-              <div className="mt-3 text-xs text-white/65">
-                <div>
-                  Page: {orgIntegration.meta_page_id ? `${orgIntegration.meta_page_id.slice(0, 8)}...${orgIntegration.meta_page_id.slice(-6)}` : "No vinculada"}
-                </div>
-                <div>
-                  Connected at: {orgIntegration.meta_connected_at ? new Date(orgIntegration.meta_connected_at).toLocaleString("es-HN") : "N/A"}
-                </div>
-              </div>
-            ) : null}
-
-            {isMessenger && (isAdmin || import.meta.env.DEV) ? (
-              <div className="mt-4 rounded-2xl border border-white/10 bg-[#090F14] p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void runRepliesDiagnostic()}
-                    disabled={diagBusy}
-                    className="h-11 rounded-xl border border-white/20 bg-white/5 px-4 text-sm font-semibold text-white/85 hover:bg-white/10 disabled:opacity-60"
-                  >
-                    {diagBusy ? "Probando..." : "Probar envío"}
-                  </button>
-                  <span className="text-xs text-white/60">
-                    Jobs pendientes: {pendingOutbox ?? "n/a"}
-                  </span>
-                </div>
-                {diagResult ? <div className="mt-2 text-xs text-white/70">{diagResult}</div> : null}
-              </div>
-            ) : null}
+            {isMessenger && orgIntegration.meta_page_id && (
+              <div className="mt-3 text-xs text-white/40">Page: {orgIntegration.meta_page_id.slice(0, 8)}... {orgIntegration.meta_connected_at && `• ${new Date(orgIntegration.meta_connected_at).toLocaleDateString()}`}</div>
+            )}
           </div>
         );
       })}
-      </div>
     </div>
   );
 
   const renderClinica = () => (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      <div className="lg:col-span-1 rounded-3xl border border-[#E5E7EB] bg-white p-6">
-        <p className="text-[10px] tracking-[0.22em] uppercase text-slate-500">Clínica</p>
-
-        <label className="mt-4 block text-xs font-medium text-slate-700">Nombre de la clínica</label>
-        <input
-          value={clinicName}
-          onChange={(e) => setClinicName(e.target.value)}
-          className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-          placeholder="Ej: Clínica Sonrisas"
-        />
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <label className="block text-xs font-medium text-white/60 mb-2">Nombre de la clínica</label>
+        <input value={clinicName} onChange={(e) => setClinicName(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder="Ej: Clínica Sonrisas" />
       </div>
-
-      <div className="lg:col-span-2 space-y-6">
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
-          <p className="text-sm font-semibold text-slate-900">Datos de la clínica</p>
-          <p className="mt-1 text-sm text-slate-700">
-            Lo más preguntado: teléfono, ubicación, dirección, horarios.
-          </p>
-
-          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium text-slate-700">Teléfono</label>
-              <input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Ej: +504 9999-9999"
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-slate-700">Ubicación (Google Maps)</label>
-              <input
-                value={mapsUrl}
-                onChange={(e) => setMapsUrl(e.target.value)}
-                placeholder="Pega el link de Maps"
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium text-slate-700">Dirección</label>
-              <input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Colonia, calle, referencia, ciudad"
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-blue-300"
-              />
-            </div>
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-white/60 mb-2">Teléfono</label>
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder="+504 9999-9999" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-white/60 mb-2">Google Maps URL</label>
+            <input value={mapsUrl} onChange={(e) => setMapsUrl(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder="Pega el link" />
           </div>
         </div>
-
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6">
-          <p className="text-sm font-semibold text-slate-900">Especialidades</p>
-          <p className="mt-1 text-sm text-slate-700">Marca todas las que aplica.</p>
-
-          <div className="mt-4 grid gap-2 md:grid-cols-2">
-            {SPECIALTIES.map((s) => {
-              const checked = specialties.includes(s.value);
-              return (
-                <button
-                  key={s.value}
-                  type="button"
-                  onClick={() => toggleSpecialty(s.value)}
-                  className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm transition ${
-                    checked
-                      ? "border-[#E5E7EB] bg-[#F4F5F7] text-slate-900"
-                      : "border-[#E5E7EB] bg-[#F4F5F7] text-slate-700 hover:bg-[#F4F5F7] hover:text-slate-900"
-                  }`}
-                >
-                  <span>{s.label}</span>
-                  <span
-                    className={`h-5 w-5 rounded-full border flex items-center justify-center ${
-                      checked ? "border-[#E5E7EB] bg-[#F4F5F7]" : "border-[#E5E7EB] bg-transparent"
-                    }`}
-                  >
-                    {checked ? "✓" : ""}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Usar plantillas</p>
-              <p className="text-xs text-slate-700">Servicios + FAQs precargadas (editable).</p>
-            </div>
-            <Toggle
-              enabled={useTemplate}
-              onChange={(v) => {
-                setUseTemplate(v);
-                if (v) {
-                  const merged = mergeTemplates(specialties);
-                  setServices(merged.services);
-                  setFaqs(merged.faqs);
-                  setEmergency(merged.emergency);
-                  setPoliciesCancel(merged.policies.cancelacion ?? "");
-                  setPoliciesDeposit(merged.policies.deposito ?? "");
-                }
-              }}
-            />
-          </div>
+        <div>
+          <label className="block text-xs font-medium text-white/60 mb-2">Dirección</label>
+          <input value={address} onChange={(e) => setAddress(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder="Colonia, calle, ciudad" />
+        </div>
+      </div>
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="text-sm font-medium text-white mb-3">Especialidades</div>
+        <div className="grid grid-cols-2 gap-2">
+          {SPECIALTIES.map((s) => {
+            const checked = specialties.includes(s.value);
+            return (
+              <button key={s.value} onClick={() => setSpecialties(prev => checked ? prev.filter(x => x !== s.value) : [...prev, s.value])}
+                className={`flex items-center justify-between px-3 py-2 rounded-xl border text-sm ${checked ? "border-[#3CBDB9]/40 bg-[#3CBDB9]/10 text-[#3CBDB9]" : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"}`}>
+                <span>{s.label}</span>
+                {checked && <Check className="h-4 w-4" />}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 
   const renderHorario = () => (
-    <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">Horario</p>
-          <p className="mt-1 text-sm text-slate-700">Configura por día.</p>
-        </div>
-
-        <div className="flex items-center gap-3 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-900">Modo avanzado</p>
-            <p className="text-xs text-slate-700">Diferente por día.</p>
-          </div>
-          <Toggle enabled={advancedPerDay} onChange={setAdvancedPerDay} />
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        {Object.entries(dayLabels).map(([k, label]) => {
-          const d = hours[k] ?? { closed: true };
-          return (
-            <div key={k} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-center justify-between md:justify-start md:gap-6">
-                  <p className="text-sm font-semibold text-slate-900">{label}</p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-700">Cerrado</span>
-                    <Toggle
-                      enabled={!d.closed}
-                      onChange={(open) =>
-                        setHours((prev) => ({
-                          ...prev,
-                          [k]: open
-                            ? { closed: false, open: d.open ?? "08:00", close: d.close ?? "17:00" }
-                            : { closed: true },
-                        }))
-                      }
-                    />
-                    <span className="text-xs text-slate-700">Abierto</span>
-                  </div>
-                </div>
-
-                {!d.closed ? (
-                  <div className="grid grid-cols-2 gap-3 md:flex md:items-center">
-                    <div>
-                      <label className="text-xs text-slate-700">Abre</label>
-                      <input
-                        type="time"
-                        value={d.open ?? "08:00"}
-                        onChange={(e) =>
-                          setHours((prev) => ({
-                            ...prev,
-                            [k]: { ...d, closed: false, open: e.target.value },
-                          }))
-                        }
-                        className="mt-1 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-700">Cierra</label>
-                      <input
-                        type="time"
-                        value={d.close ?? "17:00"}
-                        onChange={(e) =>
-                          setHours((prev) => ({
-                            ...prev,
-                            [k]: { ...d, closed: false, close: e.target.value },
-                          }))
-                        }
-                        className="mt-1 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-700">Cerrado</p>
-                )}
-              </div>
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+      {Object.entries(dayLabels).map(([k, label]) => {
+        const d = hours[k] ?? { closed: true };
+        return (
+          <div key={k} className="flex flex-col md:flex-row md:items-center justify-between gap-3 py-3 border-b border-white/5 last:border-0">
+            <div className="flex items-center justify-between md:w-40">
+              <span className="font-medium text-white">{label}</span>
+              <Toggle enabled={!d.closed} onChange={(open) => setHours(prev => ({ ...prev, [k]: open ? { closed: false, open: d.open ?? "08:00", close: d.close ?? "17:00" } : { closed: true } }))} />
             </div>
-          );
-        })}
-      </div>
+            {!d.closed && (
+              <div className="flex items-center gap-2">
+                <input type="time" value={d.open ?? "08:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, open: e.target.value } }))} className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm" />
+                <span className="text-white/50">a</span>
+                <input type="time" value={d.close ?? "17:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, close: e.target.value } }))} className="h-10 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm" />
+              </div>
+            )}
+            {d.closed && <span className="text-sm text-white/50">Cerrado</span>}
+          </div>
+        );
+      })}
     </div>
   );
 
   const renderServicios = () => (
-    <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">Servicios y precios</p>
-          <p className="mt-1 text-sm text-slate-700">Editable por clínica.</p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() =>
-            setServices((prev) => [
-              ...(prev ?? []),
-              {
-                name: "Nuevo servicio",
-                price_from: null,
-                price_to: null,
-                currency: currencyDefault,
-                duration_min: 30,
-                notes: "",
-              },
-            ])
-          }
-          className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
-        >
-          + Agregar servicio
-        </button>
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="font-medium text-white">Servicios y precios</div>
+        <button onClick={() => setServices(prev => [...prev, { name: "Nuevo servicio", price_from: null, currency: "HNL", duration_min: 30, notes: "" }])} className="px-3 py-1.5 rounded-lg bg-white/10 text-sm font-medium text-white/80 hover:bg-white/15">+ Agregar</button>
       </div>
-
-      <div className="space-y-3">
+      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
         {services.map((s, idx) => (
-          <div key={idx} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4 space-y-3">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="md:col-span-2">
-                <label className="text-xs font-medium text-slate-700">Nombre</label>
-                <input
-                  value={s.name}
-                  onChange={(e) =>
-                    setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))
-                  }
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                />
-              </div>
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={() => setServices((prev) => prev.filter((_, i) => i !== idx))}
-                  className="h-11 w-full rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-3 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                >
-                  Quitar
-                </button>
-              </div>
+          <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-3">
+            <div className="flex gap-2">
+              <input value={s.name} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} className="flex-1 h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Nombre" />
+              <button onClick={() => setServices(prev => prev.filter((_, i) => i !== idx))} className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/10 text-white/50 hover:bg-white/10"><X className="h-4 w-4" /></button>
             </div>
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-              <div>
-                <label className="text-xs font-medium text-slate-700">Desde</label>
-                <input
-                  type="number"
-                  value={s.price_from ?? ""}
-                  onChange={(e) =>
-                    setServices((prev) =>
-                      prev.map((x, i) =>
-                        i === idx ? { ...x, price_from: e.target.value ? Number(e.target.value) : null } : x
-                      )
-                    )
-                  }
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                  placeholder="0"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-700">Hasta</label>
-                <input
-                  type="number"
-                  value={s.price_to ?? ""}
-                  onChange={(e) =>
-                    setServices((prev) =>
-                      prev.map((x, i) =>
-                        i === idx ? { ...x, price_to: e.target.value ? Number(e.target.value) : null } : x
-                      )
-                    )
-                  }
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                  placeholder="0"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-700">Moneda</label>
-                <input
-                  value={s.currency ?? currencyDefault}
-                  onChange={(e) =>
-                    setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, currency: e.target.value } : x)))
-                  }
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                  placeholder="HNL"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-700">Duración (min)</label>
-                <input
-                  type="number"
-                  value={s.duration_min ?? 30}
-                  onChange={(e) =>
-                    setServices((prev) =>
-                      prev.map((x, i) =>
-                        i === idx ? { ...x, duration_min: e.target.value ? Number(e.target.value) : 30 } : x
-                      )
-                    )
-                  }
-                  className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                  placeholder="30"
-                />
-              </div>
+            <div className="grid grid-cols-3 gap-2">
+              <input type="number" value={s.price_from ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_from: e.target.value ? Number(e.target.value) : null } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Desde" />
+              <input type="number" value={s.price_to ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_to: e.target.value ? Number(e.target.value) : null } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Hasta" />
+              <input type="number" value={s.duration_min ?? 30} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, duration_min: Number(e.target.value) } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Min" />
             </div>
-
-            <div>
-              <label className="text-xs font-medium text-slate-700">Descripción</label>
-              <input
-                value={s.notes ?? ""}
-                onChange={(e) =>
-                  setServices((prev) => prev.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)))
-                }
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-                placeholder="Ej: depende del caso, incluye evaluación…"
-              />
-            </div>
+            <input value={s.notes ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, notes: e.target.value } : x))} className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Notas" />
           </div>
         ))}
       </div>
@@ -1498,324 +330,75 @@ export default function Settings() {
   );
 
   const renderFaqs = () => (
-    <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 space-y-6">
-      <div>
-        <p className="text-sm font-semibold text-slate-900">Respuestas rápidas (FAQs)</p>
-        <p className="mt-1 text-sm text-slate-700">Respuestas consistentes sin improvisar.</p>
-
-        <div className="mt-4 space-y-3">
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="font-medium text-white">Respuestas rápidas (FAQs)</div>
+          <button onClick={() => setFaqs(prev => [...prev, { q: "", a: "" }])} className="px-3 py-1.5 rounded-lg bg-white/10 text-sm font-medium text-white/80 hover:bg-white/15">+ Agregar</button>
+        </div>
+        <div className="max-h-[400px] overflow-y-auto space-y-3 pr-1">
           {faqs.map((f, idx) => (
-            <div key={idx} className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-              <label className="text-xs font-medium text-slate-700">Pregunta</label>
-              <input
-                value={f.q}
-                onChange={(e) => setFaqs((prev) => prev.map((x, i) => (i === idx ? { ...x, q: e.target.value } : x)))}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-              />
-
-              <label className="mt-3 block text-xs font-medium text-slate-700">Respuesta</label>
-              <input
-                value={f.a}
-                onChange={(e) => setFaqs((prev) => prev.map((x, i) => (i === idx ? { ...x, a: e.target.value } : x)))}
-                className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-              />
-
-              <div className="mt-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setFaqs((prev) => prev.filter((_, i) => i !== idx))}
-                  className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-                >
-                  Quitar
-                </button>
+            <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2">
+              <div className="flex gap-2">
+                <input value={f.q} onChange={(e) => setFaqs(prev => prev.map((x, i) => i === idx ? { ...x, q: e.target.value } : x))} className="flex-1 h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Pregunta" />
+                <button onClick={() => setFaqs(prev => prev.filter((_, i) => i !== idx))} className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/10 text-white/50 hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
+              <textarea value={f.a} onChange={(e) => setFaqs(prev => prev.map((x, i) => i === idx ? { ...x, a: e.target.value } : x))} className="w-full min-h-[80px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm resize-y" placeholder="Respuesta" />
             </div>
           ))}
         </div>
-
-        <button
-          type="button"
-          onClick={() => setFaqs((prev) => [...prev, { q: "Nueva pregunta", a: "Nueva respuesta" }])}
-          className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7]"
-        >
-          + Agregar FAQ
-        </button>
       </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-          <label className="text-xs font-medium text-slate-700">Urgencias</label>
-          <input
-            value={emergency}
-            onChange={(e) => setEmergency(e.target.value)}
-            className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-          />
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+        <div className="font-medium text-white">Políticas</div>
+        <div>
+          <label className="block text-xs text-white/50 mb-2">Urgencias</label>
+          <textarea value={emergency} onChange={(e) => setEmergency(e.target.value)} className="w-full min-h-[60px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm resize-y" />
         </div>
-
-        <div className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-          <label className="text-xs font-medium text-slate-700">Política de cancelación</label>
-          <input
-            value={policiesCancel}
-            onChange={(e) => setPoliciesCancel(e.target.value)}
-            className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-          />
+        <div>
+          <label className="block text-xs text-white/50 mb-2">Cancelación</label>
+          <input value={policiesCancel} onChange={(e) => setPoliciesCancel(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" />
         </div>
-
-        <div className="md:col-span-2 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] p-4">
-          <label className="text-xs font-medium text-slate-700">Depósitos (si aplica)</label>
-          <input
-            value={policiesDeposit}
-            onChange={(e) => setPoliciesDeposit(e.target.value)}
-            className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300"
-          />
+        <div>
+          <label className="block text-xs text-white/50 mb-2">Depósitos</label>
+          <input value={policiesDeposit} onChange={(e) => setPoliciesDeposit(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" />
         </div>
       </div>
     </div>
   );
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="Configuración" showBackOnMobile backTo="/overview" />
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-6 text-slate-700">
-          Cargando...
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="py-20 text-center text-white/50">Cargando...</div>;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Configuración"
-        subtitle="Gestioná tu clínica, horarios, servicios e integraciones en un solo lugar."
-        showBackOnMobile
-        backTo="/overview"
-        action={
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || !isDirty}
-            className="h-11 rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 text-sm font-semibold text-slate-900 hover:bg-[#F4F5F7] disabled:opacity-50"
-          >
-            {saving ? "Guardando..." : "Guardar cambios"}
-          </button>
-        }
+    <div className="space-y-4">
+      <PageHeader title="Configuración" subtitle="Gestiona tu clínica, horarios, servicios e integraciones." showBackOnMobile backTo="/overview"
+        action={<button onClick={save} disabled={saving || !isDirty} className={`px-4 py-2 rounded-xl text-sm font-semibold ${isDirty ? "bg-[#3CBDB9] text-[#0B1117]" : "bg-white/10 text-white/40"}`}>{saving ? "Guardando..." : isDirty ? "Guardar" : "Guardado"}</button>}
       />
 
-      {notice ? (
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-4 text-sm text-slate-700">
-          {notice}
-        </div>
-      ) : null}
-      {error ? (
-        <div className="rounded-3xl border border-[#E5E7EB] bg-white p-4 text-sm text-slate-700">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="space-y-3 lg:hidden">
-        {tabs.map((t) => {
-          const open = openSection === t.key;
-          return (
-            <div key={t.key} className="rounded-3xl border border-[#E5E7EB] bg-white">
-              <button
-                type="button"
-                onClick={() => setOpenSection(open ? null : t.key)}
-                className="flex w-full items-center justify-between px-5 py-4 text-sm font-semibold text-slate-900"
-              >
-                {t.label}
-                <span className="text-slate-500">{open ? "−" : "+"}</span>
-              </button>
-              {open ? (
-                <div className="border-t border-[#E5E7EB] p-4">
-                  {t.key === "integraciones" && renderIntegrations()}
-                  {t.key === "clinica" && renderClinica()}
-                  {t.key === "horario" && renderHorario()}
-                  {t.key === "servicios" && renderServicios()}
-                  {t.key === "faqs" && renderFaqs()}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
+      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+        {tabs.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className={`shrink-0 px-4 py-2 rounded-xl text-sm font-medium ${tab === t.key ? "bg-white text-[#0B1117]" : "bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"}`}>{t.label}</button>
+        ))}
       </div>
 
-      <div className="hidden lg:flex flex-wrap gap-2 rounded-3xl border border-[#E5E7EB] bg-[#F4F5F7] p-2">
-        {tabs.map((t) => {
-          const active = tab === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                active ? "bg-[#F4F5F7] text-slate-900" : "text-slate-700 hover:bg-[#F4F5F7] hover:text-slate-900"
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+      {tab === "integraciones" && renderIntegrations()}
+      {tab === "clinica" && renderClinica()}
+      {tab === "horario" && renderHorario()}
+      {tab === "servicios" && renderServicios()}
+      {tab === "faqs" && renderFaqs()}
 
-      <div className="hidden lg:block">
-        {tab === "integraciones" && renderIntegrations()}
-        {tab === "clinica" && renderClinica()}
-        {tab === "horario" && renderHorario()}
-        {tab === "servicios" && renderServicios()}
-        {tab === "faqs" && renderFaqs()}
-      </div>
-
-      <Modal
-        open={guideOpen !== null}
-        title="Guía de integración"
-        description="Pasos simples para conectar tu canal de comunicación."
-        onClose={() => setGuideOpen(null)}
-        actions={
-          <button
-            type="button"
-            onClick={() => setGuideOpen(null)}
-            className="rounded-2xl bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-95"
-          >
-            Entendido
-          </button>
-        }
-      >
-        <div className="space-y-3 text-sm text-slate-700">
-          <div className="flex items-start gap-3">
-            <Globe className="mt-0.5 h-4 w-4 text-slate-700" />
-            <span>Confirma el nombre comercial y los datos de contacto de tu clínica.</span>
-          </div>
-          <div className="flex items-start gap-3">
-            <PhoneCall className="mt-0.5 h-4 w-4 text-slate-700" />
-            <span>Ten a mano el canal principal (página o línea) para la validación.</span>
-          </div>
-          <div className="flex items-start gap-3">
-            <BadgeCheck className="mt-0.5 h-4 w-4 text-slate-700" />
-            <span>Enviá la solicitud y nuestro equipo te acompañará en la activación.</span>
-          </div>
+      <Modal open={guideOpen !== null} title="Guía de integración" description="Pasos para conectar." onClose={() => setGuideOpen(null)} actions={<button onClick={() => setGuideOpen(null)} className="px-4 py-2 rounded-xl bg-white text-black text-sm font-medium">Entendido</button>}>
+        <div className="space-y-3 text-sm text-white/70">
+          <div className="flex items-start gap-3"><Globe className="h-4 w-4 mt-0.5" /><span>Confirma los datos de tu clínica.</span></div>
+          <div className="flex items-start gap-3"><PhoneCall className="h-4 w-4 mt-0.5" /><span>Ten a mano el canal principal.</span></div>
+          <div className="flex items-start gap-3"><BadgeCheck className="h-4 w-4 mt-0.5" /><span>Envía la solicitud.</span></div>
         </div>
       </Modal>
 
-      <Modal
-        open={requestOpen !== null}
-        title="Conectar canal"
-        description="Completá los datos para iniciar la solicitud de conexión."
-        onClose={() => setRequestOpen(null)}
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={() => setRequestOpen(null)}
-              className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={() => requestOpen && submitIntegrationRequest(requestOpen)}
-              className="rounded-2xl bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-95"
-            >
-              Enviar solicitud
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-medium text-slate-700">Nombre comercial</label>
-            <input
-              value={requestForm.business}
-              onChange={(e) => setRequestForm((prev) => ({ ...prev, business: e.target.value }))}
-              className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-700">Teléfono de contacto</label>
-            <input
-              value={requestForm.phone}
-              onChange={(e) => setRequestForm((prev) => ({ ...prev, phone: e.target.value }))}
-              className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-700">Página o usuario</label>
-            <input
-              value={requestForm.handle}
-              onChange={(e) => setRequestForm((prev) => ({ ...prev, handle: e.target.value }))}
-              className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-              placeholder="Ej: @clinica"
-            />
-          </div>
-        </div>
+      <Modal open={waitlistOpen} title="Lista de espera" description="Te avisamos cuando esté disponible." onClose={() => setWaitlistOpen(false)} actions={<><button onClick={() => setWaitlistOpen(false)} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80">Cancelar</button><button onClick={submitWaitlist} className="px-4 py-2 rounded-xl bg-[#3CBDB9] text-[#0B1117] text-sm font-semibold">Unirme</button></>}>
+        <input value={waitlistEmail} onChange={(e) => setWaitlistEmail(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm" placeholder="tu@email.com" />
       </Modal>
 
-      <Modal
-        open={waitlistOpen}
-        title="Lista de espera"
-        description="Dejanos tu email para avisarte cuando esté habilitado."
-        onClose={() => setWaitlistOpen(false)}
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={() => setWaitlistOpen(false)}
-              className="rounded-2xl border border-[#E5E7EB] bg-[#F4F5F7] px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F4F5F7]"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={submitWaitlist}
-              className="rounded-2xl bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-95"
-            >
-              Unirme a lista de espera
-            </button>
-          </>
-        }
-      >
-        <div>
-          <label className="text-xs font-medium text-slate-700">Email</label>
-          <input
-            value={waitlistEmail}
-            onChange={(e) => setWaitlistEmail(e.target.value)}
-            className="mt-2 h-11 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-            placeholder="tu@email.com"
-          />
-        </div>
-      </Modal>
-
-      <Modal
-        open={fixWarningOpen}
-        title="Resolver configuración Messenger"
-        description="Tu integración está conectada, pero hay una configuración avanzada pendiente."
-        onClose={() => setFixWarningOpen(false)}
-        actions={
-          <button
-            type="button"
-            onClick={() => setFixWarningOpen(false)}
-            className="rounded-2xl bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-95"
-          >
-            Entendido
-          </button>
-        }
-      >
-        <div className="space-y-2 text-sm text-slate-700">
-          <p>Verifica que los secrets de Meta existan en formato key/value para esta organización:</p>
-          <p className="font-mono text-xs">META_PAGE_ACCESS_TOKEN, META_PAGE_ID, META_GRAPH_VERSION</p>
-          {import.meta.env.DEV && orgIntegration.meta_last_error ? (
-            <p className="text-xs text-amber-200">Detalle técnico: {orgIntegration.meta_last_error}</p>
-          ) : null}
-        </div>
-      </Modal>
-
-      <Toast
-        open={Boolean(toast)}
-        kind={toast?.kind}
-        message={toast?.message ?? ""}
-        onClose={() => setToast(null)}
-      />
+      <Toast open={!!toast} kind={toast?.kind} message={toast?.message ?? ""} onClose={() => setToast(null)} />
     </div>
   );
 }

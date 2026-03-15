@@ -1,7 +1,6 @@
 // src/App.tsx
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Layout from "./layouts/Layout";
-
 import Hoy from "./pages/Hoy";
 import Tomorrow from "./pages/Tomorrow";
 import Inbox from "./pages/Inbox";
@@ -12,12 +11,12 @@ import Settings from "./pages/Settings";
 import MarketingAI from "./pages/MarketingAI";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import Signup from "./pages/Signup";
 import MetaCallback from "./pages/MetaCallback";
 import Upgrade from "./pages/Upgrade";
 import Billing from "./pages/Billing";
 import BillingSuccess from "./pages/BillingSuccess";
 import BillingCancel from "./pages/BillingCancel";
-
 import { AuthProvider } from "./context/AuthContext";
 import { ClinicProvider } from "./context/ClinicContext";
 import { useAuth } from "./context/AuthContext";
@@ -44,9 +43,12 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 function AppRoutesInner() {
   return (
     <Routes>
+      {/* Public routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/signup" element={<Signup />} />
       <Route path="/auth/meta/callback" element={<MetaCallback />} />
+
       <Route
         path="/upgrade"
         element={
@@ -56,6 +58,7 @@ function AppRoutesInner() {
         }
       />
 
+      {/* Protected routes */}
       <Route
         path="/"
         element={
@@ -65,20 +68,15 @@ function AppRoutesInner() {
         }
       >
         <Route index element={<Navigate to="/hoy" replace />} />
-
         <Route path="overview" element={<Hoy />} />
         <Route path="hoy" element={<Hoy />} />
         <Route path="tomorrow" element={<Tomorrow />} />
-
         <Route path="inbox" element={<Inbox />} />
         <Route path="inbox/:leadId" element={<Inbox />} />
         <Route path="leads" element={<Leads />} />
-
         <Route path="agenda" element={<CalendarBoardPage />} />
         <Route path="calendar" element={<CalendarBoardPage />} />
-
         <Route path="marketing" element={<MarketingAI />} />
-
         <Route path="patients" element={<Patients />} />
         <Route path="settings" element={<Settings />} />
         <Route path="settings/integrations" element={<Settings />} />

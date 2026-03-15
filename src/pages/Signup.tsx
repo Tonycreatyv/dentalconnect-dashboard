@@ -1,25 +1,19 @@
-import { type FormEvent, useState, useEffect } from "react";
+import { type FormEvent, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
-import { useAuth } from "../context/AuthContext";
 
 export default function Signup() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { session, loading: authLoading } = useAuth();
 
   const [email, setEmail] = useState(searchParams.get("email") || "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   const token = searchParams.get("token");
-
-  useEffect(() => {
-    if (authLoading) return;
-    if (session) navigate("/settings", { replace: true });
-  }, [session, authLoading, navigate]);
 
   async function handleSignup(e: FormEvent) {
     e.preventDefault();
@@ -37,7 +31,8 @@ export default function Signup() {
 
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
+    // 1. Crear cuenta
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
@@ -45,14 +40,39 @@ export default function Signup() {
       },
     });
 
-    if (error) {
-      setError(error.message || "No se pudo crear la cuenta.");
+    if (signUpError) {
+      setError(signUpError.message || "No se pudo crear la cuenta.");
       setLoading(false);
       return;
     }
 
+    // 2. Si Supabase devolvió sesión, ya estamos logueados
+    if (signUpData.session) {
+      navigate("/settings", { replace: true });
+      return;
+    }
+
+    // 3. Si no hay sesión (email confirmation habilitado), intentar login directo
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (signInError) {
+      // Probablemente necesita confirmar email
+      setSuccess(true);
+      setLoading(false);
+      return;
+    }
+
+    if (signInData.session) {
+      navigate("/settings", { replace: true });
+      return;
+    }
+
+    // Fallback: mostrar éxito
+    setSuccess(true);
     setLoading(false);
-    navigate("/settings", { replace: true });
   }
 
   async function handleGoogleSignup() {
@@ -65,9 +85,38 @@ export default function Signup() {
     setLoading(false);
   }
 
+  // Mostrar mensaje de éxito si necesita confirmar email
+  if (success) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-[#05070C] text-white">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(closest-side_at_25%_80%,rgba(8,148,193,0.35),transparent_60%),radial-gradient(closest-side_at_70%_85%,rgba(89,224,184,0.28),transparent_60%),radial-gradient(1200px_circle_at_50%_28%,rgba(60,189,185,0.12),transparent_55%),linear-gradient(#05070C,#05070C)]" />
+        <div className="pointer-events-none absolute inset-0 bg-black/50" />
+        
+        <main className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-black/35 px-6 py-10 text-center shadow-2xl shadow-black/45 backdrop-blur-xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-[#0894C1] to-[#59E0B8]">
+              <svg className="h-8 w-8 text-[#041015]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="mt-6 text-2xl font-semibold">¡Cuenta creada!</h2>
+            <p className="mt-3 text-white/70">
+              Revisa tu email ({email}) para confirmar tu cuenta.
+            </p>
+            <Link
+              to="/login"
+              className="mt-6 inline-block rounded-2xl bg-gradient-to-r from-[#0894C1] via-[#3CBDB9] to-[#59E0B8] px-8 py-3 text-sm font-semibold text-[#041015] transition hover:brightness-110"
+            >
+              Ir a Iniciar Sesión
+            </Link>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#05070C] text-white">
-      {/* Background gradients */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(closest-side_at_25%_80%,rgba(8,148,193,0.35),transparent_60%),radial-gradient(closest-side_at_70%_85%,rgba(89,224,184,0.28),transparent_60%),radial-gradient(1200px_circle_at_50%_28%,rgba(60,189,185,0.12),transparent_55%),linear-gradient(#05070C,#05070C)]" />
       <div className="pointer-events-none absolute inset-0 bg-black/50" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:repeating-linear-gradient(0deg,rgba(255,255,255,0.7)_0,rgba(255,255,255,0.7)_1px,transparent_1px,transparent_3px)]" />
@@ -84,7 +133,6 @@ export default function Signup() {
             <div className="mt-3 h-1 w-20 rounded-full bg-gradient-to-r from-[#0894C1] via-[#3CBDB9] to-[#59E0B8]" />
             <p className="mt-4 text-sm text-white/75">Crea tu cuenta y comienza tu trial de 14 días.</p>
 
-            {/* Google OAuth */}
             <button
               type="button"
               onClick={handleGoogleSignup}
@@ -100,7 +148,6 @@ export default function Signup() {
               Continuar con Google
             </button>
 
-            {/* Divider */}
             <div className="mt-6 flex items-center gap-4">
               <div className="h-px flex-1 bg-white/15" />
               <span className="text-xs text-white/50">o con email</span>
@@ -115,7 +162,6 @@ export default function Signup() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
               required
               className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/10 px-4 text-base text-white placeholder:text-white/40 outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30"
               placeholder="tu@clinica.com"
@@ -129,7 +175,6 @@ export default function Signup() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
               required
               minLength={8}
               className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/10 px-4 text-base text-white placeholder:text-white/40 outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30"
@@ -144,7 +189,6 @@ export default function Signup() {
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              autoComplete="new-password"
               required
               className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/10 px-4 text-base text-white placeholder:text-white/40 outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30"
               placeholder="Repite tu contraseña"

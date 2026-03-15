@@ -1,7 +1,15 @@
 import { buildAppointmentPayload, AppointmentPayload } from "./appointments.ts";
 import { CalendarAdapter, StubCalendarAdapter } from "./calendarAdapter.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const calendarAdapter: CalendarAdapter = new StubCalendarAdapter();
+
+// URLs de productos
+const PRODUCT_URLS = {
+  dental_signup: "https://dental.creatyv.io/signup",
+  dental_landing: "https://creatyv.io/dentalconnect",
+  creatyv_main: "https://creatyv.io",
+};
 
 export async function createLead(payload: Record<string, unknown>) {
   return { ok: true, lead_id: payload.lead_id ?? "stub" };
@@ -34,7 +42,11 @@ export async function bookAppointment(args: {
     end_at: args.end_at,
     source: "run_replies",
   });
-  const calendar = await calendarAdapter.bookEvent({ appointmentId: appointment.id, startAt: appointment.start_at ?? undefined, endAt: appointment.end_at ?? undefined });
+  const calendar = await calendarAdapter.bookEvent({ 
+    appointmentId: appointment.id, 
+    startAt: appointment.start_at ?? undefined, 
+    endAt: appointment.end_at ?? undefined 
+  });
   return {
     ok: calendar.ok,
     appointment: { ...appointment, calendar_event_id: calendar.eventId ?? null },
@@ -74,4 +86,69 @@ export async function captureBusinessType(leadId: string, businessType: string) 
 
 export async function captureLeadGoal(leadId: string, goal: string) {
   return { ok: true, goal, lead_id: leadId };
+}
+
+// ============================================
+// CREATE TRIAL ACCOUNT - Genera link de signup
+// ============================================
+export async function createTrialAccount(args: {
+  supabase: ReturnType<typeof createClient>;
+  organizationId: string;
+  leadId: string;
+  email: string;
+  name?: string;
+  businessType?: string;
+}): Promise<{
+  ok: boolean;
+  signupUrl?: string;
+  error?: string;
+  productUrls?: typeof PRODUCT_URLS;
+}> {
+  const { supabase, leadId, email, name, businessType } = args;
+
+  // Validar email
+  if (!email || !email.includes("@")) {
+    return { ok: false, error: "invalid_email" };
+  }
+
+  // Generar token único
+  const signupToken = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  try {
+    // Actualizar lead con email y token
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({
+        email: email.toLowerCase().trim(),
+        signup_token: signupToken,
+        signup_requested_at: now,
+      })
+      .eq("id", leadId);
+
+    if (updateError) {
+      console.error("[createTrialAccount] update lead failed:", updateError);
+      return { ok: false, error: "db_error" };
+    }
+
+    // Construir URL de signup
+    const signupUrl = `${PRODUCT_URLS.dental_signup}?email=${encodeURIComponent(email)}&token=${signupToken}`;
+
+    console.log("[createTrialAccount] success", { 
+      leadId, 
+      email, 
+      signupUrl,
+      name,
+      businessType 
+    });
+
+    return {
+      ok: true,
+      signupUrl,
+      productUrls: PRODUCT_URLS,
+    };
+  } catch (err) {
+    console.error("[createTrialAccount] error:", err);
+    return { ok: false, error: String(err) };
+  }
 }

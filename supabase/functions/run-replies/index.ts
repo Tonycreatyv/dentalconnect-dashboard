@@ -1,9 +1,36 @@
+// =============================================================================
+// RUN-REPLIES - Worker principal de respuestas automáticas
+// =============================================================================
+// ANTI-STORM: Verifica si ya existe respuesta para el job antes de enviar
+// =============================================================================
+
 import { createClient, type SupabaseClient as SupabaseClientBase } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { runConversationEngine, StatePatch, ConversationResult } from "./conversationEngine.ts";
 import { executeToolAction, type ActionExecutionResult } from "./domain/actionExecutor.ts";
-import { runLlmTurn, validateLlmTurnResult, LlmTurnValidation } from "./domain/llmTurn.ts";
+import { runLlmTurn, validateLlmTurnResult } from "./domain/llmTurn.ts";
+
+// =============================================================================
+// TYPES
+// =============================================================================
 
 type Json = Record<string, unknown>;
+type SupabaseClientType = SupabaseClientBase<any, "public", any>;
+
+interface RecentMessage {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+}
+
+interface MetaSendResult {
+  ok: boolean;
+  status: number;
+  data: any;
+}
+
+// =============================================================================
+// CONSTANTS & CORS
+// =============================================================================
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -11,14 +38,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-run-replies-secret",
 };
 
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
 function j(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "content-type": "application/json" },
   });
 }
-
-export { mergeLeadState, mergeStatePatches };
 
 function env(name: string, fallback?: string) {
   const v = Deno.env.get(name) ?? fallback;
@@ -51,18 +80,21 @@ function normalizeChannel(ch: string) {
 }
 
 function logEvent(event: string, data: Record<string, unknown>) {
-  console.log(
-    JSON.stringify({
-      ts: nowIso(),
-      event,
-      ...data,
-    })
-  );
+  console.log(JSON.stringify({ ts: nowIso(), event, ...data }));
 }
 
 function toErrorStack(err: unknown) {
   if (err instanceof Error) return err.stack ?? err.message;
   return safeStr(err, "");
+}
+
+function normalizeSecretValue(raw: string) {
+  const v = safeStr(raw, "").trim();
+  if (!v) return "";
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1).trim();
+  }
+  return v;
 }
 
 function parseMetaStatus(errorMessage: string) {
@@ -85,50 +117,67 @@ function plusSecondsIso(seconds: number) {
   return new Date(Date.now() + Math.max(0, seconds) * 1000).toISOString();
 }
 
-function normalizeSecretValue(raw: string) {
-  const v = safeStr(raw, "").trim();
-  if (!v) return "";
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-    return v.slice(1, -1).trim();
-  }
-  return v;
-}
-
-async function sendToMeta(args: {
-  graphVersion: string;
-  pageAccessToken: string;
-  recipientId: string;
-  text: string;
-}) {
-  const url = new URL(`https://graph.facebook.com/${args.graphVersion}/me/messages`);
-  url.searchParams.set("access_token", args.pageAccessToken);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      messaging_type: "RESPONSE",
-      recipient: { id: args.recipientId },
-      message: { text: args.text },
-    }),
-  });
-
-  const data = await res.json();
-  return { ok: res.ok, status: res.status, data };
-}
-
 function isOperatorOutboundJob(job: any) {
   const source = safeStr(job?.payload?.source, "").toLowerCase();
   const actor = safeStr(job?.actor, "").toLowerCase();
   const role = safeStr(job?.role, "").toLowerCase();
-  return source.includes("operator") || source.includes("manual") || actor === "human" || role === "operator";
+  return source.includes("operator") || source.includes("manual") || source.includes("ui_manual") || actor === "human" || role === "operator";
 }
 
-type SupabaseClientType = SupabaseClientBase<any, "public", any>;
+// =============================================================================
+// STATE MANAGEMENT
+// =============================================================================
 
-async function loadOrgSecretsKV(
-  supabase: SupabaseClientType,
-  organizationId: string
-) {
+function mergeCollectedStates(base: Record<string, unknown>, patch: Record<string, unknown>) {
+  const baseBooking = base.booking && typeof base.booking === "object" 
+    ? { ...(base.booking as Record<string, unknown>) } 
+    : {};
+  const patchBooking = patch.booking && typeof patch.booking === "object" 
+    ? { ...(patch.booking as Record<string, unknown>) } 
+    : {};
+  return {
+    ...base,
+    ...patch,
+    booking: { ...baseBooking, ...patchBooking },
+  };
+}
+
+export function mergeLeadState(existing: Json | null, patch: Json | null) {
+  const base = existing && typeof existing === "object" ? { ...existing } : {};
+  const baseCollected = base?.collected && typeof base.collected === "object" 
+    ? { ...base.collected } 
+    : {};
+  const patchCollected = patch?.collected && typeof patch.collected === "object" 
+    ? { ...patch.collected } 
+    : {};
+  return {
+    ...base,
+    ...(patch ?? {}),
+    collected: mergeCollectedStates(baseCollected, patchCollected),
+  };
+}
+
+export function mergeStatePatches(primary?: Json | null, secondary?: Json | null): Json {
+  if (!primary) return secondary && typeof secondary === "object" ? { ...secondary } : {};
+  if (!secondary) return primary;
+  const primaryCollected = primary.collected && typeof primary.collected === "object" 
+    ? { ...primary.collected } 
+    : {};
+  const secondaryCollected = secondary.collected && typeof secondary.collected === "object" 
+    ? { ...secondary.collected } 
+    : {};
+  return {
+    ...primary,
+    ...secondary,
+    collected: mergeCollectedStates(primaryCollected, secondaryCollected),
+  };
+}
+
+// =============================================================================
+// DATABASE LOADERS
+// =============================================================================
+
+async function loadOrgSecretsKV(supabase: SupabaseClientType, organizationId: string) {
   const keys = ["META_PAGE_ACCESS_TOKEN", "META_PAGE_ID", "META_GRAPH_VERSION"];
   const res = await supabase
     .from("org_secrets")
@@ -147,10 +196,7 @@ async function loadOrgSecretsKV(
   return kv;
 }
 
-async function loadOrgSecretWithFallback(
-  supabase: SupabaseClientType,
-  organizationId: string
-) {
+async function loadOrgSecretWithFallback(supabase: SupabaseClientType, organizationId: string) {
   const selects = [
     'meta_page_id, meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
     'meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
@@ -165,13 +211,63 @@ async function loadOrgSecretWithFallback(
       .maybeSingle();
 
     if (!r.error) return r.data as Json | null;
-    const isSchemaCache =
-      r.error.message.includes("schema cache") && r.error.message.includes("Could not find");
+    const isSchemaCache = r.error.message.includes("schema cache") && r.error.message.includes("Could not find");
     if (!isSchemaCache) break;
   }
-
   return null;
 }
+
+async function loadProductKnowledge(supabase: SupabaseClientType, organizationId: string) {
+  const topics = ["implementation_steps", "pricing_plans", "dashboard_modules", "integrations", "trial_flow"];
+  const data = await supabase.from("product_knowledge").select("topic, content").in("topic", topics);
+  const map: Record<string, unknown> = {};
+  if (!data.error && Array.isArray(data.data)) {
+    for (const row of data.data as any[]) {
+      const topic = safeStr(row.topic, "");
+      if (topic) map[topic] = row.content;
+    }
+  }
+  return map;
+}
+
+async function loadClinicKnowledge(supabase: SupabaseClientType, organizationId: string) {
+  const topics = ["services", "pricing", "hours", "location", "appointment_policy", "insurance"];
+  const data = await supabase.from("clinic_knowledge").select("topic, content").in("topic", topics);
+  const map: Record<string, unknown> = {};
+  if (!data.error && Array.isArray(data.data)) {
+    for (const row of data.data as any[]) {
+      const topic = safeStr(row.topic, "");
+      if (topic) map[topic] = row.content;
+    }
+  }
+  return map;
+}
+
+async function loadRecentMessages(
+  supabase: SupabaseClientType, 
+  leadId: string
+): Promise<RecentMessage[]> {
+  if (!leadId) return [];
+  
+  const res = await supabase
+    .from("messages")
+    .select("role, content, created_at")
+    .eq("lead_id", leadId)
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (res.error || !res.data) return [];
+
+  return (res.data as any[]).reverse().map((m: any) => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: String(m.content || ""),
+    timestamp: m.created_at,
+  }));
+}
+
+// =============================================================================
+// JOB MANAGEMENT
+// =============================================================================
 
 async function claimJobsViaRpc(args: {
   supabase: SupabaseClientType;
@@ -192,102 +288,302 @@ async function claimJobsViaRpc(args: {
   return v2;
 }
 
-async function loadProductKnowledge(
+function finalizeOutboxJob(
   supabase: SupabaseClientType,
-  organizationId: string
+  jobId: string, 
+  updates: Record<string, unknown>
 ) {
-  const topics = [
-    "implementation_steps",
-    "pricing_plans",
-    "dashboard_modules",
-    "integrations",
-    "trial_flow",
-  ];
-  const data = await supabase
-    .from("product_knowledge")
-    .select("topic, content")
-    .in("topic", topics);
-  const map: Record<string, unknown> = {};
-  if (!data.error && Array.isArray(data.data)) {
-    for (const row of data.data as any[]) {
-      const topic = safeStr(row.topic, "");
-      if (topic) map[topic] = row.content;
+  return supabase
+    .from("reply_outbox")
+    .update({
+      locked_at: null,
+      locked_by: null,
+      claimed_at: null,
+      claimed_by: null,
+      processing_started_at: null,
+      ...updates,
+    })
+    .eq("id", jobId);
+}
+
+// =============================================================================
+// ANTI-STORM: Check if response already exists
+// =============================================================================
+
+async function hasResponseAfterJobCreation(
+  supabase: SupabaseClientType,
+  leadId: string,
+  jobCreatedAt: string
+): Promise<boolean> {
+  if (!leadId || !jobCreatedAt) return false;
+
+  const res = await supabase
+    .from("messages")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("role", "assistant")
+    .gte("created_at", jobCreatedAt)
+    .limit(1)
+    .maybeSingle();
+
+  return Boolean(res.data?.id);
+}
+
+// =============================================================================
+// META API
+// =============================================================================
+
+async function sendToMeta(args: {
+  graphVersion: string;
+  pageAccessToken: string;
+  recipientId: string;
+  text: string;
+}): Promise<MetaSendResult> {
+  const url = new URL(`https://graph.facebook.com/${args.graphVersion}/me/messages`);
+  url.searchParams.set("access_token", args.pageAccessToken);
+  
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      messaging_type: "RESPONSE",
+      recipient: { id: args.recipientId },
+      message: { text: args.text },
+    }),
+  });
+
+  const data = await res.json();
+  return { ok: res.ok, status: res.status, data };
+}
+
+// =============================================================================
+// TOOL EXECUTION
+// =============================================================================
+
+async function executeToolCalls(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  toolCalls: any[];
+  executionId: string;
+  traceId: string;
+  jobId: string;
+}): Promise<{ reply?: string; statePatch?: Json }> {
+  const { supabase, organizationId, leadId, toolCalls, executionId, traceId, jobId } = args;
+  
+  let finalReply: string | undefined;
+  let combinedStatePatch: Json = {};
+
+  for (const toolCall of toolCalls) {
+    const toolName = safeStr(toolCall?.name, "");
+    const toolPayload = toolCall?.payload ?? {};
+
+    if (!toolName) continue;
+
+    console.log("[run-replies] Executing tool_call:", { toolName, toolPayload, leadId });
+
+    try {
+      const result = await executeToolAction({
+        supabase,
+        organizationId,
+        leadId,
+        action: { name: toolName as any, payload: toolPayload },
+      });
+
+      if (result.event) {
+        logEvent("run_replies_tool_executed", {
+          execution_id: executionId,
+          trace_id: traceId,
+          organization_id: organizationId,
+          lead_id: leadId,
+          job_id: jobId,
+          tool_name: toolName,
+          event_type: result.event.type,
+        });
+      }
+
+      if (result.replyOverride) {
+        finalReply = result.replyOverride;
+        console.log("[run-replies] Tool returned replyOverride:", toolName);
+      }
+
+      if (result.statePatch) {
+        combinedStatePatch = mergeStatePatches(combinedStatePatch, result.statePatch);
+      }
+    } catch (err) {
+      console.error("[run-replies] Tool execution failed:", { toolName, error: err });
     }
   }
-  return map;
+
+  return { reply: finalReply, statePatch: combinedStatePatch };
 }
 
-async function loadClinicKnowledge(
-  supabase: SupabaseClientType,
-  organizationId: string
-) {
-  const topics = [
-    "services",
-    "pricing",
-    "hours",
-    "location",
-    "appointment_policy",
-    "insurance",
-  ];
-  const data = await supabase
-    .from("clinic_knowledge")
-    .select("topic, content")
-    .in("topic", topics);
-  const map: Record<string, unknown> = {};
-  if (!data.error && Array.isArray(data.data)) {
-    for (const row of data.data as any[]) {
-      const topic = safeStr(row.topic, "");
-      if (topic) map[topic] = row.content;
+// =============================================================================
+// REPLY GENERATION
+// =============================================================================
+
+interface GenerateReplyArgs {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  leadState: Json | null;
+  inboundText: string;
+  orgSettings: any;
+  recentMessages: RecentMessage[];
+  productKnowledge: Record<string, unknown>;
+  clinicKnowledge: Record<string, unknown>;
+  llmEnabled: boolean;
+  isOperatorOutbound: boolean;
+  manualText: string;
+  executionId: string;
+  traceId: string;
+  jobId: string;
+}
+
+interface GenerateReplyResult {
+  reply: string;
+  statePatch: Json;
+  debugNote: string;
+}
+
+async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResult> {
+  const {
+    supabase, organizationId, leadId, leadState, inboundText,
+    orgSettings, recentMessages, productKnowledge, clinicKnowledge,
+    llmEnabled, isOperatorOutbound, manualText,
+    executionId, traceId, jobId
+  } = args;
+
+  // OPERATOR OUTBOUND (manual reply from dashboard)
+  if (isOperatorOutbound) {
+    return {
+      reply: manualText || inboundText || "Gracias por escribirnos.",
+      statePatch: {},
+      debugNote: "operator_outbound",
+    };
+  }
+
+  // LLM MODE (OpenAI)
+  if (llmEnabled) {
+    console.log("[run-replies] LLM mode enabled, calling runLlmTurn...");
+
+    try {
+      const llmResult = await runLlmTurn({
+        organizationId,
+        inboundText,
+        leadState: leadState as any,
+        orgSettings,
+        recentMessages,
+      });
+
+      if (llmResult) {
+        console.log("[run-replies] LLM returned result:", {
+          hasReply: !!llmResult.reply,
+          hasToolCalls: llmResult.tool_calls?.length > 0,
+        });
+
+        let reply = clampText(llmResult.reply, 950);
+        let statePatch: Json = llmResult.state_patch ?? {};
+
+        if (llmResult.tool_calls && llmResult.tool_calls.length > 0 && leadId) {
+          console.log("[run-replies] LLM returned tool_calls:", llmResult.tool_calls);
+
+          const toolResult = await executeToolCalls({
+            supabase,
+            organizationId,
+            leadId,
+            toolCalls: llmResult.tool_calls,
+            executionId,
+            traceId,
+            jobId,
+          });
+
+          if (toolResult.reply) {
+            reply = clampText(toolResult.reply, 950);
+          }
+
+          if (toolResult.statePatch) {
+            statePatch = mergeStatePatches(statePatch, toolResult.statePatch);
+          }
+        }
+
+        return {
+          reply: reply || "Gracias por escribirnos. ¿En qué te puedo ayudar?",
+          statePatch,
+          debugNote: "llm",
+        };
+      }
+    } catch (err) {
+      console.error("[run-replies] LLM turn failed:", err);
     }
   }
-  return map;
-}
 
-function mergeCollectedStates(base: Record<string, unknown>, patch: Record<string, unknown>) {
-  const baseBooking = base.booking && typeof base.booking === "object" ? { ...(base.booking as Record<string, unknown>) } : {};
-  const patchBooking = patch.booking && typeof patch.booking === "object" ? { ...(patch.booking as Record<string, unknown>) } : {};
+  // FALLBACK: CONVERSATION ENGINE (deterministic)
+  console.log("[run-replies] Using conversation engine fallback...");
+
+  const engineResult = runConversationEngine({
+    organizationId,
+    leadState,
+    inboundText,
+    knowledge: productKnowledge,
+    clinicKnowledge,
+  });
+
+  if (engineResult?.replyText) {
+    let reply = clampText(engineResult.replyText, 950);
+    let statePatch: Json = engineResult.statePatch ?? {};
+
+    if (engineResult.toolAction && leadId) {
+      const result = await executeToolAction({
+        supabase,
+        organizationId,
+        leadId,
+        action: engineResult.toolAction,
+      });
+
+      if (result.replyOverride) {
+        reply = clampText(result.replyOverride, 950);
+      }
+
+      if (result.statePatch) {
+        statePatch = mergeStatePatches(statePatch, result.statePatch);
+      }
+    }
+
+    return {
+      reply,
+      statePatch,
+      debugNote: `engine:${safeStr(engineResult.debug?.stage, "") || safeStr(engineResult.debug?.intent, "") || "reply"}`,
+    };
+  }
+
+  // FINAL FALLBACK
   return {
-    ...base,
-    ...patch,
-    booking: {
-      ...baseBooking,
-      ...patchBooking,
-    },
+    reply: "Gracias por escribirnos. Te respondo en un momento.",
+    statePatch: {},
+    debugNote: "fallback",
   };
 }
 
-function mergeLeadState(existing: Json | null, patch: Json | null) {
-  const base = existing && typeof existing === "object" ? { ...existing } : {};
-  const baseCollected = base?.collected && typeof base.collected === "object" ? { ...base.collected } : {};
-  const patchCollected = patch?.collected && typeof patch.collected === "object" ? { ...patch.collected } : {};
-  const merged = {
-    ...base,
-    ...(patch ?? {}),
-    collected: mergeCollectedStates(baseCollected, patchCollected),
-  };
-  return merged;
-}
-
-function mergeStatePatches(primary?: Json | null, secondary?: Json | null): Json {
-  if (!primary) return secondary && typeof secondary === "object" ? { ...secondary } : {};
-  if (!secondary) return primary;
-  const primaryCollected = primary.collected && typeof primary.collected === "object" ? { ...primary.collected } : {};
-  const secondaryCollected = secondary.collected && typeof secondary.collected === "object" ? { ...secondary.collected } : {};
-  return {
-    ...primary,
-    ...secondary,
-    collected: mergeCollectedStates(primaryCollected, secondaryCollected),
-  };
-}
+// =============================================================================
+// MAIN HANDLER
+// =============================================================================
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  // CORS
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
 
   try {
+    // AUTH
     const expected = env("RUN_REPLIES_SECRET");
     const provided = req.headers.get("x-run-replies-secret") ?? "";
-    if (!provided || provided !== expected) return j(401, { ok: false, error: "unauthorized" });
+    if (!provided || provided !== expected) {
+      return j(401, { ok: false, error: "unauthorized" });
+    }
 
+    // INIT
     const SUPABASE_URL = env("SUPABASE_URL");
     const SERVICE_KEY = env("SUPABASE_SERVICE_ROLE_KEY");
     const DEFAULT_META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
@@ -296,36 +592,27 @@ Deno.serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
       auth: { persistSession: false },
     });
+
     const executionId = crypto.randomUUID();
     const workerId = `run-replies:${executionId}`;
 
+    // PARSE REQUEST
     const url = new URL(req.url);
     const body = req.headers.get("content-type")?.includes("application/json")
       ? await req.json().catch(() => ({}))
       : {};
 
-    const organization_id_input =
-      safeStr(body?.organization_id, "") ||
+    const organization_id_input = safeStr(body?.organization_id, "") || 
       safeStr(url.searchParams.get("organization_id"), "");
-
     const organization_id = organization_id_input || DEFAULT_ORG_ENV;
 
     if (!organization_id) {
-      console.error(JSON.stringify({
-        event: "run_replies_missing_org",
-        waterline: "resolution",
-        provided_body: organization_id_input,
-        default_org: DEFAULT_ORG_ENV,
-      }));
       return j(400, { ok: false, error: "missing_organization_id" });
     }
 
-    logEvent("run_replies_org_resolution", {
-      organization_id,
-      provided: Boolean(organization_id_input),
-      default_used: !organization_id_input && Boolean(DEFAULT_ORG_ENV),
-    });
+    logEvent("run_replies_start", { execution_id: executionId, organization_id });
 
+    // LOAD SECRETS
     let pageAccessToken = normalizeSecretValue(Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "");
     let metaGraphVersion = DEFAULT_META_GRAPH_VERSION;
 
@@ -335,15 +622,30 @@ Deno.serve(async (req) => {
 
     const sec = await loadOrgSecretWithFallback(supabase, organization_id);
     if (sec) {
-      const token =
-        normalizeSecretValue(safeStr((sec as any).meta_page_access_token, "")) ||
+      const token = normalizeSecretValue(safeStr((sec as any).meta_page_access_token, "")) ||
         normalizeSecretValue(safeStr((sec as any).META_PAGE_ACCESS_TOKEN, ""));
       if (token) pageAccessToken = safeStr(token, pageAccessToken);
     }
 
+    // LOAD ORG SETTINGS & KNOWLEDGE
+    const orgSettingsRes = await supabase
+      .from("org_settings")
+      .select("llm_brain_enabled, system_prompt, business_type, brand_name")
+      .eq("organization_id", organization_id)
+      .maybeSingle();
+
+    const orgSettings = (orgSettingsRes.data as any) ?? {};
+    const llmEnabled = Boolean(orgSettings.llm_brain_enabled);
+
+    const productKnowledge = await loadProductKnowledge(supabase, organization_id);
+    const clinicKnowledge = await loadClinicKnowledge(supabase, organization_id);
+
+    // CLAIM JOBS
     const limit = Math.max(1, Math.min(Number(body?.limit ?? 10) || 10, 50));
     const lockTtlSeconds = Math.max(300, Math.min(Number(body?.lock_ttl_seconds ?? 300) || 300, 1800));
     const staleLockCutoff = new Date(Date.now() - lockTtlSeconds * 1000).toISOString();
+
+    // Reclaim stale processing jobs
     const reclaimRes = await supabase
       .from("reply_outbox")
       .update({
@@ -360,7 +662,10 @@ Deno.serve(async (req) => {
       .eq("status", "processing")
       .lte("processing_started_at", staleLockCutoff)
       .select("id");
+
     const reclaimedCount = reclaimRes.error ? 0 : reclaimRes.data?.length ?? 0;
+
+    // Claim new jobs
     const claimRes = await claimJobsViaRpc({
       supabase,
       organizationId: organization_id,
@@ -368,27 +673,21 @@ Deno.serve(async (req) => {
       lockOwner: workerId,
       lockTtlSeconds,
     });
+
     if (claimRes.error) {
       return j(500, { ok: false, error: `claim_rpc_failed:${claimRes.error.message}` });
     }
-    const productKnowledge = await loadProductKnowledge(supabase, organization_id);
-    const clinicKnowledge = await loadClinicKnowledge(supabase, organization_id);
-    const orgSettingsRes = await supabase
-      .from("org_settings")
-      .select("llm_brain_enabled, system_prompt, business_type, brand_name")
-      .eq("organization_id", organization_id)
-      .maybeSingle();
-    const llmEnabled = Boolean((orgSettingsRes.data as any)?.llm_brain_enabled);
+
     const jobs = Array.isArray(claimRes.data) ? claimRes.data : [];
+
     logEvent("run_replies_claimed", {
       execution_id: executionId,
       organization_id,
       claimed: jobs.length,
-      reclaimed_processing: reclaimedCount,
-      worker_id: workerId,
-      lock_ttl_seconds: lockTtlSeconds,
+      reclaimed: reclaimedCount,
     });
-    if (!jobs.length)
+
+    if (!jobs.length) {
       return j(200, {
         ok: true,
         execution_id: executionId,
@@ -396,103 +695,72 @@ Deno.serve(async (req) => {
         claimed_count: 0,
         sent_count: 0,
         failed_count: 0,
-        skipped_count: 0,
-        job_ids: [],
-        sample_job_ids: [],
-        reclaimed_processing: reclaimedCount,
       });
+    }
 
-    let claimed = 0;
+    // PROCESS JOBS
     let sent = 0;
     let failed = 0;
-    let skipped = 0;
+    let deduped = 0;
     const failures: Array<{ id: string; error: string }> = [];
-    const skipped_reasons: Array<{ id: string; reason: string; details?: string }> = [];
-    const sampleJobIds: string[] = [];
-    const finalizeOutboxJob = (jobId: string, updates: Record<string, unknown>) =>
-      supabase
-        .from("reply_outbox")
-        .update({
-          locked_at: null,
-          locked_by: null,
-          claimed_at: null,
-          claimed_by: null,
-          processing_started_at: null,
-          ...updates,
-        })
-        .eq("id", jobId);
 
     for (const job of jobs) {
       const jobId = safeStr(job.id);
-      sampleJobIds.push(jobId);
       const traceId = safeStr((job.payload as Json | null)?.trace_id, "") || crypto.randomUUID();
-      logEvent("run_replies_job_start", {
-        execution_id: executionId,
-        trace_id: traceId,
-        organization_id,
-        lead_id: safeStr(job.lead_id, ""),
-        job_id: jobId,
-        channel: safeStr(job.channel, ""),
-        channel_user_id: safeStr(job.channel_user_id, ""),
-        inbound_provider_message_id: safeStr(job.inbound_provider_message_id, ""),
-        inbound_message_id: safeStr(job.inbound_message_id, ""),
-        status: safeStr(job.status, ""),
-      });
-      logEvent("run_replies_status_transition", {
-        execution_id: executionId,
-        trace_id: traceId,
-        organization_id,
-        lead_id: safeStr(job.lead_id, ""),
-        job_id: jobId,
-        from: safeStr(job.status, ""),
-        to: "processing",
-      });
-      claimed++;
+      const leadId = safeStr(job.lead_id, "");
+      const jobCreatedAt = safeStr(job.created_at, "");
 
-      let currentAttemptCount = Number((job as any).attempt_count ?? 0);
       try {
+        // =====================================================================
+        // ANTI-STORM: Check if response already exists for this job
+        // =====================================================================
+        if (leadId && jobCreatedAt && !isOperatorOutboundJob(job)) {
+          const alreadyResponded = await hasResponseAfterJobCreation(
+            supabase,
+            leadId,
+            jobCreatedAt
+          );
+
+          if (alreadyResponded) {
+            console.log("[run-replies] ANTI-STORM: Response already exists, skipping:", {
+              jobId,
+              leadId,
+              jobCreatedAt,
+            });
+            
+            await finalizeOutboxJob(supabase, jobId, {
+              status: "sent",
+              sent_at: nowIso(),
+              last_error: "deduped:response_already_exists",
+              updated_at: nowIso(),
+            });
+            
+            deduped++;
+            sent++;
+            continue;
+          }
+        }
+        // =====================================================================
+
+        // VALIDATE JOB
         const channel = normalizeChannel(safeStr(job.channel, "messenger"));
         if (channel !== "messenger") {
           throw new Error(`unsupported_channel:${channel}`);
         }
-        const recipientId =
-          safeStr(job.channel_user_id, "") || safeStr(job.recipient_id, "") || safeStr(job.psid, "");
-        const leadId = safeStr(job.lead_id, "");
-        const inboundProviderMessageId =
-          safeStr(job.inbound_provider_message_id, "") ||
-          safeStr((job.payload as Json | null)?.inbound_provider_message_id, "") ||
-          safeStr(((job.payload as Json | null)?.raw as any)?.message?.mid, "");
-        const inboundMessageId = safeStr(job.inbound_message_id, "");
 
-        if (!recipientId) throw new Error("missing_recipient_id: channel_user_id/psid");
-        const attemptBump = await supabase
-          .from("reply_outbox")
-          .update({
-            attempt_count: currentAttemptCount + 1,
-            updated_at: nowIso(),
-          })
-          .eq("id", jobId)
-          .eq("status", "processing")
-          .select("attempt_count")
-          .maybeSingle();
-        if (!attemptBump.error && attemptBump.data) {
-          currentAttemptCount = Number((attemptBump.data as any).attempt_count ?? currentAttemptCount + 1);
-        } else {
-          currentAttemptCount += 1;
+        const recipientId = safeStr(job.channel_user_id, "") || 
+          safeStr(job.recipient_id, "") || 
+          safeStr(job.psid, "");
+        
+        if (!recipientId) {
+          throw new Error("missing_recipient_id");
         }
-        const jobStatusRow = await supabase
-          .from("reply_outbox")
-          .select("status, sent_at")
-          .eq("id", jobId)
-          .maybeSingle();
-        if (!jobStatusRow.error && jobStatusRow.data) {
-          const statusValue = safeStr((jobStatusRow.data as any).status, "");
-          const sentAtValue = safeStr((jobStatusRow.data as any).sent_at, "");
-          if (statusValue === "sent" || sentAtValue) {
-            console.log("Skipping already sent job", jobId);
-            continue;
-          }
+
+        if (!pageAccessToken || pageAccessToken.length <= 50) {
+          throw new Error("missing_or_invalid_page_token");
         }
+
+        // MARK AS PROCESSING
         const processingStartedAt = nowIso();
         await supabase
           .from("reply_outbox")
@@ -504,419 +772,241 @@ Deno.serve(async (req) => {
             locked_at: processingStartedAt,
             locked_by: workerId,
             updated_at: processingStartedAt,
+            attempt_count: (job.attempt_count ?? 0) + 1,
           })
           .eq("id", jobId);
+
+        // LOAD CONTEXT
         const payload = ((job.payload as Json | null) ?? {}) as Json;
-        const payloadSource = safeStr(payload.source, "").toLowerCase() || "inbound";
-        const operatorOutbound = isOperatorOutboundJob(job) || payloadSource === "ui_manual";
+        const isOperatorOutbound = isOperatorOutboundJob(job);
         const manualText = clampText(safeStr(payload.text, ""));
 
-        const inboundTextCandidate = clampText(
-          safeStr(job.inbound_text, "") || safeStr(job.text, "") || ""
+        // Get inbound text
+        let inboundText = clampText(
+          safeStr(payload.inbound_text, "") || 
+          safeStr(payload.text, "") ||
+          safeStr(job.inbound_text, "") || 
+          safeStr(job.text, "") ||
+          safeStr(job.message_text, "")
         );
-        let resolvedInboundText = clampText(safeStr(payload.inbound_text, "") || safeStr(payload.text, ""));
-        if (!resolvedInboundText && safeStr(job.inbound_message_id, "")) {
-          const inboundMsg = await supabase
-            .from("messages")
-            .select("content")
-            .eq("id", safeStr(job.inbound_message_id, ""))
-            .maybeSingle();
-          if (!inboundMsg.error && inboundMsg.data) {
-            resolvedInboundText = clampText(safeStr((inboundMsg.data as any).content, ""));
-          }
-        }
-        if (!resolvedInboundText) resolvedInboundText = inboundTextCandidate || safeStr(job.message_text, "");
 
-        if (!operatorOutbound && !resolvedInboundText) {
-          throw new Error("missing_inbound_text: payload.inbound_text/payload.text/messages.content");
+        if (!isOperatorOutbound && !inboundText) {
+          throw new Error("missing_inbound_text");
         }
-        if (!pageAccessToken || pageAccessToken.length <= 50) throw new Error("missing_or_invalid_page_token");
 
+        // Load lead state
         let leadState: Json | null = null;
-        let leadLastSeenInbound = "";
         if (leadId) {
           const ld = await supabase
             .from("leads")
-            .select("state,last_seen_inbound_message_id")
+            .select("state")
             .eq("id", leadId)
             .maybeSingle();
           if (!ld.error && ld.data) {
             leadState = (ld.data as any).state as Json | null;
-            leadLastSeenInbound = safeStr((ld.data as any).last_seen_inbound_message_id ?? "", "");
           }
         }
 
-        if (!operatorOutbound && inboundProviderMessageId && leadLastSeenInbound === inboundProviderMessageId) {
-          const reason = "duplicate_inbound_mid";
-          failures.push({ id: jobId, error: reason });
-          skipped++;
-          skipped_reasons.push({ id: jobId, reason });
-          await supabase
-            .from("reply_outbox")
-            .update({
-              status: "skipped",
-              claimed_at: null,
-              claimed_by: null,
-              locked_at: null,
-              locked_by: null,
-              last_error: reason,
-              updated_at: nowIso(),
-            })
-            .eq("id", jobId);
-          logEvent("run_replies_job_skipped", {
-            execution_id: executionId,
-            trace_id: traceId,
-            organization_id,
-            lead_id: leadId,
-            job_id: jobId,
-            reason,
-          });
-          continue;
-        }
+        // Load recent messages
+        const recentMessages = await loadRecentMessages(supabase, leadId);
 
-        let reply = "";
-        let statePatch: Json = {};
-        let debugNote: string | null = null;
-        let actionExecution: ActionExecutionResult | null = null;
-        let engineResult: ConversationResult | null = null;
-
-        // Cargar mensajes recientes para dar contexto al LLM
-        let recentMessages: Array<{ role: "user" | "assistant"; content: string; timestamp: string }> = [];
-        if (leadId) {
-          const recentMsgsRes = await supabase
-            .from("messages")
-            .select("role, content, created_at")
-            .eq("lead_id", leadId)
-            .order("created_at", { ascending: false })
-            .limit(10);
-
-          if (!recentMsgsRes.error && recentMsgsRes.data) {
-            recentMessages = (recentMsgsRes.data as any[])
-              .reverse()
-              .map((m: any) => ({
-                role: m.role === "assistant" ? "assistant" : "user",
-                content: String(m.content || ""),
-                timestamp: m.created_at,
-              }));
-          }
-        }
-
-        const orgSettings = (orgSettingsRes.data as any) ?? {};
-        console.log("[DEBUG] orgSettings:", JSON.stringify({
-          llm_brain_enabled: orgSettings.llm_brain_enabled,
-          business_type: orgSettings.business_type,
-          has_system_prompt: !!orgSettings.system_prompt,
-        }));
-        console.log("[DEBUG] llmEnabled:", llmEnabled);
-        console.log("[DEBUG] resolvedInboundText:", resolvedInboundText);
-        console.log("[DEBUG] recentMessages count:", recentMessages.length);
-
-        const llmContext = {
+        // GENERATE REPLY
+        const { reply, statePatch, debugNote } = await generateReply({
+          supabase,
           organizationId: organization_id,
-          inboundText: resolvedInboundText,
+          leadId,
           leadState,
-          orgSettings: orgSettings,
+          inboundText,
+          orgSettings,
           recentMessages,
-        };
+          productKnowledge,
+          clinicKnowledge,
+          llmEnabled,
+          isOperatorOutbound,
+          manualText,
+          executionId,
+          traceId,
+          jobId,
+        });
 
-        if (llmEnabled) {
-          console.log("[DEBUG] Entering LLM block");
-          try {
-            console.log("[DEBUG] Calling runLlmTurn...");
-            const candidate = await runLlmTurn(llmContext);
-            console.log("[DEBUG] runLlmTurn result:", candidate ? "got result" : "null");
-            const validation = validateLlmTurnResult(candidate);
-            if (validation.validation.valid && validation.result) {
-              const llmResult = validation.result;
-              const currentStage = (leadState as any)?.stage ?? "INITIAL";
-              const nextStage = (llmResult.state_patch.stage as string) ?? currentStage;
-              engineResult = {
-                replyText: llmResult.reply,
-                statePatch: llmResult.state_patch,
-                debug: { intent: "llm", stage: nextStage },
-                toolAction: undefined,
-              };
-            } else if (!validation.validation.valid) {
-              console.warn("run-replies: llm validation failed", validation.validation.errors);
-            }
-          } catch (err) {
-            console.error("run-replies: llm turn failed", err);
-          }
-        }
-        if (operatorOutbound) {
-          reply = manualText || resolvedInboundText || "Gracias por escribirnos.";
-          debugNote = "operator_outbound";
-        } else {
-          if (!engineResult) {
-            engineResult = runConversationEngine({
-              organizationId: organization_id,
-              leadState,
-              inboundText: resolvedInboundText,
-              knowledge: productKnowledge,
-              clinicKnowledge,
+        // =====================================================================
+        // ANTI-STORM: Double-check before sending (in case of race condition)
+        // =====================================================================
+        if (leadId && jobCreatedAt && !isOperatorOutbound) {
+          const alreadyResponded = await hasResponseAfterJobCreation(
+            supabase,
+            leadId,
+            jobCreatedAt
+          );
+
+          if (alreadyResponded) {
+            console.log("[run-replies] ANTI-STORM: Race condition caught, skipping send:", {
+              jobId,
+              leadId,
             });
-          }
-          if (engineResult?.replyText) {
-            reply = clampText(engineResult.replyText, 950);
-            statePatch = engineResult.statePatch ?? {};
-            if (engineResult.toolAction && leadId) {
-              actionExecution = await executeToolAction({
-                supabase,
-                organizationId: organization_id,
-                leadId,
-                action: engineResult.toolAction,
-              });
-              if (actionExecution.event) {
-                logEvent("run_replies_tool_action", {
-                  execution_id: executionId,
-                  trace_id: traceId,
-                  organization_id,
-                  lead_id: leadId,
-                  job_id: jobId,
-                  action: actionExecution.event.type,
-                  payload: actionExecution.event.payload,
-                });
-              }
-            }
-            debugNote = `engine:${safeStr(engineResult.debug.stage, "") || safeStr(engineResult.debug.intent, "") || "reply"}`;
-          } else {
-            reply = "Gracias por escribirnos. Te respondo en un momento.";
-            statePatch = {};
-            debugNote = "fallback";
+            
+            await finalizeOutboxJob(supabase, jobId, {
+              status: "sent",
+              sent_at: nowIso(),
+              last_error: "deduped:race_condition_caught",
+              updated_at: nowIso(),
+            });
+            
+            deduped++;
+            sent++;
+            continue;
           }
         }
-        if (!reply) reply = "Gracias por escribirnos. Te respondo en un momento.";
+        // =====================================================================
 
-        const combinedPatch = mergeStatePatches(statePatch, actionExecution?.statePatch ?? undefined);
-        const nextState = mergeLeadState(leadState, { ...combinedPatch, last_bot_text: reply });
-        let outbound_message_id: string | null = null;
-        const messagePayload = {
-          organization_id,
-          lead_id: leadId || null,
-          channel,
-          role: "assistant",
-          actor: operatorOutbound ? "operator" : "bot",
-          content: operatorOutbound ? manualText || reply : reply,
-          created_at: nowIso(),
-          inbound_message_id: inboundMessageId || null,
-          channel_user_id: recipientId,
-        };
+        // SAVE OUTBOUND MESSAGE FIRST (before sending to Meta)
+        let outboundMessageId: string | null = null;
         try {
           const outMsgInsert = await supabase
             .from("messages")
-            .insert(messagePayload)
+            .insert({
+              organization_id,
+              lead_id: leadId || null,
+              channel,
+              role: "assistant",
+              actor: isOperatorOutbound ? "operator" : "bot",
+              content: reply,
+              created_at: nowIso(),
+              channel_user_id: recipientId,
+            })
             .select("id")
             .maybeSingle();
-          outbound_message_id = outMsgInsert.data?.id ?? null;
+          outboundMessageId = outMsgInsert.data?.id ?? null;
         } catch (err) {
-          console.warn("[run-replies] message_insert_failed", {
-            organization_id,
-            lead_id: leadId,
-            job_id: jobId,
-            error: safeStr((err as any)?.message ?? err),
-          });
+          console.warn("[run-replies] message_insert_failed", err);
         }
 
-        logEvent("run_replies_meta_send_attempt", {
-          execution_id: executionId,
-          trace_id: traceId,
-          organization_id,
-          lead_id: leadId,
-          job_id: jobId,
-          channel,
-          endpoint: `https://graph.facebook.com/${metaGraphVersion}/me/messages`,
-        });
-        const { data: existingOutbound } = await supabase
-          .from("messages")
-          .select("id")
-          .eq("organization_id", organization_id)
-          .eq("lead_id", leadId || null)
-          .eq("inbound_message_id", inboundMessageId)
-          .eq("role", "assistant")
-          .maybeSingle();
-        if (existingOutbound?.id) {
-          console.log("[DUPLICATE_PREVENTED]", {
-            job_id: jobId,
-            inbound_message_id: inboundMessageId,
-            existing_message_id: existingOutbound.id,
-          });
-          await finalizeOutboxJob(jobId, {
-            status: "sent",
-            sent_at: nowIso(),
-            updated_at: nowIso(),
-            last_error: `duplicate_prevented:existing_outbound:${existingOutbound.id}`,
-          });
-          continue;
-        }
+        // SEND TO META
         const metaResp = await sendToMeta({
           graphVersion: metaGraphVersion,
           pageAccessToken,
           recipientId,
           text: reply,
         });
-        logEvent("run_replies_meta_send_result", {
-          execution_id: executionId,
-          trace_id: traceId,
-          organization_id,
-          lead_id: leadId,
-          job_id: jobId,
-          http_status: metaResp?.status ?? null,
-          body_snippet: JSON.stringify(metaResp?.data ?? {}).slice(0, 500),
-        });
+
         if (!metaResp?.ok) {
+          // Delete the message we just saved since send failed
+          if (outboundMessageId) {
+            await supabase.from("messages").delete().eq("id", outboundMessageId);
+          }
           throw new Error(`meta_send_failed:${metaResp?.status}:${JSON.stringify(metaResp?.data ?? {})}`);
         }
 
+        // UPDATE JOB STATUS
         await supabase
           .from("reply_outbox")
           .update({
             status: "sent",
             sent_at: nowIso(),
-            outbound_message_id,
+            outbound_message_id: outboundMessageId,
             meta_message_id: metaResp?.data?.message_id ?? null,
-            provider_payload: {
-              message_id: metaResp?.data?.message_id ?? null,
-              recipient_id: metaResp?.data?.recipient_id ?? null,
-              status: metaResp?.status ?? 200,
-            },
             locked_at: null,
             locked_by: null,
             claimed_at: null,
             claimed_by: null,
             processing_started_at: null,
             last_error: debugNote ? `debug:${debugNote}` : null,
-            payload: {
-              ...((job.payload as Json | null) ?? {}),
-              trace_id: traceId,
-            },
+            updated_at: nowIso(),
           })
           .eq("id", jobId);
-        if (leadId && metaResp?.data?.message_id) {
-          await supabase
-            .from("leads")
-            .update({ last_reply_outbound_mid: String(metaResp.data.message_id) })
-            .eq("id", leadId);
-        }
-        if (outbound_message_id && metaResp?.data?.message_id) {
-          await supabase
-            .from("messages")
-            .update({ provider_message_id: String(metaResp.data.message_id) })
-            .eq("id", outbound_message_id);
-        }
+
+        // UPDATE LEAD STATE
         if (leadId) {
+          const nextState = mergeLeadState(leadState, { 
+            ...statePatch, 
+            last_bot_text: reply 
+          });
+
           await supabase
             .from("leads")
             .update({
               last_message_at: nowIso(),
-              last_message_preview: safeStr(reply, "").slice(0, 140),
+              last_bot_reply_at: nowIso(),
+              last_message_preview: reply.slice(0, 140),
               state: nextState,
-              ...(operatorOutbound || !inboundProviderMessageId
-                ? {}
-                : { last_seen_inbound_message_id: inboundProviderMessageId }),
             })
             .eq("id", leadId);
         }
+
+        // UPDATE MESSAGE WITH META ID
+        if (outboundMessageId && metaResp?.data?.message_id) {
+          await supabase
+            .from("messages")
+            .update({ provider_message_id: String(metaResp.data.message_id) })
+            .eq("id", outboundMessageId);
+        }
+
         logEvent("run_replies_job_sent", {
           execution_id: executionId,
           trace_id: traceId,
           organization_id,
           lead_id: leadId,
           job_id: jobId,
-          outbound_message_id,
-          meta_message_id: metaResp?.data?.message_id ?? null,
-          meta_http_status: metaResp?.status ?? 200,
-          meta_response: JSON.stringify(metaResp?.data ?? {}).slice(0, 500),
-          channel,
+          debug_note: debugNote,
         });
+
         sent++;
+
       } catch (e: any) {
+        // ERROR HANDLING
         const msg = safeStr(e?.message, String(e));
         const retryableStatus = parseMetaStatus(msg);
-        const isRetryable =
-          msg.includes("meta_send_failed:429") ||
-          msg.includes("meta_send_failed:500") ||
-          msg.includes("meta_send_failed:502") ||
-          msg.includes("meta_send_failed:503") ||
-          msg.includes("fetch failed") ||
-          msg.includes("network") ||
-          retryableStatus === 429 ||
-          (retryableStatus !== null && retryableStatus >= 500);
-        const nextAttemptCount = Math.max(1, currentAttemptCount || Number((job as any).attempt_count ?? 1));
-        const maxRetries = Number(Deno.env.get("RUN_REPLIES_MAX_RETRIES") ?? 8);
-        const delaySec = backoffSeconds(nextAttemptCount);
-        const retryAt = plusSecondsIso(delaySec);
-        const shouldRetry = isRetryable && nextAttemptCount < maxRetries;
-        const terminalDead = nextAttemptCount >= maxRetries;
+        const isRetryable = msg.includes("429") || msg.includes("5") || 
+          retryableStatus === 429 || (retryableStatus !== null && retryableStatus >= 500);
+        
+        const attemptCount = Number((job as any).attempt_count ?? 0) + 1;
+        const maxRetries = 3; // Reduced from 8 to prevent storm
+        const shouldRetry = isRetryable && attemptCount < maxRetries;
+        const terminalDead = attemptCount >= maxRetries;
 
-        failures.push({ id: safeStr(job.id), error: msg });
+        failures.push({ id: jobId, error: msg });
         failed++;
-        await finalizeOutboxJob(safeStr(job.id), {
+
+        await finalizeOutboxJob(supabase, jobId, {
           status: shouldRetry ? "queued" : terminalDead ? "dead" : "failed",
-          scheduled_for: shouldRetry ? retryAt : safeStr((job as any).scheduled_for, nowIso()),
+          scheduled_for: shouldRetry ? plusSecondsIso(backoffSeconds(attemptCount)) : nowIso(),
           last_error: msg,
           updated_at: nowIso(),
-          payload: {
-            ...(((job as any).payload as Json | null) ?? {}),
-            trace_id: traceId,
-            retry_backoff_seconds: delaySec,
-            retryable: shouldRetry,
-          },
         });
+
         logEvent("run_replies_job_failed", {
           execution_id: executionId,
           trace_id: traceId,
           organization_id,
-          lead_id: safeStr((job as any).lead_id, ""),
-          job_id: safeStr(job.id),
+          lead_id: leadId,
+          job_id: jobId,
           error: msg,
-          stack: toErrorStack(e),
           retryable: shouldRetry,
-          terminal_dead: terminalDead,
-          retry_at: shouldRetry ? retryAt : null,
         });
-        if (terminalDead) {
-          await supabase.from("alerts").insert({
-            organization_id,
-            type: "reply_job_dead",
-            severity: "error",
-            title: "Reply job moved to dead-letter",
-            body: `job ${safeStr(job.id)} reached max attempts`,
-            action: {
-              job_id: safeStr(job.id),
-              lead_id: safeStr((job as any).lead_id, ""),
-              attempt_count: nextAttemptCount,
-              last_error: msg.slice(0, 500),
-            },
-            status: "open",
-          });
-        }
       }
     }
 
-    logEvent("run_replies_summary", {
+    // RETURN SUMMARY
+    logEvent("run_replies_complete", {
       execution_id: executionId,
       organization_id,
-      worker_id: workerId,
-      claimed,
       sent,
       failed,
-      skipped,
-      failures: failures.length,
+      deduped,
     });
+
     return j(200, {
       ok: true,
       execution_id: executionId,
       org_id: organization_id,
-      claimed_count: claimed,
+      claimed_count: jobs.length,
       sent_count: sent,
       failed_count: failed,
-      skipped_count: skipped,
-      job_ids: sampleJobIds,
-      sample_job_ids: sampleJobIds.slice(0, 10),
+      deduped_count: deduped,
       reclaimed_processing: reclaimedCount,
       failures,
-      skipped_reasons,
     });
+
   } catch (e: any) {
     return j(500, { ok: false, error: safeStr(e?.message, String(e)) });
   }

@@ -6,6 +6,7 @@ import {
   captureLeadGoal,
   showDemo,
   bookAppointment,
+  createTrialAccount,
 } from "./tools.ts";
 import { syncCalendarEvent } from "./calendar/calendarSync.ts";
 import { CreateCalendarEventInput } from "./calendar/types.ts";
@@ -22,7 +23,8 @@ export type ToolActionName =
   | "begin_onboarding"
   | "capture_business_type"
   | "capture_lead_goal"
-  | "book_appointment";
+  | "book_appointment"
+  | "create_trial_account";
 
 export type ToolActionExecution = {
   name: ToolActionName;
@@ -32,6 +34,7 @@ export type ToolActionExecution = {
 export type ActionExecutionResult = {
   statePatch?: Json;
   event?: { type: string; payload: Json };
+  replyOverride?: string;
 };
 
 function buildEventPayload(action: ToolActionExecution, toolResult: Json | undefined, now: string): Json {
@@ -55,9 +58,62 @@ export async function executeToolAction(params: {
   let statePatch: Json | undefined;
   let eventType: string | undefined;
   let toolResult: Json | undefined;
+  let replyOverride: string | undefined;
 
   try {
     switch (action.name) {
+      // ============================================
+      // CREATE TRIAL ACCOUNT - Nuevo tool
+      // ============================================
+      case "create_trial_account": {
+        const email = String(action.payload?.email ?? "").trim().toLowerCase();
+        const name = String(action.payload?.name ?? "").trim();
+        const businessType = String(action.payload?.business_type ?? "dental").trim();
+
+        if (!email || !email.includes("@")) {
+          console.warn("[actionExecutor] create_trial_account: invalid email", { email, leadId });
+          break;
+        }
+
+        const result = await createTrialAccount({
+          supabase,
+          organizationId,
+          leadId,
+          email,
+          name,
+          businessType,
+        });
+
+        toolResult = result as unknown as Json;
+
+        if (result.ok && result.signupUrl) {
+          statePatch = {
+            stage: "SIGNUP_LINK_SENT",
+            collected: {
+              email,
+              name: name || null,
+              business_type: businessType,
+              signup_url: result.signupUrl,
+              signup_requested_at: now,
+            },
+          };
+          eventType = "trial_signup_link_sent";
+
+          // Override del reply para incluir el link real
+          replyOverride = `¡Perfecto${name ? `, ${name}` : ""}! Creé tu cuenta de prueba. 
+
+Entra aquí para configurar tu clínica:
+${result.signupUrl}
+
+Una vez dentro, podrás conectar tu página de Facebook/Instagram para empezar a recibir mensajes automáticamente.
+
+Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.creatyv_main}`;
+        } else {
+          console.warn("[actionExecutor] create_trial_account failed:", result.error);
+        }
+        break;
+      }
+
       case "start_trial": {
         toolResult = await startTrial(leadId);
         statePatch = {
@@ -70,6 +126,7 @@ export async function executeToolAction(params: {
         eventType = "trial_offered";
         break;
       }
+
       case "begin_onboarding": {
         toolResult = await beginOnboarding(leadId);
         statePatch = {
@@ -82,6 +139,7 @@ export async function executeToolAction(params: {
         eventType = "onboarding_started";
         break;
       }
+
       case "capture_business_type": {
         const businessType = String(action.payload?.businessType ?? "").trim();
         toolResult = await captureBusinessType(leadId, businessType);
@@ -94,6 +152,7 @@ export async function executeToolAction(params: {
         eventType = "business_type_captured";
         break;
       }
+
       case "capture_lead_goal": {
         const goal = String(action.payload?.goal ?? "").trim();
         toolResult = await captureLeadGoal(leadId, goal);
@@ -106,6 +165,7 @@ export async function executeToolAction(params: {
         eventType = "lead_goal_captured";
         break;
       }
+
       case "book_appointment": {
         const payload: Record<string, unknown> = action.payload ?? {};
         const appointmentDate = String(payload.appointment_date ?? "").trim();
@@ -118,10 +178,12 @@ export async function executeToolAction(params: {
         const channel = String(payload.channel ?? "messenger");
         const startIso = buildIsoTimestamp(appointmentDate, appointmentTime, startsAtPayload);
         const endIso = buildEndIso(endsAtPayload, startIso, durationMin);
+        
         if (!startIso) {
           console.warn("[actionExecutor] missing start time", { leadId, organizationId });
           break;
         }
+        
         toolResult = await bookAppointment({
           organization_id: organizationId,
           lead_id: leadId,
@@ -129,6 +191,7 @@ export async function executeToolAction(params: {
           end_at: endIso ?? undefined,
           channel,
         });
+        
         const metadata: Record<string, unknown> = {
           channel,
           duration_min: durationMin,
@@ -138,6 +201,7 @@ export async function executeToolAction(params: {
         const calendarIdValue = String(payload.calendar_id ?? "").trim();
         if (providerValue) metadata.calendar_provider = providerValue;
         if (calendarIdValue) metadata.calendar_id = calendarIdValue;
+        
         let appointmentId: string | null = null;
         try {
           const insertResult = await supabase
@@ -167,6 +231,7 @@ export async function executeToolAction(params: {
             organizationId,
           });
         }
+        
         const syncInput: CreateCalendarEventInput & { provider?: string } = {
           provider: providerValue,
           calendar_id: calendarIdValue,
@@ -181,6 +246,7 @@ export async function executeToolAction(params: {
           metadata,
         };
         const syncResult = await syncCalendarEvent(syncInput as any);
+        
         if (appointmentId) {
           await supabase
             .from("appointments")
@@ -194,6 +260,7 @@ export async function executeToolAction(params: {
             })
             .eq("id", appointmentId);
         }
+        
         statePatch = {
           collected: {
             appointment_scheduled: true,
@@ -213,11 +280,13 @@ export async function executeToolAction(params: {
         eventType = "appointment_booked";
         break;
       }
+
       case "show_demo": {
         toolResult = await showDemo();
         eventType = "demo_interest_detected";
         break;
       }
+
       default:
         break;
     }
@@ -247,9 +316,9 @@ export async function executeToolAction(params: {
         leadId,
       });
     }
-    return { statePatch, event: { type: eventType, payload } };
+    return { statePatch, event: { type: eventType, payload }, replyOverride };
   }
-  return { statePatch };
+  return { statePatch, replyOverride };
 }
 
 function buildIsoTimestamp(date: string, time: string, overrideValue: string): string | null {
