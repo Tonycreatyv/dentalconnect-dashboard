@@ -67,6 +67,14 @@ function getResponses(orgType: "creatyv" | "dental" | "generic") {
   return RESPONSES[orgType] ?? RESPONSES.generic;
 }
 
+function hasCollectedName(state: ConversationState) {
+  const collectedName = safeStr(state.collected?.full_name, "").trim();
+  const stateName = safeStr((state as any)?.name, "").trim();
+  const validCollected = collectedName && !collectedName.startsWith("Usuario ");
+  const validState = stateName && !stateName.startsWith("Usuario ");
+  return Boolean(validCollected || validState);
+}
+
 export function runConversationEngine(args: {
   organizationId: string;
   leadId: string;
@@ -81,6 +89,7 @@ export function runConversationEngine(args: {
   const responses = getResponses(orgType);
   const state: ConversationState = args.leadState ?? { stage: "INITIAL", orgType, collected: {} };
   const collected = (state.collected ?? {}) as Record<string, unknown>;
+  const needsName = orgType === "dental" && !hasCollectedName(state);
   const intent = detectIntent(text, { nextExpected: state.nextExpected });
 
   // P1: Handoff
@@ -112,7 +121,9 @@ export function runConversationEngine(args: {
     if (intent.intent === "book_appointment") {
       const resp = orgType === "dental" ? responses.bookAppointment : responses.demo;
       return {
-        replyText: pickRandom(resp ?? responses.fallback),
+        replyText: needsName
+          ? "¡Claro! Antes de agendar, ¿me compartes tu nombre completo?"
+          : pickRandom(resp ?? responses.fallback),
         statePatch: { stage: "BOOKING", lastIntent: "book_appointment", nextExpected: "confirm_name" },
         debug: { intent: "book_appointment", phase: "BOOKING", route: "booking" },
       };
@@ -151,7 +162,9 @@ export function runConversationEngine(args: {
   if (intent.intent === "greeting") {
     if (state.stage === "INITIAL" || !state.lastIntent) {
       return {
-        replyText: pickRandom(responses.greeting),
+        replyText: needsName
+          ? "¡Hola! 👋 Bienvenido a la clínica. Antes de ayudarte, ¿me compartes tu nombre completo?"
+          : pickRandom(responses.greeting),
         statePatch: { stage: "DISCOVERY", lastIntent: "greeting", nextExpected: orgType === "dental" ? undefined : "business_type", orgType },
         debug: { intent: "greeting", phase: "DISCOVERY", route: "initial" },
       };
@@ -198,15 +211,19 @@ export function runConversationEngine(args: {
   // Fallback
   if (state.stage === "INITIAL") {
     return {
-      replyText: pickRandom(responses.greeting),
-      statePatch: { stage: "DISCOVERY", lastIntent: "unknown", orgType },
+      replyText: needsName
+        ? "¡Hola! 👋 Gracias por escribirnos. Para ayudarte mejor, ¿me compartes tu nombre completo?"
+        : pickRandom(responses.greeting),
+      statePatch: { stage: "DISCOVERY", lastIntent: "unknown", orgType, nextExpected: needsName ? "confirm_name" : undefined },
       debug: { intent: "unknown", phase: "DISCOVERY", route: "fallback_greeting" },
     };
   }
 
   return {
-    replyText: pickRandom(responses.fallback),
-    statePatch: { lastIntent: "unknown" },
+    replyText: needsName
+      ? "Con gusto te ayudo. Antes de continuar, ¿me compartes tu nombre completo?"
+      : pickRandom(responses.fallback),
+    statePatch: { lastIntent: "unknown", nextExpected: needsName ? "confirm_name" : state.nextExpected },
     debug: { intent: "unknown", phase: state.stage ?? "DISCOVERY", route: "fallback" },
   };
 }

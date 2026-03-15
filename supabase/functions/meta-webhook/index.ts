@@ -347,15 +347,19 @@ serve(async (req) => {
       }
       const existingFullName = String(existingLead?.full_name ?? "").trim();
       const stateName = String(nextState?.name ?? "").trim();
-      const hasRealName =
-        (existingFullName && !existingFullName.startsWith("Usuario ")) ||
-        (stateName && !stateName.startsWith("Usuario "));
-      let resolvedName = existingFullName || stateName || `Usuario ${psidSuffix(psid)}`;
+      const existingRealName = existingFullName && !existingFullName.startsWith("Usuario ") ? existingFullName : "";
+      const stateRealName = stateName && !stateName.startsWith("Usuario ") ? stateName : "";
+      const hasRealName = Boolean(existingRealName || stateRealName);
+      let resolvedName: string | null = existingRealName || stateRealName || null;
+      let resolvedFirstName: string | null = null;
+      let resolvedLastName: string | null = null;
       let resolvedProfilePic: string | null = String(nextState?.profile_pic ?? "").trim() || null;
 
       if (!hasRealName) {
         const token = await resolvePageToken(supabase, organization_id);
         const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid });
+        if (profile?.firstName) resolvedFirstName = profile.firstName;
+        if (profile?.lastName) resolvedLastName = profile.lastName;
         if (profile?.fullName) resolvedName = profile.fullName;
         if (profile?.profilePic) resolvedProfilePic = profile.profilePic;
       }
@@ -368,6 +372,8 @@ serve(async (req) => {
         last_channel: channel,
         channel_user_id: psid,
         full_name: resolvedName,
+        first_name: resolvedFirstName,
+        last_name: resolvedLastName,
         avatar_url: resolvedProfilePic,
         last_message_preview: text.slice(0, 140),
         last_message_at: isoTime,
@@ -659,6 +665,7 @@ serve(async (req) => {
                 first_name: profile.firstName,
                 last_name: profile.lastName,
                 full_name: profile.fullName,
+                avatar_url: profile.profilePic,
                 locale: profile.locale,
                 timezone: profile.timezone,
                 gender: profile.gender,
