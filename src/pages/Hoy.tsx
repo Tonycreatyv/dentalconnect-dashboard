@@ -87,6 +87,7 @@ export default function Hoy() {
   const [dailyDigest, setDailyDigest] = useState<AlertRow | null>(null);
   const [actions, setActions] = useState<ActionRow[]>([]);
   const [tomorrowCount, setTomorrowCount] = useState(0);
+  const [weekAppointments, setWeekAppointments] = useState(0);
   const [loading, setLoading] = useState(true);
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
 
@@ -98,15 +99,20 @@ export default function Hoy() {
     const todayStart = startOfDay(selectedDate).toISOString();
     const todayEnd = endOfDay(selectedDate).toISOString();
     const tomorrowStart = startOfDay(new Date(selectedDate.getTime() + 86400000)).toISOString();
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const weekEnd = new Date(selectedDate);
+    weekEnd.setDate(weekEnd.getDate() + (7 - weekEnd.getDay()));
+    const weekEndIso = endOfDay(weekEnd).toISOString();
 
-    const [apptsRes, msgsRes, pendingRes, alertsRes, digestRes, actionsRes] = await Promise.all([
+    const [apptsRes, msgsRes, pendingRes, alertsRes, digestRes, actionsRes, weekApptsRes] = await Promise.all([
       supabase.from("appointments").select("id, organization_id, lead_id, patient_name, title, reason, status, start_at, starts_at")
         .eq("organization_id", orgId).gte("start_at", todayStart).lte("start_at", todayEnd).order("start_at", { ascending: true }),
       supabase.from("messages").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("role", "user").gte("created_at", todayStart),
-      supabase.from("reply_outbox").select("id", { count: "exact", head: true }).eq("organization_id", orgId).in("status", ["queued", "pending", "processing"]),
+      supabase.from("reply_outbox").select("id", { count: "exact", head: true }).eq("organization_id", orgId).in("status", ["queued", "pending", "processing"]).gte("created_at", oneDayAgo),
       supabase.from("alerts").select("id, title, body, type, action, status").eq("organization_id", orgId).eq("status", "open").neq("type", "daily_digest").order("created_at", { ascending: false }).limit(3),
       supabase.from("alerts").select("id, title, body, type, action, status").eq("organization_id", orgId).eq("status", "open").eq("type", "daily_digest").limit(1).maybeSingle(),
       supabase.from("actions").select("id, type, title, description, priority, status, payload").eq("organization_id", orgId).eq("status", "open").order("priority", { ascending: false }).limit(3),
+      supabase.from("appointments").select("id", { count: "exact", head: true }).eq("organization_id", orgId).gte("start_at", todayStart).lte("start_at", weekEndIso).neq("status", "cancelled"),
     ]);
 
     if (!apptsRes.error) setAppointments(apptsRes.data as AppointmentRow[] ?? []);
@@ -115,6 +121,7 @@ export default function Hoy() {
     if (!alertsRes.error) setAlerts(alertsRes.data as AlertRow[] ?? []);
     if (!digestRes.error && digestRes.data) setDailyDigest(digestRes.data as AlertRow);
     if (!actionsRes.error) setActions(actionsRes.data as ActionRow[] ?? []);
+    setWeekAppointments(weekApptsRes.count ?? 0);
 
     const tomorrow = await supabase.from("appointments").select("id", { count: "exact", head: true })
       .eq("organization_id", orgId).gte("start_at", tomorrowStart).lt("start_at", endOfDay(new Date(selectedDate.getTime() + 86400000)).toISOString());
@@ -191,6 +198,10 @@ export default function Hoy() {
         <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/10">
           <span className="text-lg font-bold text-white">{appointments.length}</span>
           <span className="text-xs text-white/60">citas hoy</span>
+        </div>
+        <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-400/20">
+          <span className="text-lg font-bold text-emerald-400">{weekAppointments}</span>
+          <span className="text-xs text-emerald-300">esta semana</span>
         </div>
       </div>
 

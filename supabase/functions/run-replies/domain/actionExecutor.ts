@@ -172,6 +172,8 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
         const appointmentTime = String(payload.appointment_time ?? "").trim();
         const startsAtPayload = String(payload.starts_at ?? "").trim();
         const endsAtPayload = String(payload.ends_at ?? "").trim();
+        const patientName = String(payload.patient_name ?? "").trim();
+        const service = String(payload.service ?? payload.reason ?? "").trim();
         const durationMin = Number.isFinite(Number(payload.duration_min ?? 0)) && Number(payload.duration_min ?? 0) > 0
           ? Number(payload.duration_min ?? 0)
           : 60;
@@ -209,13 +211,16 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
             .insert({
               organization_id: organizationId,
               lead_id: leadId,
+              patient_name: patientName || null,
+              reason: service || null,
               start_at: startIso,
               starts_at: startIso,
               end_at: endIso,
               ends_at: endIso,
-              status: "booked",
+              status: "confirmed",
               appointment_date: appointmentDate || startIso.slice(0, 10),
               appointment_time: appointmentTime || startIso.slice(11, 16),
+              title: service || "Cita dental",
               metadata,
               calendar_provider: providerValue || null,
               calendar_id: calendarIdValue || null,

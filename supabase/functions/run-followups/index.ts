@@ -55,24 +55,17 @@ function buildFollowupText(reason: string, step: number) {
 
 async function loadOrgToken(supabase: ReturnType<typeof createClient>, organizationId: string) {
   const kv = await supabase
-    .from("org_secrets")
-    .select("key, value")
+    .from("org_settings")
+    .select("meta_page_access_token")
     .eq("organization_id", organizationId)
-    .in("key", ["META_PAGE_ACCESS_TOKEN", "PAGE_ACCESS_TOKEN", "META_PAGE_TOKEN", "META_GRAPH_VERSION"]);
+    .maybeSingle();
 
   let token = normalizeSecret(Deno.env.get("META_PAGE_ACCESS_TOKEN") ?? "");
   let graphVersion = safeStr(Deno.env.get("META_GRAPH_VERSION"), "v19.0");
 
-  if (!kv.error && Array.isArray(kv.data)) {
-    for (const row of kv.data as any[]) {
-      const key = safeStr(row?.key, "").trim();
-      const value = normalizeSecret(safeStr(row?.value, ""));
-      if (!key || !value) continue;
-      if (key === "META_GRAPH_VERSION") graphVersion = value;
-      if (["META_PAGE_ACCESS_TOKEN", "PAGE_ACCESS_TOKEN", "META_PAGE_TOKEN"].includes(key) && value.length > 50) {
-        token = value;
-      }
-    }
+  if (!kv.error && kv.data) {
+    const value = normalizeSecret(safeStr((kv.data as any)?.meta_page_access_token, ""));
+    if (value.length > 50) token = value;
   }
 
   return { token, graphVersion };

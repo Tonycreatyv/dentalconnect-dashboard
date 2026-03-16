@@ -18,6 +18,7 @@ function ensureState(state: any): any {
   const s = state && typeof state === "object" ? state : {};
   if (!s.stage) s.stage = "collecting";
   if (!("full_name" in s)) s.full_name = null;
+  if (!("collected_name" in s)) s.collected_name = false;
   if (!("service" in s)) s.service = null;
   if (!("phone" in s)) s.phone = null;
   if (!("availability" in s)) s.availability = null;
@@ -174,23 +175,12 @@ async function resolvePageToken(
   supabase: ReturnType<typeof createClient>,
   organizationId: string
 ) {
-  const kv = await supabase
-    .from("org_secrets")
-    .select("key, value")
-    .eq("organization_id", organizationId)
-    .in("key", ["META_PAGE_ACCESS_TOKEN", "PAGE_ACCESS_TOKEN", "META_PAGE_TOKEN"]);
-  if (!kv.error && Array.isArray(kv.data)) {
-    for (const row of kv.data as any[]) {
-      const token = String(row?.value ?? "").replace(/^['"]|['"]$/g, "").trim();
-      if (token.length > 50) return token;
-    }
-  }
-  const legacy = await supabase
-    .from("org_secrets")
-    .select('meta_page_access_token, "META_PAGE_ACCESS_TOKEN"')
+  const { data } = await supabase
+    .from("org_settings")
+    .select("meta_page_access_token")
     .eq("organization_id", organizationId)
     .maybeSingle();
-  return String((legacy.data as any)?.meta_page_access_token ?? (legacy.data as any)?.META_PAGE_ACCESS_TOKEN ?? "").trim();
+  return String(data?.meta_page_access_token ?? "").trim();
 }
 
 serve(async (req) => {
@@ -354,16 +344,40 @@ serve(async (req) => {
       let resolvedFirstName: string | null = null;
       let resolvedLastName: string | null = null;
       let resolvedProfilePic: string | null = String(nextState?.profile_pic ?? "").trim() || null;
+      let metaProfileLookupAttempted = false;
+      let metaProfileLookupSucceeded = false;
 
-      if (!hasRealName) {
-        const token = await resolvePageToken(supabase, organization_id);
-        const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid });
-        if (profile?.firstName) resolvedFirstName = profile.firstName;
-        if (profile?.lastName) resolvedLastName = profile.lastName;
-        if (profile?.fullName) resolvedName = profile.fullName;
-        if (profile?.profilePic) resolvedProfilePic = profile.profilePic;
+      if (!hasRealName && (channel === "messenger" || channel === "instagram")) {
+        metaProfileLookupAttempted = true;
+        try {
+          const token = await resolvePageToken(supabase, organization_id);
+          if (token) {
+            const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid });
+            if (profile?.firstName) resolvedFirstName = profile.firstName;
+            if (profile?.lastName) resolvedLastName = profile.lastName;
+            if (profile?.fullName) resolvedName = profile.fullName;
+            if (profile?.profilePic) resolvedProfilePic = profile.profilePic;
+            metaProfileLookupSucceeded = Boolean(profile?.fullName || profile?.firstName || profile?.lastName);
+          }
+        } catch (err) {
+          console.warn("[meta-webhook] graph_api_profile_fetch_failed", {
+            organization_id,
+            psid,
+            error: String((err as any)?.message ?? err),
+          });
+          metaProfileLookupSucceeded = false;
+        }
       }
+      const graphGotName = Boolean(resolvedName && !resolvedName.startsWith("Usuario "));
       nextState.name = resolvedName;
+      nextState.full_name = resolvedName;
+      nextState.collected_name = hasRealName || graphGotName;
+      nextState.meta_profile_lookup_attempted = metaProfileLookupAttempted;
+      nextState.meta_profile_lookup_succeeded = metaProfileLookupSucceeded;
+      if (graphGotName) {
+        nextState.asked = { ...(nextState.asked ?? {}), full_name: true };
+        nextState.collected = { ...(nextState.collected ?? {}), full_name: resolvedName };
+      }
       if (resolvedProfilePic) nextState.profile_pic = resolvedProfilePic;
 
       const upsertPayload: Record<string, unknown> = {
@@ -636,52 +650,6 @@ serve(async (req) => {
           });
         }
       }
-      const profileNeedsFetch = await (async () => {
-        try {
-          const leadState = await supabase
-            .from("leads")
-            .select("full_name,fb_profile_fetched_at")
-            .eq("id", lead.id)
-            .maybeSingle();
-          if (leadState.error) return false;
-          const fullName = String(leadState.data?.full_name ?? "").trim();
-          if (!fullName || fullName.startsWith("Usuario ")) return true;
-          const fetchedAt = leadState.data?.fb_profile_fetched_at;
-          if (!fetchedAt) return true;
-          const elapsed = Date.now() - new Date(fetchedAt).getTime();
-          return elapsed > 30 * 24 * 60 * 60 * 1000;
-        } catch {
-          return false;
-        }
-      })();
-      if (profileNeedsFetch) {
-        try {
-          const token = await resolvePageToken(supabase, organization_id);
-          const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid });
-          if (profile) {
-            await supabase
-              .from("leads")
-              .update({
-                first_name: profile.firstName,
-                last_name: profile.lastName,
-                full_name: profile.fullName,
-                avatar_url: profile.profilePic,
-                locale: profile.locale,
-                timezone: profile.timezone,
-                gender: profile.gender,
-                fb_profile_fetched_at: new Date().toISOString(),
-              })
-              .eq("id", lead.id);
-          }
-        } catch (err) {
-          console.warn("[meta-webhook] profile_fetch_failed", {
-            organization_id,
-            lead_id: lead.id,
-            error: safeString((err as any)?.message ?? err),
-          });
-        }
-      }
-
       if (RUN_REPLIES_SECRET) {
         const RUN_REPLIES_URL = `${SUPABASE_URL}/functions/v1/run-replies`;
         await fetch(RUN_REPLIES_URL, {

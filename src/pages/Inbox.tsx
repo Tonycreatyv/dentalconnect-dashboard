@@ -5,7 +5,6 @@ import { supabase } from "../lib/supabaseClient";
 import { SectionCard } from "../components/SectionCard";
 import { dedupeByKey } from "../lib/dedupe";
 import { messageKey } from "../lib/messages";
-import { getLeadDisplayName } from "../lib/leads";
 import { useClinic } from "../context/ClinicContext";
 
 const DEFAULT_ORG = "clinic-demo";
@@ -40,18 +39,17 @@ type MsgRow = {
 
 // Helper: Get best display name (priority: full_name > first+last > state.name > fallback)
 function getBestDisplayName(lead: LeadRow): string {
-  if (lead.full_name && lead.full_name.trim() && !lead.full_name.startsWith("Usuario ")) {
+  if (lead.full_name?.trim() && !lead.full_name.startsWith("Usuario ")) {
     return lead.full_name.trim();
   }
-  if (lead.first_name) {
-    const parts = [lead.first_name, lead.last_name].filter(Boolean);
-    if (parts.length > 0) return parts.join(" ");
-  }
+  const parts = [lead.first_name, lead.last_name].filter(Boolean);
+  if (parts.length > 0) return parts.join(" ");
   const stateName = lead.state?.name;
   if (stateName && typeof stateName === "string" && stateName.trim() && !stateName.startsWith("Usuario ")) {
     return stateName.trim();
   }
-  return getLeadDisplayName(lead);
+  if (lead.phone) return lead.phone;
+  return "Sin nombre";
 }
 
 // Helper: Format relative time (5m, 2h, 3d)

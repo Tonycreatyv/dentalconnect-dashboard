@@ -5,9 +5,10 @@
 // =============================================================================
 
 import { createClient, type SupabaseClient as SupabaseClientBase } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { runConversationEngine, StatePatch, ConversationResult } from "./conversationEngine.ts";
+import { runConversationEngine, maybeHandleNameCapture } from "./conversationEngine.ts";
 import { executeToolAction, type ActionExecutionResult } from "./domain/actionExecutor.ts";
-import { runLlmTurn, validateLlmTurnResult } from "./domain/llmTurn.ts";
+import { runLlmTurn } from "./domain/llmTurn.ts";
+import { classifyMessage, type ClassifiedIntent } from "./domain/llmClassifier.ts";
 
 // =============================================================================
 // TYPES
@@ -77,6 +78,14 @@ function normalizeChannel(ch: string) {
   if (c.includes("instagram")) return "instagram";
   if (c.includes("whatsapp")) return "whatsapp";
   return c || "messenger";
+}
+
+function resolveLeadFullName(leadState: Json | null, statePatch?: Json | null) {
+  const patchCollectedName = safeStr((statePatch as any)?.collected?.full_name, "").trim();
+  const patchName = safeStr((statePatch as any)?.full_name, "").trim();
+  const leadName = safeStr((leadState as any)?.full_name, "").trim();
+  const stateName = safeStr((leadState as any)?.name, "").trim();
+  return patchCollectedName || patchName || leadName || stateName || "";
 }
 
 function logEvent(event: string, data: Record<string, unknown>) {
@@ -178,43 +187,28 @@ export function mergeStatePatches(primary?: Json | null, secondary?: Json | null
 // =============================================================================
 
 async function loadOrgSecretsKV(supabase: SupabaseClientType, organizationId: string) {
-  const keys = ["META_PAGE_ACCESS_TOKEN", "META_PAGE_ID", "META_GRAPH_VERSION"];
   const res = await supabase
-    .from("org_secrets")
-    .select("key, value")
+    .from("org_settings")
+    .select("meta_page_access_token")
     .eq("organization_id", organizationId)
-    .in("key", keys);
+    .maybeSingle();
 
   const kv: Record<string, string> = {};
-  if (!res.error && Array.isArray(res.data)) {
-    for (const row of res.data as any[]) {
-      const k = safeStr(row?.key, "").trim();
-      const v = normalizeSecretValue(safeStr(row?.value, ""));
-      if (k) kv[k] = v;
-    }
+  if (!res.error && res.data) {
+    kv.META_PAGE_ACCESS_TOKEN = normalizeSecretValue(safeStr((res.data as any)?.meta_page_access_token, ""));
   }
   return kv;
 }
 
 async function loadOrgSecretWithFallback(supabase: SupabaseClientType, organizationId: string) {
-  const selects = [
-    'meta_page_id, meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
-    'meta_page_access_token, "META_PAGE_ACCESS_TOKEN"',
-    '"META_PAGE_ACCESS_TOKEN"',
-  ];
+  const r = await supabase
+    .from("org_settings")
+    .select("meta_page_id, meta_page_access_token")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
 
-  for (const sel of selects) {
-    const r = await supabase
-      .from("org_secrets")
-      .select(sel)
-      .eq("organization_id", organizationId)
-      .maybeSingle();
-
-    if (!r.error) return r.data as Json | null;
-    const isSchemaCache = r.error.message.includes("schema cache") && r.error.message.includes("Could not find");
-    if (!isSchemaCache) break;
-  }
-  return null;
+  if (r.error) return null;
+  return r.data as Json | null;
 }
 
 async function loadProductKnowledge(supabase: SupabaseClientType, organizationId: string) {
@@ -241,6 +235,29 @@ async function loadClinicKnowledge(supabase: SupabaseClientType, organizationId:
     }
   }
   return map;
+}
+
+async function loadClinicSettings(
+  supabase: SupabaseClientType,
+  organizationId: string
+): Promise<Record<string, unknown>> {
+  const clinicRes = await supabase
+    .from("clinics")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!clinicRes.data?.id) return {};
+
+  const settingsRes = await supabase
+    .from("clinic_settings")
+    .select("hours, services, phone, address")
+    .eq("clinic_id", clinicRes.data.id)
+    .maybeSingle();
+
+  if (!settingsRes.data) return {};
+  return settingsRes.data as Record<string, unknown>;
 }
 
 async function loadRecentMessages(
@@ -432,6 +449,7 @@ interface GenerateReplyArgs {
   recentMessages: RecentMessage[];
   productKnowledge: Record<string, unknown>;
   clinicKnowledge: Record<string, unknown>;
+  clinicSettings: Record<string, unknown>;
   llmEnabled: boolean;
   isOperatorOutbound: boolean;
   manualText: string;
@@ -443,28 +461,135 @@ interface GenerateReplyArgs {
 interface GenerateReplyResult {
   reply: string;
   statePatch: Json;
+  leadPatch?: Json;
   debugNote: string;
 }
 
 async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResult> {
   const {
-    supabase, organizationId, leadId, leadState, inboundText,
-    orgSettings, recentMessages, productKnowledge, clinicKnowledge,
+    supabase, organizationId, leadId, leadState: initialLeadState, inboundText: initialInboundText,
+    orgSettings, recentMessages, productKnowledge, clinicKnowledge, clinicSettings,
     llmEnabled, isOperatorOutbound, manualText,
     executionId, traceId, jobId
   } = args;
+  let leadState = initialLeadState;
+  let inboundText = initialInboundText;
 
   // OPERATOR OUTBOUND (manual reply from dashboard)
   if (isOperatorOutbound) {
     return {
       reply: manualText || inboundText || "Gracias por escribirnos.",
       statePatch: {},
+      leadPatch: {},
       debugNote: "operator_outbound",
     };
   }
 
+  let classified: ClassifiedIntent | null = null;
+  const businessType = safeStr(orgSettings?.business_type, "").toLowerCase();
+  const isDentalOrg = businessType === "dental" || businessType === "clinic" || businessType.includes("dental");
+
+  if (isDentalOrg) {
+    const services = Array.isArray(clinicSettings?.services)
+      ? (clinicSettings.services as any[]).map((service: any) => String(service?.name ?? service ?? "").trim()).filter(Boolean)
+      : ["limpieza dental", "ortodoncia", "blanqueamiento", "implantes", "extracción", "consulta general"];
+    const history = (recentMessages ?? []).slice(-6).map((message: any) => String(message.content ?? ""));
+
+    classified = await classifyMessage({
+      message: inboundText,
+      conversationHistory: history,
+      currentStage: safeStr((leadState as any)?.stage, "INITIAL"),
+      nextExpected: safeStr((leadState as any)?.nextExpected, "") || null,
+      collectedData: ((leadState as any)?.collected ?? {}) as Record<string, unknown>,
+      clinicServices: services,
+    });
+  }
+
+  if (classified) {
+    const existingCollected = (((leadState as any)?.collected ?? {}) as Record<string, unknown>);
+
+    if (classified.service) {
+      leadState = mergeLeadState(leadState, {
+        collected: {
+          ...existingCollected,
+          service: classified.service,
+        },
+      });
+    }
+
+    if (classified.date || classified.time) {
+      leadState = mergeLeadState(leadState, {
+        collected: {
+          ...(((leadState as any)?.collected ?? {}) as Record<string, unknown>),
+          ...(classified.date ? { preferred_date: classified.date } : {}),
+          ...(classified.time ? { preferred_time: classified.time } : {}),
+        },
+      });
+    }
+
+    if (classified.is_confirmation && safeStr((leadState as any)?.nextExpected, "") === "confirm_booking") {
+      inboundText = "sí";
+    }
+
+    if (classified.is_negation && safeStr((leadState as any)?.nextExpected, "") === "confirm_booking") {
+      inboundText = "no";
+    }
+
+    if (classified.patient_name && !resolveLeadFullName(leadState)) {
+      inboundText = classified.patient_name;
+    }
+
+    if (
+      classified.intent === "book_appointment" ||
+      classified.intent === "provide_service" ||
+      classified.intent === "provide_datetime" ||
+      classified.service ||
+      classified.date ||
+      classified.time
+    ) {
+      if (safeStr((leadState as any)?.stage, "") !== "BOOKING") {
+        leadState = mergeLeadState(leadState, { stage: "BOOKING" });
+      }
+    }
+
+    if (classified.urgency === "emergency") {
+      const clinicPhone = safeStr(clinicSettings?.phone, "");
+      const emergencyMsg = clinicPhone
+        ? `⚠️ Entiendo que es una emergencia. Por favor llama directamente a la clínica: ${clinicPhone}. Te atenderemos lo antes posible.`
+        : "⚠️ Entiendo que es una emergencia. Te recomendamos visitar la clínica directamente o llamar para atención inmediata.";
+
+      return {
+        reply: emergencyMsg,
+        statePatch: { lastIntent: "emergency" },
+        leadPatch: {},
+        debugNote: "llm:emergency",
+      };
+    }
+  }
+
+  const nameStep = maybeHandleNameCapture({
+    organizationId,
+    leadState: leadState as any,
+    inboundText,
+    channel: safeStr((leadState as any)?.channel, ""),
+  });
+  if (nameStep?.replyText) {
+    const leadPatch: Json = {};
+    const capturedFullName = safeStr((nameStep.statePatch as any)?.full_name, "").trim();
+    if (capturedFullName && !capturedFullName.startsWith("Usuario ")) {
+      leadPatch.full_name = capturedFullName;
+      leadPatch.first_name = capturedFullName.split(/\s+/)[0] ?? capturedFullName;
+    }
+    return {
+      reply: clampText(nameStep.replyText, 950),
+      statePatch: nameStep.statePatch ?? {},
+      leadPatch,
+      debugNote: `name_gate:${safeStr(nameStep.debug?.route, "step")}`,
+    };
+  }
+
   // LLM MODE (OpenAI)
-  if (llmEnabled) {
+  if (llmEnabled && !isDentalOrg) {
     console.log("[run-replies] LLM mode enabled, calling runLlmTurn...");
 
     try {
@@ -510,6 +635,7 @@ async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResu
         return {
           reply: reply || "Gracias por escribirnos. ¿En qué te puedo ayudar?",
           statePatch,
+          leadPatch: {},
           debugNote: "llm",
         };
       }
@@ -525,13 +651,22 @@ async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResu
     organizationId,
     leadState,
     inboundText,
+    channel: safeStr((leadState as any)?.channel, ""),
     knowledge: productKnowledge,
     clinicKnowledge,
+    clinicSettings,
   });
 
   if (engineResult?.replyText) {
     let reply = clampText(engineResult.replyText, 950);
     let statePatch: Json = engineResult.statePatch ?? {};
+    const leadPatch: Json = {};
+
+    const capturedFullName = safeStr((statePatch as any)?.full_name, "").trim();
+    if (capturedFullName && !capturedFullName.startsWith("Usuario ")) {
+      leadPatch.full_name = capturedFullName;
+      leadPatch.first_name = capturedFullName.split(/\s+/)[0] ?? capturedFullName;
+    }
 
     if (engineResult.toolAction && leadId) {
       const result = await executeToolAction({
@@ -550,9 +685,32 @@ async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResu
       }
     }
 
+    if (reply === "__SHOW_AVAILABILITY__") {
+      const hours = (clinicSettings.hours ?? {}) as Record<string, unknown>;
+      const { getAvailableSlots, formatSlotsMessage } = await import("./domain/availability.ts");
+      const slots = await getAvailableSlots({
+        supabase,
+        organizationId,
+        hours,
+      });
+      const slotsText = formatSlotsMessage(slots);
+      const fullName = resolveLeadFullName(leadState, statePatch);
+      const firstName = fullName ? fullName.split(/\s+/)[0] ?? "" : "";
+      reply = firstName
+        ? `${firstName}, estos son nuestros horarios disponibles:\n\n${slotsText}\n\n¿Qué día y hora te queda mejor?`
+        : `Estos son nuestros horarios disponibles:\n\n${slotsText}\n\n¿Qué día y hora te queda mejor?`;
+    }
+
+    if (reply === "__BOOK_APPOINTMENT__") {
+      const fullName = resolveLeadFullName(leadState, statePatch);
+      const firstName = fullName ? fullName.split(/\s+/)[0] ?? "" : "";
+      reply = `¡Listo${firstName ? `, ${firstName}` : ""}! Tu cita está confirmada. Te enviaremos un recordatorio 24 horas antes. 😊`;
+    }
+
     return {
       reply,
       statePatch,
+      leadPatch,
       debugNote: `engine:${safeStr(engineResult.debug?.stage, "") || safeStr(engineResult.debug?.intent, "") || "reply"}`,
     };
   }
@@ -561,6 +719,7 @@ async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResu
   return {
     reply: "Gracias por escribirnos. Te respondo en un momento.",
     statePatch: {},
+    leadPatch: {},
     debugNote: "fallback",
   };
 }
@@ -622,8 +781,7 @@ Deno.serve(async (req) => {
 
     const sec = await loadOrgSecretWithFallback(supabase, organization_id);
     if (sec) {
-      const token = normalizeSecretValue(safeStr((sec as any).meta_page_access_token, "")) ||
-        normalizeSecretValue(safeStr((sec as any).META_PAGE_ACCESS_TOKEN, ""));
+      const token = normalizeSecretValue(safeStr((sec as any).meta_page_access_token, ""));
       if (token) pageAccessToken = safeStr(token, pageAccessToken);
     }
 
@@ -639,6 +797,7 @@ Deno.serve(async (req) => {
 
     const productKnowledge = await loadProductKnowledge(supabase, organization_id);
     const clinicKnowledge = await loadClinicKnowledge(supabase, organization_id);
+    const clinicSettings = await loadClinicSettings(supabase, organization_id);
 
     // CLAIM JOBS
     const limit = Math.max(1, Math.min(Number(body?.limit ?? 10) || 10, 50));
@@ -649,7 +808,7 @@ Deno.serve(async (req) => {
     const reclaimRes = await supabase
       .from("reply_outbox")
       .update({
-        status: "queued",
+        status: "failed",
         processing_started_at: null,
         locked_at: null,
         locked_by: null,
@@ -799,11 +958,36 @@ Deno.serve(async (req) => {
         if (leadId) {
           const ld = await supabase
             .from("leads")
-            .select("state")
+            .select("state, full_name, first_name, last_name, channel")
             .eq("id", leadId)
             .maybeSingle();
           if (!ld.error && ld.data) {
             leadState = (ld.data as any).state as Json | null;
+            const leadChannel = safeStr((ld.data as any)?.channel, "");
+            if (leadChannel) {
+              leadState = mergeLeadState(leadState, { channel: leadChannel });
+            }
+            const dbFullName = safeStr((ld.data as any)?.full_name, "").trim();
+            const dbFirstName = safeStr((ld.data as any)?.first_name, "").trim();
+            const dbLastName = safeStr((ld.data as any)?.last_name, "").trim();
+            const effectiveName = dbFullName && !dbFullName.startsWith("Usuario ")
+              ? dbFullName
+              : [dbFirstName, dbLastName].filter(Boolean).join(" ").trim();
+            if (effectiveName) {
+              leadState = mergeLeadState(leadState, {
+                full_name: effectiveName,
+                name: effectiveName,
+                collected_name: true,
+                asked: {
+                  ...(((leadState as any)?.asked ?? {}) as Record<string, unknown>),
+                  full_name: true,
+                },
+                collected: {
+                  ...(((leadState as any)?.collected ?? {}) as Record<string, unknown>),
+                  full_name: effectiveName,
+                },
+              });
+            }
           }
         }
 
@@ -811,7 +995,7 @@ Deno.serve(async (req) => {
         const recentMessages = await loadRecentMessages(supabase, leadId);
 
         // GENERATE REPLY
-        const { reply, statePatch, debugNote } = await generateReply({
+        const { reply, statePatch, leadPatch, debugNote } = await generateReply({
           supabase,
           organizationId: organization_id,
           leadId,
@@ -821,6 +1005,7 @@ Deno.serve(async (req) => {
           recentMessages,
           productKnowledge,
           clinicKnowledge,
+          clinicSettings,
           llmEnabled,
           isOperatorOutbound,
           manualText,
@@ -858,6 +1043,13 @@ Deno.serve(async (req) => {
           }
         }
         // =====================================================================
+
+        if (leadId && leadPatch && Object.keys(leadPatch).length > 0) {
+          await supabase
+            .from("leads")
+            .update(leadPatch)
+            .eq("id", leadId);
+        }
 
         // SAVE OUTBOUND MESSAGE FIRST (before sending to Meta)
         let outboundMessageId: string | null = null;

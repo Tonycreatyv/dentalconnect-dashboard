@@ -735,6 +735,7 @@ export default function CalendarBoard() {
 
   function openEdit(a: ApptRow) {
     const iso = normalizedStartISO(a) ?? new Date().toISOString();
+    const existingTime = a.appointment_time?.slice(0, 5) || a.start_at?.slice(11, 16) || a.starts_at?.slice(11, 16) || "";
     setModalMode("edit");
     setActiveAppt(a);
     setForm({
@@ -742,7 +743,7 @@ export default function CalendarBoard() {
       notes: a.notes?.trim() || "",
       status: normalizeStatus(a.status),
       date: toDateInput(iso),
-      time: toTimeInput(iso),
+      time: existingTime || toTimeInput(iso),
       patient_name: a.patient_name?.trim() || "",
       reason: a.reason?.trim() || "",
     });

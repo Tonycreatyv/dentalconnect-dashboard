@@ -141,50 +141,28 @@ async function fetchPages(userToken: string): Promise<MetaPage[]> {
     }));
 }
 
-async function upsertOrgSecretsWithFallback(
+async function upsertMetaPageToken(
   supabase: ReturnType<typeof createClient>,
   args: { organizationId: string; pageId: string; pageAccessToken: string; now: string }
 ) {
-  const candidates: Record<string, string>[] = [
+  const res = await supabase.from("org_settings").upsert(
     {
       organization_id: args.organizationId,
       meta_page_id: args.pageId,
       meta_page_access_token: args.pageAccessToken,
       updated_at: args.now,
-    },
-    {
-      organization_id: args.organizationId,
-      meta_page_id: args.pageId,
-      META_PAGE_ACCESS_TOKEN: args.pageAccessToken,
-      updated_at: args.now,
-    },
-    {
-      organization_id: args.organizationId,
-      meta_page_id: args.pageId,
-      updated_at: args.now,
-    },
-  ];
+    } as any,
+    { onConflict: "organization_id" }
+  );
 
-  let lastError: { message: string; isSchemaCache: boolean } | null = null;
-
-  for (const payload of candidates) {
-    const res = await supabase.from("org_secrets").upsert(payload as any, { onConflict: "organization_id" });
-    if (!res.error) {
-      const tokenStored = "meta_page_access_token" in payload || "META_PAGE_ACCESS_TOKEN" in payload;
-      return { ok: true as const, tokenStored };
-    }
-    const isMissingColumn =
-      res.error.message.includes("Could not find the") && res.error.message.includes("column") && res.error.message.includes("schema cache");
-    lastError = { message: res.error.message, isSchemaCache: isMissingColumn };
-    if (!isMissingColumn) {
-      break;
-    }
+  if (!res.error) {
+    return { ok: true as const, tokenStored: true };
   }
 
   return {
     ok: false as const,
-    error: lastError?.message ?? "org_secrets_upsert_failed",
-    isSchemaCache: lastError?.isSchemaCache ?? false,
+    error: res.error.message ?? "org_settings_upsert_failed",
+    isSchemaCache: false,
   };
 }
 
@@ -362,34 +340,13 @@ Deno.serve(async (req) => {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
 
-      const secretRes = await upsertOrgSecretsWithFallback(supabase, {
+      const secretRes = await upsertMetaPageToken(supabase, {
         organizationId,
         pageId: page.id,
         pageAccessToken: page.access_token,
         now,
       });
       if (!secretRes.ok) {
-        if (secretRes.isSchemaCache) {
-          const warningCode = "org_secrets_schema_mismatch";
-          await supabase.from("org_settings").upsert(
-            {
-              organization_id: organizationId,
-              business_type: "dental",
-              messenger_enabled: true,
-              meta_last_error: warningCode,
-              updated_at: now,
-            },
-            { onConflict: "organization_id" }
-          );
-          return json(req, 200, {
-            ok: true,
-            connected: true,
-            page_id: page.id,
-            page_name: displayName,
-            token_saved: false,
-            warning: warningCode,
-          });
-        }
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
@@ -400,7 +357,7 @@ Deno.serve(async (req) => {
           },
           { onConflict: "organization_id" }
         );
-        return json(req, 500, { error: "org_secrets_upsert_failed", details: secretRes.error });
+        return json(req, 500, { error: "org_settings_upsert_failed", details: secretRes.error });
       }
 
       return json(req, 200, {
@@ -466,27 +423,13 @@ Deno.serve(async (req) => {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
 
-      const secretRes = await upsertOrgSecretsWithFallback(supabase, {
+      const secretRes = await upsertMetaPageToken(supabase, {
         organizationId,
         pageId,
         pageAccessToken,
         now,
       });
       if (!secretRes.ok) {
-        if (secretRes.isSchemaCache) {
-          const warningCode = "org_secrets_schema_mismatch";
-          await supabase.from("org_settings").upsert(
-            {
-              organization_id: organizationId,
-              business_type: "dental",
-              messenger_enabled: true,
-              meta_last_error: warningCode,
-              updated_at: now,
-            },
-            { onConflict: "organization_id" }
-          );
-          return json(req, 200, { ok: true, page_id: pageId, token_saved: false, warning: warningCode });
-        }
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
@@ -497,7 +440,7 @@ Deno.serve(async (req) => {
           },
           { onConflict: "organization_id" }
         );
-        return json(req, 500, { error: "org_secrets_upsert_failed", details: secretRes.error });
+        return json(req, 500, { error: "org_settings_upsert_failed", details: secretRes.error });
       }
 
       return json(req, 200, { ok: true, page_id: pageId, token_saved: secretRes.tokenStored });
