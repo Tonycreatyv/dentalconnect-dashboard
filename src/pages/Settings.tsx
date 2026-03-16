@@ -151,7 +151,7 @@ export default function Settings() {
 
   const settingsSnapshot = useMemo(() => JSON.stringify({ clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, emergency, policiesCancel, policiesDeposit }), [clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, emergency, policiesCancel, policiesDeposit]);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
-  useEffect(() => { if (!loading) setInitialSnapshot(settingsSnapshot); }, [loading, settingsSnapshot]);
+  useEffect(() => { if (!loading) setInitialSnapshot((prev) => prev ?? settingsSnapshot); }, [loading, settingsSnapshot]);
   const isDirty = initialSnapshot !== null && initialSnapshot !== settingsSnapshot;
 
   async function save() {
