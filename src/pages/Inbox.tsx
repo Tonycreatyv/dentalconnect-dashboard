@@ -236,36 +236,13 @@ export default function Inbox() {
       if (!selectedLead.channel_user_id) {
         throw new Error("Este lead no tiene PSID/channel_user_id para enviar por Messenger.");
       }
-      const kvSecrets = await supabase
-        .from("org_secrets")
-        .select("key, value")
+     const { data: settingsData } = await supabase
+        .from("org_settings")
+        .select("meta_page_access_token")
         .eq("organization_id", ORG)
-        .in("key", ["META_PAGE_ACCESS_TOKEN", "PAGE_ACCESS_TOKEN", "META_PAGE_TOKEN"])
-        .limit(3);
-
-      const kvToken = Array.isArray(kvSecrets.data)
-        ? kvSecrets.data
-            .map((row: any) => String(row?.value ?? "").replace(/^['"]|['"]$/g, "").trim())
-            .find((value) => value.length > 50) ?? ""
-        : "";
-
-      let legacyToken = "";
-      if (!kvToken) {
-        const legacySecrets = await supabase
-          .from("org_secrets")
-          .select('meta_page_access_token, "META_PAGE_ACCESS_TOKEN"')
-          .eq("organization_id", ORG)
-          .maybeSingle();
-        if (!legacySecrets.error && legacySecrets.data) {
-          legacyToken = String(
-            (legacySecrets.data as any)?.meta_page_access_token ??
-            (legacySecrets.data as any)?.META_PAGE_ACCESS_TOKEN ??
-            ""
-          ).replace(/^['"]|['"]$/g, "").trim();
-        }
-      }
-
-      if (!kvToken && !legacyToken) {
+        .maybeSingle();
+      const pageToken = String(settingsData?.meta_page_access_token ?? "").trim();
+      if (!pageToken) {
         throw new Error("Falta token de página para esta organización. Revisa Integraciones.");
       }
 
