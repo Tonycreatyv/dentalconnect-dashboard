@@ -71,7 +71,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
     const created = await supabase
       .from("clinics")
-      .insert({ name: "Clínica Sonrisas", organization_id: organizationId })
+      .insert({ name: "Clínica", organization_id: organizationId })
       .select("id, name, domain, organization_id")
       .maybeSingle();
 
@@ -79,7 +79,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
     return {
       id: created.data.id,
-      name: created.data.name ?? "Clínica Sonrisas",
+      name: created.data.name ?? "Clínica",
       domain: created.data.domain ?? null,
       organization_id: created.data.organization_id ?? organizationId,
     };

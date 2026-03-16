@@ -73,7 +73,7 @@ export default function Settings() {
   const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
   const [localClinicId, setLocalClinicId] = useState<string | null>(null);
 
-  const [clinicName, setClinicName] = useState("Clínica Sonrisas");
+  const [clinicName, setClinicName] = useState(clinic?.name ?? "Clínica");
   const [specialties, setSpecialties] = useState<string[]>(["general"]);
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
