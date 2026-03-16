@@ -161,7 +161,7 @@ export default function Settings() {
     if (!id) { setToast({ kind: "error", message: "No se pudo guardar." }); setSaving(false); return; }
     const payload: ClinicSettingsRow = { clinic_id: id, phone: phone.trim() || null, address: address.trim() || null, google_maps_url: mapsUrl.trim() || null, hours, services, faqs, emergency: emergency.trim() || null, policies: { cancelacion: policiesCancel.trim(), deposito: policiesDeposit.trim() }, specialties, updated_at: new Date().toISOString() };
     const res = await supabase.from("clinic_settings").upsert(payload, { onConflict: "clinic_id" });
-    if (res.error) { setToast({ kind: "error", message: "Error al guardar." }); } else { setToast({ kind: "success", message: "Guardado." }); setInitialSnapshot(settingsSnapshot); }
+    if (res.error) { setToast({ kind: "error", message: "Error al guardar." }); } else { await supabase.from("clinics").update({ name: clinicName.trim() }).eq("id", id); setToast({ kind: "success", message: "Guardado." }); setInitialSnapshot(settingsSnapshot); }
     setSaving(false);
   }
 
