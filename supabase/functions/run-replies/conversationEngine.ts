@@ -1,5 +1,5 @@
 import { normalizeText } from "./domain/normalization.ts";
-import { detectIntent, isHighValueIntent, needsHumanHandoff, isContinuationResponse } from "./domain/intents.ts";
+import { detectIntent, isHighValueIntent, needsHumanHandoff, isContinuationResponse, isContinuationText } from "./domain/intents.ts";
 
 export type Stage = "INITIAL" | "DISCOVERY" | "QUALIFICATION" | "VALUE" | "TRIAL_OFFER" | "ACTIVATION" | "BOOKING" | "BOOKED" | "HANDOFF" | "CLOSED";
 
@@ -364,6 +364,7 @@ export function runConversationEngine(args: {
   const isDentalBookingFlow = orgType === "dental" && (
     intent.intent === "book_appointment" ||
     state.stage === "BOOKING" ||
+    state.nextExpected === "confirm_booking_suggestion" ||
     state.nextExpected === "service" ||
     state.nextExpected === "date_time" ||
     state.nextExpected === "confirm_booking"
@@ -374,6 +375,26 @@ export function runConversationEngine(args: {
     const firstName = getFirstName(state);
     const serviceFromMessage = detectService(args.inboundText);
     const llmService = safeStr(bookingCollected.service, "").trim();
+
+    if (state.nextExpected === "confirm_booking_suggestion") {
+      const trimmed = text.trim().toLowerCase();
+      const isYes = /^(s[ií]|si|yes|ok|dale|claro|por\s*favor|porfavor|porfa|s[ií]\s+por\s+favo?r|perfecto|listo|quiero|me\s+interesa)\b/i.test(trimmed);
+
+      if (isYes || isContinuationText(trimmed)) {
+        return {
+          replyText: hasCollectedName(state)
+            ? `¡Claro, ${getFirstName(state)}! ¿Qué servicio te interesa? Ofrecemos: limpieza, ortodoncia, blanqueamiento, implantes, extracciones y más.`
+            : "¡Claro! ¿Qué servicio te interesa? Ofrecemos: limpieza, ortodoncia, blanqueamiento, implantes, extracciones y más.",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "service",
+            collected: { ...bookingCollected },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "confirmed_suggestion" },
+        };
+      }
+    }
 
     if (state.nextExpected === "confirm_booking") {
       const trimmed = text.trim();
@@ -520,14 +541,22 @@ export function runConversationEngine(args: {
     if (intent.intent === "pricing") {
       return {
         replyText: pickRandom(responses.pricing),
-        statePatch: { stage: "VALUE", lastIntent: "pricing", nextExpected: "demo_interest" },
+        statePatch: {
+          stage: orgType === "dental" ? "BOOKING" : "VALUE",
+          lastIntent: "pricing",
+          nextExpected: orgType === "dental" ? "confirm_booking_suggestion" : "demo_interest",
+        },
         debug: { intent: "pricing", phase: "VALUE", route: "high_value" },
       };
     }
     if (intent.intent === "services") {
       return {
         replyText: pickRandom(responses.services),
-        statePatch: { stage: "DISCOVERY", lastIntent: "services" },
+        statePatch: {
+          stage: orgType === "dental" ? "BOOKING" : "DISCOVERY",
+          lastIntent: "services",
+          nextExpected: orgType === "dental" ? "confirm_booking_suggestion" : undefined,
+        },
         debug: { intent: "services", phase: "DISCOVERY", route: "high_value" },
       };
     }
@@ -592,7 +621,11 @@ export function runConversationEngine(args: {
   if (intent.intent === "hours" && responses.hours) {
     return {
       replyText: pickRandom(responses.hours),
-      statePatch: { lastIntent: "hours" },
+      statePatch: {
+        stage: orgType === "dental" ? "BOOKING" : state.stage,
+        lastIntent: "hours",
+        nextExpected: orgType === "dental" ? "confirm_booking_suggestion" : undefined,
+      },
       debug: { intent: "hours", phase: state.stage ?? "DISCOVERY", route: "info" },
     };
   }
@@ -636,7 +669,15 @@ export function runConversationEngine(args: {
     replyText: needsName
       ? "Con gusto te ayudo. Antes de continuar, ¿me compartes tu nombre completo?"
       : pickRandom(responses.fallback),
-    statePatch: { lastIntent: "unknown", nextExpected: needsName ? "confirm_name" : state.nextExpected },
+    statePatch: {
+      stage: !needsName && orgType === "dental" ? "BOOKING" : state.stage,
+      lastIntent: "unknown",
+      nextExpected: needsName
+        ? "confirm_name"
+        : orgType === "dental"
+          ? "confirm_booking_suggestion"
+          : state.nextExpected,
+    },
     debug: { intent: "unknown", phase: state.stage ?? "DISCOVERY", route: "fallback" },
   };
 }

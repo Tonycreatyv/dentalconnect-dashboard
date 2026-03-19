@@ -119,7 +119,6 @@ export default function Onboarding() {
     const orgInsert = await supabase.from("organizations").insert({
       id: orgId,
       name: clinicName.trim(),
-      owner_id: user.id,
     });
     if (orgInsert.error) throw new Error(orgInsert.error.message);
 
@@ -163,11 +162,11 @@ export default function Onboarding() {
 
     const profileUpsert = await supabase.from("user_profiles").upsert(
       {
-        id: user.id,
+        user_id: user.id,
         is_admin: true,
         default_org_id: orgId,
       },
-      { onConflict: "id" }
+      { onConflict: "user_id" }
     );
     if (profileUpsert.error) throw new Error(profileUpsert.error.message);
 

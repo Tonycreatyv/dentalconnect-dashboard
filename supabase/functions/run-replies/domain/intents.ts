@@ -168,3 +168,18 @@ export function needsHumanHandoff(intent: Intent): boolean {
 export function isContinuationResponse(intent: Intent): boolean {
   return intent === "confirmation" || intent === "denial";
 }
+
+const confirmPatterns = [
+  /^s[ií]$/i,
+  /^s[ií]\s+(por\s*favor|porfavor|porfa|claro|dale)$/i,
+  /^(ok|dale|claro|perfecto|listo|bueno|va|vamos|sale)$/i,
+  /^por\s*favor$/i,
+  /^(me\s+interesa|quiero|s[ií]\s+quiero)$/i,
+  /^claro\s+que\s+s[ií]$/i,
+  /^dale\s+s[ií]$/i,
+];
+
+export function isContinuationText(text: string): boolean {
+  const normalized = normalizeText(text).toLowerCase().trim();
+  return confirmPatterns.some((pattern) => pattern.test(normalized));
+}

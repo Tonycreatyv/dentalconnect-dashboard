@@ -127,7 +127,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setLoading(true);
 
       const [profileRes, membersRes, rel] = await Promise.all([
-        supabase.from("user_profiles").select("is_admin, default_org_id").eq("id", user.id).maybeSingle(),
+        supabase.from("user_profiles").select("is_admin, default_org_id").eq("user_id", user.id).maybeSingle(),
         supabase.from("org_members").select("organization_id, role").eq("user_id", user.id).order("created_at", { ascending: true }),
         supabase
           .from("clinic_users")
