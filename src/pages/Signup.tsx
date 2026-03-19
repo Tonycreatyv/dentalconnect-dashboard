@@ -48,7 +48,7 @@ export default function Signup() {
 
     // 2. Si Supabase devolvió sesión, ya estamos logueados
     if (signUpData.session) {
-      navigate("/settings", { replace: true });
+      navigate("/onboarding", { replace: true });
       return;
     }
 
@@ -66,7 +66,7 @@ export default function Signup() {
     }
 
     if (signInData.session) {
-      navigate("/settings", { replace: true });
+      navigate("/onboarding", { replace: true });
       return;
     }
 
@@ -79,7 +79,7 @@ export default function Signup() {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/settings` },
+      options: { redirectTo: `${window.location.origin}/onboarding` },
     });
     if (error) setError(error.message);
     setLoading(false);

@@ -51,6 +51,24 @@ export default function MetaCallback() {
 
         if (!mounted) return;
         const orgFromState = decodeOrgFromSignedState(state);
+        let storedRedirect = "";
+        try {
+          storedRedirect = localStorage.getItem("dc_post_meta_redirect") ?? "";
+          if (storedRedirect) {
+            localStorage.removeItem("dc_post_meta_redirect");
+          }
+        } catch {
+          storedRedirect = "";
+        }
+
+        if (storedRedirect) {
+          const target = new URL(storedRedirect, window.location.origin);
+          target.searchParams.set("connected", "1");
+          if (orgFromState) target.searchParams.set("org", orgFromState);
+          window.location.href = `${target.pathname}${target.search}`;
+          return;
+        }
+
         const redirectParams = new URLSearchParams({
           tab: "integraciones",
           connected: "1",

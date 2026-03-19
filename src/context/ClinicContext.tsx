@@ -164,7 +164,6 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       if (isAdminUser && defaultOrgId) orgCandidates.push(defaultOrgId);
       for (const id of memberOrgIds) orgCandidates.push(id);
       if (relOrgId) orgCandidates.push(relOrgId);
-      orgCandidates.push("clinic-demo");
 
       const uniqOrgIds = Array.from(new Set(orgCandidates.filter(Boolean)));
       const resolvedOrgId =
@@ -173,9 +172,9 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         memberOnlyOrgIds[0] ||
         memberOrgIds[0] ||
         relOrgId ||
-        "clinic-demo";
+        "";
 
-      const clinicForOrg = await resolveClinicByOrg(resolvedOrgId);
+      const clinicForOrg = resolvedOrgId ? await resolveClinicByOrg(resolvedOrgId) : null;
 
       if (!mounted) return;
 

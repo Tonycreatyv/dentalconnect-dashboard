@@ -13,6 +13,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Signup from "./pages/Signup";
 import MetaCallback from "./pages/MetaCallback";
+import Onboarding from "./pages/Onboarding";
 import Upgrade from "./pages/Upgrade";
 import Billing from "./pages/Billing";
 import BillingSuccess from "./pages/BillingSuccess";
@@ -20,6 +21,7 @@ import BillingCancel from "./pages/BillingCancel";
 import { AuthProvider } from "./context/AuthContext";
 import { ClinicProvider } from "./context/ClinicContext";
 import { useAuth } from "./context/AuthContext";
+import { useClinic } from "./context/ClinicContext";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { session, loading } = useAuth();
@@ -35,6 +37,25 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return children;
+}
+
+function RequireClinic({ children }: { children: JSX.Element }) {
+  const { clinic, loading } = useClinic();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1117] text-sm text-white/60">
+        Cargando…
+      </div>
+    );
+  }
+
+  if (!clinic) {
+    return <Navigate to="/onboarding" replace state={{ from: location.pathname }} />;
   }
 
   return children;
@@ -58,12 +79,23 @@ function AppRoutesInner() {
         }
       />
 
+      <Route
+        path="/onboarding"
+        element={
+          <RequireAuth>
+            <Onboarding />
+          </RequireAuth>
+        }
+      />
+
       {/* Protected routes */}
       <Route
         path="/"
         element={
           <RequireAuth>
-            <Layout />
+            <RequireClinic>
+              <Layout />
+            </RequireClinic>
           </RequireAuth>
         }
       >
