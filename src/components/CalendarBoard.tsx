@@ -781,6 +781,7 @@ export default function CalendarBoard() {
 
     const startISO = buildLocalISO(form.date, form.time);
     if (!startISO) return;
+    const endISO = new Date(new Date(startISO).getTime() + 30 * 60 * 1000).toISOString();
 
     setSaving(true);
 
@@ -788,6 +789,8 @@ export default function CalendarBoard() {
       const payload = {
         organization_id: ORG,
         start_at: startISO,
+        end_at: endISO,
+        ends_at: endISO,
         status: form.status,
         title: form.title.trim() || null,
         notes: form.notes.trim() || null,
@@ -822,6 +825,8 @@ export default function CalendarBoard() {
 
     const payload: Record<string, any> = {
       start_at: startISO,
+      end_at: endISO,
+      ends_at: endISO,
       status: form.status,
       title: form.title.trim() || null,
       notes: form.notes.trim() || null,
