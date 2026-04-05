@@ -49,7 +49,7 @@ const CLAIMED_SLOTS = 7;
 
 const PLANS = [
   {
-    id: "starter",
+    id: "starter", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/3d164ed5-85ac-4a42-a94c-a34ade5c4fc7",
     name: "Starter",
     price: 79,
     foundersPrice: 49,
@@ -58,7 +58,7 @@ const PLANS = [
     highlight: false,
   },
   {
-    id: "growth",
+    id: "growth", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/151e1ebc-2a05-4dc0-8ad0-c8d289ecaf9e",
     name: "Clínica",
     price: 149,
     foundersPrice: 89,
@@ -67,7 +67,7 @@ const PLANS = [
     highlight: true,
   },
   {
-    id: "pro",
+    id: "pro", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/b370f675-8b53-4bcb-b4ef-0546f4016675",
     name: "Elite",
     price: 249,
     foundersPrice: 149,
@@ -114,31 +114,12 @@ export default function Billing() {
     void load();
   }, [ORG]);
 
-  async function handleSubscribe(planId: string) {
-    setLoading(planId);
-    setError(null);
-    try {
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stripe-checkout`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ organization_id: ORG, plan: planId }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data.error ?? "Error al crear sesión de pago");
-      window.location.href = data.url;
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(null);
+  function handleSubscribe(planId: string) {
+    const plan = PLANS.find(p => p.id === planId);
+    if ((plan as any)?.checkoutUrl) {
+      window.location.href = (plan as any).checkoutUrl;
     }
   }
-
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
