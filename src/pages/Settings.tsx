@@ -1,10 +1,12 @@
+import WhatsAppConnect from "../components/WhatsAppConnect";
 // src/pages/Settings.tsx - DARK THEME
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { BadgeCheck, CalendarDays, Globe, Instagram, MessageCircle, MessagesSquare, PhoneCall, Check, X } from "lucide-react";
+import { BadgeCheck, CalendarDays, Globe, Instagram, Lock, MessageCircle, MessagesSquare, PhoneCall, Check, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { Toggle } from "../components/Toggle";
+import { BotKillSwitch } from "../components/BotKillSwitch";
 import { Modal } from "../components/ui/Modal";
 import { Toast, type ToastKind } from "../components/ui/Toast";
 import { startMetaOAuth } from "../components/integrations/ConnectMessengerButton";
@@ -20,7 +22,15 @@ type HoursMap = Record<string, DayHours>;
 
 type ClinicSettingsRow = { clinic_id: string; phone: string | null; address: string | null; google_maps_url: string | null; hours: any; services: ServiceItem[] | null; faqs: FaqItem[] | null; emergency: string | null; policies: any; updated_at: string | null; specialties: any };
 
-type OrgIntegrationState = { meta_page_id: string | null; messenger_enabled: boolean | null; meta_connected_at: string | null; meta_last_error: string | null };
+type OrgIntegrationState = {
+  meta_page_id: string | null;
+  messenger_enabled: boolean | null;
+  meta_connected_at: string | null;
+  meta_last_error: string | null;
+  whatsapp_enabled: boolean | null;
+  whatsapp_phone_number_id: string | null;
+  whatsapp_business_account_id: string | null;
+};
 
 const SPECIALTIES = [
   { value: "general", label: "Clínica general" },
@@ -52,7 +62,7 @@ function defaultHours(): HoursMap {
 
 const dayLabels: Record<string, string> = { mon: "Lunes", tue: "Martes", wed: "Miércoles", thu: "Jueves", fri: "Viernes", sat: "Sábado", sun: "Domingo" };
 
-type TabKey = "integraciones" | "clinica" | "horario" | "servicios" | "faqs";
+type TabKey = "integraciones" | "clinica" | "horario" | "servicios" | "faqs" | "cuenta";
 
 const INTEGRATIONS = [
   { key: "messenger" as const, name: "Messenger", description: "Centraliza mensajes de Facebook.", icon: MessagesSquare },
@@ -85,10 +95,22 @@ export default function Settings() {
   const [policiesCancel, setPoliciesCancel] = useState("Avisa con 2 horas de anticipación.");
   const [policiesDeposit, setPoliciesDeposit] = useState("Algunos tratamientos requieren depósito.");
 
-  const [orgIntegration, setOrgIntegration] = useState<OrgIntegrationState>({ meta_page_id: null, messenger_enabled: false, meta_connected_at: null, meta_last_error: null });
+  const [orgIntegration, setOrgIntegration] = useState<OrgIntegrationState>({
+    meta_page_id: null,
+    messenger_enabled: false,
+    meta_connected_at: null,
+    meta_last_error: null,
+    whatsapp_enabled: false,
+    whatsapp_phone_number_id: null,
+    whatsapp_business_account_id: null,
+  });
   const [guideOpen, setGuideOpen] = useState<string | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [waitlistEmail, setWaitlistEmail] = useState("");
+
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -103,10 +125,22 @@ export default function Settings() {
   }, [location.pathname, location.search, navigate]);
 
   async function loadOrgIntegration() {
-    const res = await supabase.from("org_settings").select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error").eq("organization_id", ORG).limit(1);
+    const res = await supabase
+      .from("org_settings")
+      .select("meta_page_id, messenger_enabled, meta_connected_at, meta_last_error, whatsapp_enabled, whatsapp_phone_number_id, whatsapp_business_account_id")
+      .eq("organization_id", ORG)
+      .limit(1);
     if (!res.error && res.data?.[0]) {
       const s = res.data[0] as any;
-      setOrgIntegration({ meta_page_id: s.meta_page_id ?? null, messenger_enabled: s.messenger_enabled ?? false, meta_connected_at: s.meta_connected_at ?? null, meta_last_error: s.meta_last_error ?? null });
+      setOrgIntegration({
+        meta_page_id: s.meta_page_id ?? null,
+        messenger_enabled: s.messenger_enabled ?? false,
+        meta_connected_at: s.meta_connected_at ?? null,
+        meta_last_error: s.meta_last_error ?? null,
+        whatsapp_enabled: s.whatsapp_enabled ?? false,
+        whatsapp_phone_number_id: s.whatsapp_phone_number_id ?? null,
+        whatsapp_business_account_id: s.whatsapp_business_account_id ?? null,
+      });
     }
   }
 
@@ -182,11 +216,26 @@ export default function Settings() {
     if (res.error) { setToast({ kind: "error", message: "No se pudo registrar." }); } else { setToast({ kind: "success", message: "Te avisaremos." }); setWaitlistEmail(""); setWaitlistOpen(false); }
   }
 
+  async function savePassword() {
+    if (!newPassword.trim()) { setToast({ kind: "error", message: "Ingresa una contraseña." }); return; }
+    if (newPassword.length < 8) { setToast({ kind: "error", message: "Mínimo 8 caracteres." }); return; }
+    if (newPassword !== confirmPassword) { setToast({ kind: "error", message: "Las contraseñas no coinciden." }); return; }
+    setSavingPassword(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) { setToast({ kind: "error", message: "Error al cambiar contraseña." }); }
+    else { setToast({ kind: "success", message: "Contraseña actualizada." }); setNewPassword(""); setConfirmPassword(""); }
+    setSavingPassword(false);
+  }
+
   function statusFor(channel: string) {
     if (channel === "google_calendar") return { label: "Próximamente", status: "disconnected" as const, disabled: true };
     if (channel === "messenger") {
       const connected = !!orgIntegration.meta_page_id && orgIntegration.messenger_enabled;
       return { label: connected ? "Conectado" : "No conectado", status: connected ? "connected" as const : "disconnected" as const, disabled: false };
+    }
+    if (channel === "whatsapp") {
+      const connected = !!orgIntegration.whatsapp_phone_number_id && !!orgIntegration.whatsapp_business_account_id && orgIntegration.whatsapp_enabled;
+      return { label: connected ? "Conectado" : "No conectado", status: connected ? "connected" as const : "warning" as const, disabled: false };
     }
     return { label: "No conectado", status: "disconnected" as const, disabled: false };
   }
@@ -197,14 +246,17 @@ export default function Settings() {
     { key: "horario" as const, label: "Horario" },
     { key: "servicios" as const, label: "Servicios" },
     { key: "faqs" as const, label: "FAQs" },
+    { key: "cuenta" as const, label: "Cuenta" },
   ];
 
   const renderIntegrations = () => (
     <div className="space-y-4">
+      <BotKillSwitch orgId={ORG} />
       {INTEGRATIONS.map((integration) => {
         const status = statusFor(integration.key);
         const Icon = integration.icon;
         const isMessenger = integration.key === "messenger";
+        const isWhatsApp = integration.key === "whatsapp";
         const isDisabled = integration.key === "google_calendar";
         return (
           <div key={integration.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -225,6 +277,8 @@ export default function Settings() {
                 <button onClick={disconnectMessenger} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Desconectar</button>
               ) : isMessenger ? (
                 <button onClick={connectMeta} className="px-4 py-2 rounded-xl bg-[#3CBDB9] text-[#0B1117] text-sm font-semibold hover:bg-[#3CBDB9]/90">Conectar</button>
+              ) : isWhatsApp && status.status !== "connected" ? (
+                <WhatsAppConnect organizationId={ORG} onConnected={() => loadSettings()} />
               ) : isDisabled ? (
                 <button onClick={() => setWaitlistOpen(true)} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Lista de espera</button>
               ) : (
@@ -233,6 +287,9 @@ export default function Settings() {
             </div>
             {isMessenger && orgIntegration.meta_page_id && (
               <div className="mt-3 text-xs text-white/40">Page: {orgIntegration.meta_page_id.slice(0, 8)}... {orgIntegration.meta_connected_at && `• ${new Date(orgIntegration.meta_connected_at).toLocaleDateString()}`}</div>
+            )}
+            {isWhatsApp && orgIntegration.whatsapp_phone_number_id && (
+              <div className="mt-3 text-xs text-white/40">Phone ID: {orgIntegration.whatsapp_phone_number_id.slice(0, 8)}... {orgIntegration.whatsapp_business_account_id && `• WABA ${orgIntegration.whatsapp_business_account_id.slice(0, 8)}...`}</div>
             )}
           </div>
         );
@@ -366,6 +423,33 @@ export default function Settings() {
     </div>
   );
 
+  const renderCuenta = () => (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/5 border border-white/10">
+            <Lock className="h-5 w-5 text-white/70" />
+          </div>
+          <div>
+            <div className="font-semibold text-white">Cambiar contraseña</div>
+            <div className="text-sm text-white/50">Actualiza tu contraseña de acceso.</div>
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-white/60 mb-2">Nueva contraseña</label>
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder="Mínimo 8 caracteres" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-white/60 mb-2">Confirmar contraseña</label>
+          <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder="Repite la contraseña" />
+        </div>
+        <button onClick={savePassword} disabled={savingPassword || !newPassword.trim()} className={`px-4 py-2 rounded-xl text-sm font-semibold ${newPassword.trim() ? "bg-[#3CBDB9] text-[#0B1117] hover:bg-[#3CBDB9]/90" : "bg-white/10 text-white/40"}`}>
+          {savingPassword ? "Guardando..." : "Cambiar contraseña"}
+        </button>
+      </div>
+    </div>
+  );
+
   if (loading) return <div className="py-20 text-center text-white/50">Cargando...</div>;
 
   return (
@@ -385,6 +469,7 @@ export default function Settings() {
       {tab === "horario" && renderHorario()}
       {tab === "servicios" && renderServicios()}
       {tab === "faqs" && renderFaqs()}
+      {tab === "cuenta" && renderCuenta()}
 
       <Modal open={guideOpen !== null} title="Guía de integración" description="Pasos para conectar." onClose={() => setGuideOpen(null)} actions={<button onClick={() => setGuideOpen(null)} className="rounded-xl bg-[#3CBDB9] px-4 py-2 text-sm font-medium text-white hover:bg-[#35a9a5]">Entendido</button>}>
         <div className="space-y-3 text-sm text-white/70">

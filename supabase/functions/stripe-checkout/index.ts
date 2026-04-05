@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     params.set("subscription_data[metadata][organization_id]", organizationId);
     params.set("subscription_data[metadata][plan]", plan);
     if (customerId) params.set("customer", customerId);
-    if (!customerId) params.set("customer_creation", "always");
+    // customer auto-created in subscription mode
 
     const checkoutRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",

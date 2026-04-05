@@ -1,79 +1,80 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { 
-  ArrowLeft, Check, Crown, Zap, Shield, Clock, 
-  MessageCircle, Calendar, TrendingUp, Star, Users,
-  ChevronRight, Sparkles, Lock
+import {
+  Check, Shield, Clock, MessageCircle, Calendar,
+  TrendingUp, Users, Sparkles, Zap, Lock,
+  Bot, Bell, BarChart3, Headphones, Star
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
+import PageHeader from "../components/PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
-
-type Plan = "starter" | "growth" | "pro";
 type BillingStatus = "trialing" | "active" | "past_due" | "canceled";
+
+const FEATURES = [
+  { icon: Bot, text: "Asistente IA 24/7 en Messenger y WhatsApp" },
+  { icon: MessageCircle, text: "Inbox centralizado — todos los mensajes en un solo lugar" },
+  { icon: Calendar, text: "Agenda inteligente con vista día, semana y mes" },
+  { icon: Bell, text: "Recordatorios automáticos 72h, 24h y 2h antes" },
+  { icon: Users, text: "CRM de pacientes con historial completo" },
+  { icon: TrendingUp, text: "Leads ilimitados — nunca pierdas un paciente" },
+  { icon: Sparkles, text: "Marketing IA — genera contenido para redes" },
+  { icon: BarChart3, text: "Reportes y métricas de tu clínica" },
+  { icon: Zap, text: "Automatizaciones y follow-ups inteligentes" },
+  { icon: Headphones, text: "Soporte dedicado" },
+];
+
+const COMPARISON = [
+  { label: "Responde 24/7", creatyv: true, recep: false, agency: false },
+  { label: "Agenda citas automáticamente", creatyv: true, recep: true, agency: false },
+  { label: "Recordatorios automáticos", creatyv: true, recep: false, agency: true },
+  { label: "CRM de pacientes", creatyv: true, recep: false, agency: false },
+  { label: "Messenger + WhatsApp", creatyv: true, recep: false, agency: true },
+  { label: "Marketing IA", creatyv: true, recep: false, agency: true },
+  { label: "Reportes y métricas", creatyv: true, recep: false, agency: true },
+  { label: "Nunca se enferma ni falta", creatyv: true, recep: false, agency: false },
+];
+
+const FAQ = [
+  { q: "¿Qué pasa si cancelo?", a: "Sin contratos ni penalidades. Cancelás cuando quieras y tu clínica sigue funcionando hasta el final del período pagado." },
+  { q: "¿Qué pasa después de los 12 meses del founders price?", a: "El precio pasa al plan regular. Pero si renovás antes de que se cumpla el año, te mantenemos el precio." },
+  { q: "¿Necesito WhatsApp Business?", a: "No. Podés empezar solo con Messenger o usar la app como calendario y CRM sin ningún canal de mensajería." },
+  { q: "¿Cuánto tarda la configuración?", a: "Menos de 15 minutos. Conectás tu página de Facebook, configurás horarios y servicios, y el bot empieza a responder." },
+  { q: "¿Mis datos están seguros?", a: "Sí. Usamos cifrado SSL y Row Level Security. Tus datos son tuyos y nunca los compartimos." },
+];
+
+const TOTAL_SLOTS = 10;
+const CLAIMED_SLOTS = 7;
 
 const PLANS = [
   {
-    id: "starter" as Plan,
+    id: "starter",
     name: "Starter",
-    price: 49,
-    period: "mes",
-    description: "Perfecto para empezar",
+    price: 79,
+    foundersPrice: 49,
+    description: "1 doctor, Messenger incluido",
+    features: ["1 doctor", "Messenger", "Reminders automáticos", "CRM básico", "Soporte por email"],
     highlight: false,
-    features: [
-      { text: "Inbox centralizado", included: true },
-      { text: "Agenda inteligente", included: true },
-      { text: "Hasta 100 leads/mes", included: true },
-      { text: "Reportes básicos", included: true },
-      { text: "Automatizaciones IA", included: false },
-      { text: "Marketing IA", included: false },
-    ],
   },
   {
-    id: "growth" as Plan,
-    name: "Growth",
-    price: 99,
-    period: "mes",
-    description: "El más popular",
+    id: "growth",
+    name: "Clínica",
+    price: 149,
+    foundersPrice: 89,
+    description: "Hasta 4 doctores, WhatsApp + Messenger",
+    features: ["Hasta 4 doctores", "WhatsApp + Messenger", "Reminders 72h/24h/2h", "CRM completo", "Reportes", "Soporte prioritario"],
     highlight: true,
-    badge: "Recomendado",
-    features: [
-      { text: "Todo de Starter", included: true },
-      { text: "Leads ilimitados", included: true },
-      { text: "Automatizaciones IA", included: true },
-      { text: "Integraciones sociales", included: true },
-      { text: "Seguimiento avanzado", included: true },
-      { text: "Marketing IA básico", included: true },
-    ],
   },
   {
-    id: "pro" as Plan,
-    name: "Pro",
-    price: 199,
-    period: "mes",
-    description: "Máximo poder",
+    id: "pro",
+    name: "Elite",
+    price: 249,
+    foundersPrice: 149,
+    description: "Doctores ilimitados, todo incluido",
+    features: ["Doctores ilimitados", "WhatsApp + Messenger", "Google Calendar sync", "Marketing IA", "Analíticas avanzadas", "Soporte VIP 24/7"],
     highlight: false,
-    features: [
-      { text: "Todo de Growth", included: true },
-      { text: "Marketing IA completo", included: true },
-      { text: "Workflows automáticos", included: true },
-      { text: "API access", included: true },
-      { text: "Soporte prioritario", included: true },
-      { text: "Onboarding dedicado", included: true },
-    ],
   },
-];
-
-const TESTIMONIALS = [
-  { name: "Dra. María García", clinic: "Clínica Dental Sonrisas", text: "Reducimos los no-shows en un 60% desde que usamos Creatyv.", avatar: "M" },
-  { name: "Dr. Carlos López", clinic: "Centro Dental Premium", text: "El bot responde 24/7 y mis pacientes están más satisfechos.", avatar: "C" },
-];
-
-const TRUST_BADGES = [
-  { icon: Shield, text: "Datos seguros" },
-  { icon: Lock, text: "Cifrado SSL" },
-  { icon: Clock, text: "Soporte 24/7" },
 ];
 
 export default function Billing() {
@@ -81,12 +82,15 @@ export default function Billing() {
   const { clinic } = useClinic();
   const ORG = clinic?.organization_id ?? DEFAULT_ORG;
 
-  const [selectedPlan, setSelectedPlan] = useState<Plan>("growth");
-  const [currentPlan, setCurrentPlan] = useState<Plan | null>(null);
   const [status, setStatus] = useState<BillingStatus | null>(null);
+  const [currentPlan, setCurrentPlan] = useState<string | null>(null);
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isFounders, setIsFounders] = useState(true);
+
+  const spotsLeft = TOTAL_SLOTS - CLAIMED_SLOTS;
+  const progressPercent = (CLAIMED_SLOTS / TOTAL_SLOTS) * 100;
 
   const trialDaysLeft = useMemo(() => {
     if (!trialEndsAt) return null;
@@ -101,300 +105,231 @@ export default function Billing() {
         .select("plan, status, trial_ends_at")
         .eq("organization_id", ORG)
         .maybeSingle();
-
       if (!sub.error && sub.data) {
-        const plan = sub.data.plan as Plan;
-        if (["starter", "growth", "pro"].includes(plan)) {
-          setCurrentPlan(plan);
-          setSelectedPlan(plan);
-        }
         setStatus(sub.data.status as BillingStatus);
-        setTrialEndsAt(sub.data.trial_ends_at);
+        setCurrentPlan(sub.data.plan);
+        setTrialEndsAt(sub.data.trial_ends_at ?? null);
       }
     }
-    load();
+    void load();
   }, [ORG]);
 
-  async function startCheckout() {
+  async function handleSubscribe(planId: string) {
+    setLoading(planId);
     setError(null);
-    setLoading(true);
-
-    const res = await supabase.functions.invoke("stripe-checkout", {
-      body: { organization_id: ORG, plan: selectedPlan },
-    });
-
-    setLoading(false);
-
-    if (res.error || !res.data?.url) {
-      setError("No se pudo iniciar el pago. Por favor intenta nuevamente.");
-      return;
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stripe-checkout`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ organization_id: ORG, plan: planId }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Error al crear sesión de pago");
+      window.location.href = data.url;
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(null);
     }
-
-    window.location.href = res.data.url;
   }
 
-  const selectedPlanData = PLANS.find(p => p.id === selectedPlan)!;
-
   return (
-    <div className="min-h-screen bg-[#0B1117] text-white">
-      {/* Header */}
-      <div className="sticky top-0 z-20 border-b border-white/10 bg-[#0B1117]/90 backdrop-blur-lg safe-area-top">
-        <div className="flex items-center gap-3 px-4 py-4 max-w-5xl mx-auto">
-          <button onClick={() => navigate("/overview")} className="flex items-center justify-center w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 transition">
-            <ArrowLeft className="h-5 w-5 text-white/80" />
-          </button>
-          <div>
-            <h1 className="text-xl font-bold text-white">Elige tu plan</h1>
-            <p className="text-sm text-white/50">Prueba gratis por 14 días</p>
+    <div className="space-y-6 pb-12">
+      <PageHeader
+        title="Plan y Facturación"
+        subtitle="Un solo sistema. Todo incluido. Sin sorpresas."
+      />
+
+      {status === "trialing" && trialDaysLeft !== null && (
+        <div className="rounded-2xl border border-[#3CBDB9]/30 bg-[#3CBDB9]/10 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-[#3CBDB9]">Período de prueba activo</div>
+              <div className="mt-1 text-sm text-white/60">
+                Te quedan <span className="font-bold text-white">{trialDaysLeft} días</span> de prueba gratuita.
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Founders toggle */}
+      <div className="flex items-center justify-center gap-4">
+        <span className={`text-sm ${!isFounders ? "text-white" : "text-white/40"}`}>Precio regular</span>
+        <button
+          onClick={() => setIsFounders(!isFounders)}
+          className={`relative h-7 w-14 rounded-full border transition-all duration-300 ${isFounders ? "border-[#3CBDB9]/60 bg-[#3CBDB9]/20" : "border-white/10 bg-white/5"}`}
+        >
+          <span className={`absolute top-0.5 h-6 w-6 rounded-full transition-all duration-300 ${isFounders ? "left-7 bg-[#59E0B8] shadow-[0_0_10px_rgba(89,224,184,0.5)]" : "left-0.5 bg-white/50"}`} />
+        </button>
+        <span className={`text-sm flex items-center gap-1 ${isFounders ? "text-[#59E0B8] font-semibold" : "text-white/40"}`}>
+          <Star className="h-3 w-3" /> Founders Price
+        </span>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 py-6 space-y-8">
-        {/* Current status banner */}
-        {status === "trialing" && trialDaysLeft !== null && (
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-4 text-white">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-white/20">
-                <Clock className="h-6 w-6" />
-              </div>
-              <div>
-                <div className="font-semibold">Tu prueba gratis está activa</div>
-                <div className="text-sm text-white/80">Te quedan {trialDaysLeft} días. Elige un plan para continuar.</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {status === "past_due" && (
-          <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-4 text-white">
-            <div className="flex items-center gap-3">
-              <Zap className="h-6 w-6" />
-              <div>
-                <div className="font-semibold">Tu prueba terminó</div>
-                <div className="text-sm text-white/80">Activa un plan para seguir usando todas las funciones.</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Value proposition */}
-        <div className="text-center py-4">
-          <h2 className="mb-2 text-2xl font-bold text-white">
-            La recepcionista que nunca duerme
-          </h2>
-          <p className="mx-auto max-w-xl text-white/60">
-            Automatiza respuestas, reduce no-shows y llena tu agenda sin esfuerzo.
-            Únete a +100 clínicas que ya confían en nosotros.
-          </p>
+      {/* Urgency bar */}
+      <div className="rounded-2xl border border-[#3CBDB9]/20 bg-[#3CBDB9]/5 px-6 py-4">
+        <div className="flex justify-between text-xs mb-2">
+          <span className="text-white/50">Espacios founders ocupados</span>
+          <span className="text-[#3CBDB9] font-semibold">⚡ Solo quedan {spotsLeft} espacios</span>
         </div>
+        <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+          <div className="h-full rounded-full bg-gradient-to-r from-[#3CBDB9] to-[#34d399] transition-all" style={{ width: `${progressPercent}%` }} />
+        </div>
+        <div className="mt-2 text-xs text-white/30">2 clínicas evaluando este plan esta semana · Última registrada hace 2 días</div>
+      </div>
 
-        {/* Plans */}
-        <div className="grid md:grid-cols-3 gap-4">
-          {PLANS.map((plan) => {
-            const isSelected = selectedPlan === plan.id;
-            const isCurrent = currentPlan === plan.id;
+      {/* Plans grid */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {PLANS.map((plan) => {
+          const price = isFounders ? plan.foundersPrice : plan.price;
+          const isActive = currentPlan === plan.id && (status === "active" || status === "trialing");
 
-            return (
-              <button
-                key={plan.id}
-                onClick={() => setSelectedPlan(plan.id)}
-                className={`relative text-left rounded-2xl border-2 p-5 transition-all ${
-                  isSelected
-                    ? plan.highlight
-                      ? "border-blue-400/20 bg-blue-500/10 shadow-none"
-                      : "border-white/10 bg-white/5 shadow-none"
-                    : "border-white/10 bg-white/5 hover:bg-white/10"
-                }`}
-              >
-                {/* Badge */}
-                {plan.badge && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-blue-600 text-white text-xs font-semibold">
-                      <Star className="h-3 w-3" />
-                      {plan.badge}
-                    </span>
-                  </div>
-                )}
-
-                {/* Current badge */}
-                {isCurrent && (
-                  <div className="absolute top-3 right-3">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-                      Actual
-                    </span>
-                  </div>
-                )}
-
-                <div className="mb-4">
-                  <div className="text-lg font-bold text-white">{plan.name}</div>
-                  <div className="text-sm text-white/50">{plan.description}</div>
+          return (
+            <div
+              key={plan.id}
+              className={`relative rounded-2xl border p-6 transition-all ${
+                plan.highlight
+                  ? "border-[#3CBDB9] bg-gradient-to-b from-[#3CBDB9]/10 to-transparent"
+                  : "border-white/10 bg-white/5"
+              }`}
+            >
+              {plan.highlight && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#3CBDB9] px-4 py-1 text-[10px] font-bold uppercase tracking-wider text-[#0B1117]">
+                  Más popular
                 </div>
+              )}
 
-                <div className="mb-4">
-                  <span className="text-3xl font-bold text-white">${plan.price}</span>
-                  <span className="text-white/50">/{plan.period}</span>
-                </div>
-
-                <div className="space-y-2">
-                  {plan.features.map((feature, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <div className={`flex items-center justify-center w-5 h-5 rounded-full ${feature.included ? "bg-emerald-500/10" : "bg-white/10"}`}>
-                        {feature.included ? (
-                          <Check className="h-3 w-3 text-emerald-400" />
-                        ) : (
-                          <span className="h-0.5 w-1.5 rounded-full bg-white/30" />
-                        )}
-                      </div>
-                      <span className={`text-sm ${feature.included ? "text-white/80" : "text-white/40"}`}>
-                        {feature.text}
+              <div className="space-y-4">
+                <div>
+                  <div className="text-sm font-semibold text-white/50 uppercase tracking-wider">{plan.name}</div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-4xl font-extrabold text-white">${price}</span>
+                    <span className="text-white/40">/mes</span>
+                  </div>
+                  {isFounders && (
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="text-xs text-white/30 line-through">${plan.price}/mes</span>
+                      <span className="rounded-full bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+                        Founders price
                       </span>
                     </div>
+                  )}
+                  <div className="mt-1 text-xs text-white/40">{plan.description}</div>
+                </div>
+
+                <ul className="space-y-2">
+                  {plan.features.map((f, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm text-white/60">
+                      <Check className="h-3.5 w-3.5 shrink-0 text-[#3CBDB9]" />
+                      {f}
+                    </li>
                   ))}
-                </div>
+                </ul>
 
-                {/* Selection indicator */}
-                <div className={`mt-4 flex items-center justify-center h-10 rounded-xl font-medium text-sm transition ${
-                  isSelected
-                    ? "bg-[#3CBDB9] text-white"
-                    : "bg-white/10 text-white/50"
-                }`}>
-                  {isSelected ? "Seleccionado" : "Seleccionar"}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Summary and CTA */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-none">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div>
-              <div className="mb-1 text-sm text-white/50">Plan seleccionado</div>
-              <div className="text-2xl font-bold text-white">
-                {selectedPlanData.name} - ${selectedPlanData.price}/mes
-              </div>
-              <div className="mt-1 text-sm font-medium text-emerald-400">
-                ✓ 14 días de prueba gratis incluidos
-              </div>
-            </div>
-
-            <button
-              onClick={startCheckout}
-              disabled={loading}
-              className="flex items-center justify-center gap-2 h-14 px-8 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-lg hover:opacity-90 disabled:opacity-50 transition shadow-none shadow-blue-200"
-            >
-              {loading ? (
-                "Procesando..."
-              ) : (
-                <>
-                  Comenzar prueba gratis
-                  <ChevronRight className="h-5 w-5" />
-                </>
-              )}
-            </button>
-          </div>
-
-          {error && (
-            <div className="mb-4 rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-sm text-rose-400">
-              {error}
-            </div>
-          )}
-
-          {/* Trust badges */}
-          <div className="flex items-center justify-center gap-6 border-t border-white/10 pt-4">
-            {TRUST_BADGES.map((badge, idx) => {
-              const Icon = badge.icon;
-              return (
-                <div key={idx} className="flex items-center gap-2 text-sm text-white/50">
-                  <Icon className="h-4 w-4" />
-                  <span>{badge.text}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Features highlight */}
-        <div className="grid md:grid-cols-3 gap-4">
-          {[
-            { icon: MessageCircle, title: "Bot 24/7", description: "Responde automáticamente mientras duermes" },
-            { icon: Calendar, title: "Menos no-shows", description: "Confirmaciones automáticas reducen cancelaciones" },
-            { icon: TrendingUp, title: "Más pacientes", description: "Convierte leads en citas sin esfuerzo" },
-          ].map((item, idx) => {
-            const Icon = item.icon;
-            return (
-              <div key={idx} className="rounded-xl border border-white/10 bg-white/5 p-4">
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
-                  <Icon className="h-5 w-5" />
-                </div>
-                <div className="mb-1 font-semibold text-white">{item.title}</div>
-                <div className="text-sm text-white/50">{item.description}</div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Testimonials */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="text-center mb-6">
-            <div className="flex items-center justify-center gap-1 mb-2">
-              {[1,2,3,4,5].map(i => <Star key={i} className="h-5 w-5 text-amber-400 fill-amber-400" />)}
-            </div>
-            <div className="text-sm text-white/60">+100 clínicas confían en nosotros</div>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-4">
-            {TESTIMONIALS.map((t, idx) => (
-              <div key={idx} className="rounded-xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10 font-bold text-blue-400">
-                    {t.avatar}
+                {isActive ? (
+                  <div className="w-full rounded-xl border border-emerald-400/20 bg-emerald-500/10 py-3 text-center text-sm font-semibold text-emerald-400">
+                    ✓ Plan activo
                   </div>
-                  <div>
-                    <div className="font-semibold text-white">{t.name}</div>
-                    <div className="mb-2 text-xs text-white/50">{t.clinic}</div>
-                    <div className="text-sm text-white/80">"{t.text}"</div>
-                  </div>
-                </div>
+                ) : (
+                  <button
+                    onClick={() => handleSubscribe(plan.id)}
+                    disabled={loading === plan.id}
+                    className={`w-full rounded-xl py-3 text-sm font-bold transition-colors disabled:opacity-50 ${
+                      plan.highlight
+                        ? "bg-[#3CBDB9] text-[#0B1117] hover:bg-[#35a9a5]"
+                        : "border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                    }`}
+                  >
+                    {loading === plan.id ? "Procesando..." : "Empezar 14 días gratis"}
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          );
+        })}
+      </div>
 
-        {/* FAQ */}
-        <div className="space-y-4">
-          <h3 className="text-center text-lg font-bold text-white">Preguntas frecuentes</h3>
-          {[
-            { q: "¿Puedo cancelar cuando quiera?", a: "Sí, puedes cancelar en cualquier momento. Sin contratos ni penalidades." },
-            { q: "¿Qué pasa después de los 14 días?", a: "Se cobra el plan elegido. Si cancelas antes, no se cobra nada." },
-            { q: "¿Necesito tarjeta de crédito para la prueba?", a: "Sí, pero no se hace ningún cobro hasta que termine la prueba." },
-          ].map((faq, idx) => (
-            <details key={idx} className="group rounded-xl border border-white/10 bg-white/5 p-4">
-              <summary className="flex cursor-pointer list-none items-center justify-between font-medium text-white">
-                {faq.q}
-                <ChevronRight className="h-4 w-4 text-white/40 transition-transform group-open:rotate-90" />
-              </summary>
-              <p className="mt-2 text-sm text-white/60">{faq.a}</p>
-            </details>
+      <div className="text-center text-xs text-white/30">
+        14 días gratis en todos los planes · Sin contratos · Cancelá cuando quieras
+      </div>
+
+      {/* Features */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-8">
+        <div className="text-lg font-bold text-white mb-1">Todo incluido en todos los planes</div>
+        <div className="text-sm text-white/50 mb-6">Sin upgrades, sin features bloqueados.</div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {FEATURES.map((feature, i) => (
+            <div key={i} className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#3CBDB9]/10">
+                <feature.icon className="h-4 w-4 text-[#3CBDB9]" />
+              </div>
+              <span className="text-sm text-white/70 leading-relaxed">{feature.text}</span>
+            </div>
           ))}
         </div>
+      </div>
 
-        {/* Final CTA */}
-        <div className="text-center py-8">
-          <button
-            onClick={startCheckout}
-            disabled={loading}
-            className="inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-[#3CBDB9] px-8 text-lg font-semibold text-white transition hover:bg-[#35a9a5] disabled:opacity-50"
-          >
-            <Sparkles className="h-5 w-5" />
-            Comenzar ahora
-          </button>
-          <p className="mt-3 text-sm text-white/50">
-            Sin riesgos. Cancela cuando quieras.
-          </p>
+      {/* Comparison */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-8">
+        <div className="text-lg font-bold text-white mb-6">¿Por qué Creatyv?</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className="text-left py-3 pr-4 text-white/50 font-medium">Característica</th>
+                <th className="py-3 px-4 text-center"><span className="text-[#3CBDB9] font-bold">Creatyv</span><div className="text-white/30 text-xs mt-0.5">$79-249/mes</div></th>
+                <th className="py-3 px-4 text-center"><span className="text-white/50 font-medium">Recepcionista</span><div className="text-white/30 text-xs mt-0.5">$400-600/mes</div></th>
+                <th className="py-3 px-4 text-center"><span className="text-white/50 font-medium">Agencia</span><div className="text-white/30 text-xs mt-0.5">$300-800/mes</div></th>
+              </tr>
+            </thead>
+            <tbody className="text-white/60">
+              {COMPARISON.map((row, i) => (
+                <tr key={i} className="border-b border-white/5">
+                  <td className="py-3 pr-4">{row.label}</td>
+                  <td className="py-3 px-4 text-center">{row.creatyv ? <Check className="h-4 w-4 text-[#3CBDB9] mx-auto" /> : <span className="text-white/20">—</span>}</td>
+                  <td className="py-3 px-4 text-center">{row.recep ? <Check className="h-4 w-4 text-white/30 mx-auto" /> : <span className="text-white/20">—</span>}</td>
+                  <td className="py-3 px-4 text-center">{row.agency ? <Check className="h-4 w-4 text-white/30 mx-auto" /> : <span className="text-white/20">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-6">
+        {[{ icon: Shield, text: "Datos seguros" }, { icon: Lock, text: "Cifrado SSL" }, { icon: Clock, text: "Soporte incluido" }].map((badge, i) => (
+          <div key={i} className="flex items-center gap-2 text-white/30 text-sm">
+            <badge.icon className="h-4 w-4" />
+            <span>{badge.text}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* FAQ */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-8">
+        <div className="text-lg font-bold text-white mb-6">Preguntas frecuentes</div>
+        <div className="space-y-6">
+          {FAQ.map(({ q, a }, i) => (
+            <div key={i}>
+              <div className="text-sm font-semibold text-white">{q}</div>
+              <div className="mt-1 text-sm text-white/50 leading-relaxed">{a}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+          {error}
+        </div>
+      )}
     </div>
   );
 }

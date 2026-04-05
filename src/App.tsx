@@ -18,6 +18,8 @@ import Upgrade from "./pages/Upgrade";
 import Billing from "./pages/Billing";
 import BillingSuccess from "./pages/BillingSuccess";
 import BillingCancel from "./pages/BillingCancel";
+import WhatsAppTemplates from "./pages/WhatsAppTemplates";
+import CommandCenter from "./pages/CommandCenter";
 import { AuthProvider } from "./context/AuthContext";
 import { ClinicProvider } from "./context/ClinicContext";
 import { useAuth } from "./context/AuthContext";
@@ -112,9 +114,11 @@ function AppRoutesInner() {
         <Route path="patients" element={<Patients />} />
         <Route path="settings" element={<Settings />} />
         <Route path="settings/integrations" element={<Settings />} />
+        <Route path="whatsapp-templates" element={<WhatsAppTemplates />} />
         <Route path="billing" element={<Billing />} />
         <Route path="billing/success" element={<BillingSuccess />} />
         <Route path="billing/cancel" element={<BillingCancel />} />
+        <Route path="command" element={<CommandCenter />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/hoy" replace />} />

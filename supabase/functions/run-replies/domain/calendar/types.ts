@@ -1,3 +1,5 @@
+export type CalendarProvider = "google";
+
 export type CreateCalendarEventInput = {
   organization_id: string;
   calendar_id: string;
@@ -14,7 +16,7 @@ export type CreateCalendarEventInput = {
 export type CreateCalendarEventResult = {
   success: boolean;
   event_id?: string;
-  provider: string;
+  provider: CalendarProvider;
   error?: string;
 };
 
@@ -29,7 +31,7 @@ export type UpdateCalendarEventInput = {
 
 export type UpdateCalendarEventResult = {
   success: boolean;
-  provider: string;
+  provider: CalendarProvider;
   error?: string;
 };
 
@@ -40,6 +42,6 @@ export type CancelCalendarEventInput = {
 
 export type CancelCalendarEventResult = {
   success: boolean;
-  provider: string;
+  provider: CalendarProvider;
   error?: string;
 };

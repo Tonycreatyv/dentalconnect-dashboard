@@ -35,12 +35,15 @@ function psidSuffix(psid: string) {
   return digits.slice(-4).padStart(4, "0");
 }
 
-type MessengerEvent = {
-  page_id: string;
-  psid: string;
+type InboundEvent = {
+  channel: "messenger" | "whatsapp";
+  page_id?: string;
+  phone_number_id?: string;
+  sender_id: string;
   mid: string;
   text: string;
   timestamp: number;
+  sender_name?: string | null;
 };
 
 function normalizePsid(input: unknown) {
@@ -79,8 +82,8 @@ function collectTesterPsids(target: Set<string>, raw: unknown) {
   }
 }
 
-function extractMessengerTextEvents(body: any): MessengerEvent[] {
-  const events: MessengerEvent[] = [];
+function extractMessengerTextEvents(body: any): InboundEvent[] {
+  const events: InboundEvent[] = [];
   const entries = Array.isArray(body?.entry) ? body.entry : [];
 
   for (const entry of entries) {
@@ -98,14 +101,50 @@ function extractMessengerTextEvents(body: any): MessengerEvent[] {
       if (typeof text !== "string" || !text.trim()) continue;
 
       events.push({
+        channel: "messenger",
         page_id: pageId,
-        psid: String(psid),
+        sender_id: String(psid),
         mid: String(mid),
         text: text.trim(),
         timestamp: Number(ts),
       });
     }
   }
+  return events;
+}
+
+function extractWhatsAppTextEvents(body: any): InboundEvent[] {
+  const events: InboundEvent[] = [];
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
+
+  for (const entry of entries) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    for (const change of changes) {
+      if (String(change?.field ?? "") !== "messages") continue;
+      const value = change?.value ?? {};
+      const metadata = value?.metadata ?? {};
+      const phoneNumberId = safeString(metadata?.phone_number_id);
+      const messages = Array.isArray(value?.messages) ? value.messages : [];
+      const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
+      for (const msg of messages) {
+        const senderId = safeString(msg?.from);
+        const mid = safeString(msg?.id);
+        const text = safeString(msg?.text?.body);
+        if (!senderId || !mid || !text) continue;
+        const contact = contacts.find((item: any) => safeString(item?.wa_id) === senderId) ?? contacts[0];
+        events.push({
+          channel: "whatsapp",
+          phone_number_id: phoneNumberId,
+          sender_id: senderId,
+          mid,
+          text,
+          timestamp: Number(msg?.timestamp ? Number(msg.timestamp) * 1000 : Date.now()),
+          sender_name: safeString(contact?.profile?.name) || null,
+        });
+      }
+    }
+  }
+
   return events;
 }
 
@@ -215,8 +254,10 @@ serve(async (req) => {
     if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
 
     const body = await req.json();
-    const channel = "messenger";
-    const events = extractMessengerTextEvents(body);
+    const events = [
+      ...extractMessengerTextEvents(body),
+      ...extractWhatsAppTextEvents(body),
+    ];
     if (!events.length) return json(200, { ok: true, received: 0, organization_ids: [] });
 
     let received = 0;
@@ -227,8 +268,10 @@ serve(async (req) => {
     for (const ev of events) {
       received++;
 
-      const pageId = ev.page_id;
-      const psid = ev.psid;
+      const channel = ev.channel;
+      const pageId = ev.page_id ?? "";
+      const phoneNumberId = ev.phone_number_id ?? "";
+      const senderId = ev.sender_id;
       const providerMid = ev.mid;
       const traceId = providerMid || crypto.randomUUID();
       const rawText = ev.text;
@@ -242,7 +285,7 @@ serve(async (req) => {
       let organization_id = DEFAULT_ORG;
       let orgBusinessType = "";
       let orgTesterPsids = new Set<string>();
-      if (pageId) {
+      if (channel === "messenger" && pageId) {
         const orgLookup = await supabase
           .from("org_settings")
           .select("organization_id,business_type,tester_psids")
@@ -253,6 +296,17 @@ serve(async (req) => {
           organization_id = String(orgLookup.data.organization_id);
           orgBusinessType = String(orgLookup.data.business_type ?? "").trim();
           collectTesterPsids(orgTesterPsids, orgLookup.data?.tester_psids);
+        }
+      } else if (channel === "whatsapp" && phoneNumberId) {
+        const orgLookup = await supabase
+          .from("org_settings")
+          .select("organization_id,business_type")
+          .eq("whatsapp_phone_number_id", phoneNumberId)
+          .eq("whatsapp_enabled", true)
+          .maybeSingle();
+        if (!orgLookup.error && orgLookup.data?.organization_id) {
+          organization_id = String(orgLookup.data.organization_id);
+          orgBusinessType = String(orgLookup.data.business_type ?? "").trim();
         }
       }
       orgIds.add(organization_id);
@@ -276,11 +330,13 @@ serve(async (req) => {
           collectTesterPsids(orgTesterPsids, testerRes.data?.tester_psids);
         }
       }
-      const isTester = orgTesterPsids.has(psid);
+      const isTester = channel === "messenger" && orgTesterPsids.has(senderId);
       console.log("[meta-webhook] inbound", {
         organization_id,
         page_id: pageId,
-        psid,
+        phone_number_id: phoneNumberId,
+        sender_id: senderId,
+        channel,
         provider_message_id: providerMid,
         has_testdental_tag: hasTestdentalTag,
         is_tester: isTester,
@@ -291,7 +347,7 @@ serve(async (req) => {
         .select("id, state, full_name, channel")
         .eq("organization_id", organization_id)
         .eq("channel", channel)
-        .eq("channel_user_id", psid)
+        .eq("channel_user_id", senderId)
         .maybeSingle();
       if (selErr) throw selErr;
 
@@ -352,7 +408,7 @@ serve(async (req) => {
         try {
           const token = await resolvePageToken(supabase, organization_id);
           if (token) {
-            const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid });
+            const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid: senderId });
             if (profile?.firstName) resolvedFirstName = profile.firstName;
             if (profile?.lastName) resolvedLastName = profile.lastName;
             if (profile?.fullName) resolvedName = profile.fullName;
@@ -362,11 +418,14 @@ serve(async (req) => {
         } catch (err) {
           console.warn("[meta-webhook] graph_api_profile_fetch_failed", {
             organization_id,
-            psid,
+            psid: senderId,
             error: String((err as any)?.message ?? err),
           });
           metaProfileLookupSucceeded = false;
         }
+      }
+      if (!resolvedName && channel === "whatsapp") {
+        resolvedName = safeString(ev.sender_name) || null;
       }
       const graphGotName = Boolean(resolvedName && !resolvedName.startsWith("Usuario "));
       nextState.name = resolvedName;
@@ -384,7 +443,7 @@ serve(async (req) => {
         organization_id,
         channel,
         last_channel: channel,
-        channel_user_id: psid,
+        channel_user_id: senderId,
         full_name: resolvedName,
         first_name: resolvedFirstName,
         last_name: resolvedLastName,
@@ -530,14 +589,14 @@ serve(async (req) => {
         .insert({
           organization_id,
           lead_id: lead.id,
-          channel: "messenger",
+          channel,
           role: "user",
           actor: "user",
           content: text,
           created_at: new Date().toISOString(),
           provider_message_id: providerMid,
           inbound_message_id: providerMid,
-          channel_user_id: psid,
+          channel_user_id: senderId,
         })
         .select("id")
         .maybeSingle();
@@ -555,15 +614,15 @@ serve(async (req) => {
         const outboxPayload = {
           organization_id,
           lead_id: lead.id,
-          channel: "messenger",
-          channel_user_id: psid,
+          channel,
+          channel_user_id: senderId,
           status: "queued",
           scheduled_for: new Date().toISOString(),
           inbound_provider_message_id: providerMid,
           payload: {
             text,
-            channel: "messenger",
-            channel_user_id: psid,
+            channel,
+            channel_user_id: senderId,
             organization_id,
             inbound_provider_message_id: providerMid,
             trace_id: traceId,
@@ -589,7 +648,7 @@ serve(async (req) => {
         }
         console.log("[meta-webhook] enqueue", {
           organization_id,
-          psid,
+          sender_id: senderId,
           provider_message_id: providerMid,
           outbox_id: enqueuedOutboxId,
           result: enqueueStatus,
@@ -597,7 +656,7 @@ serve(async (req) => {
       } else {
         console.log("[meta-webhook] enqueue_skip", {
           organization_id,
-          psid,
+          sender_id: senderId,
           provider_message_id: providerMid,
           reason: !providerMid ? "missing_mid" : "missing_text",
         });
@@ -611,8 +670,8 @@ serve(async (req) => {
             {
               organization_id,
               lead_id: lead.id,
-              channel_user_id: psid,
-              provider: "meta",
+              channel_user_id: senderId,
+              provider: channel === "whatsapp" ? "whatsapp" : "meta",
               reason: "lead_silent",
               step: 1,
               max_steps: 3,

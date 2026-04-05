@@ -1,7 +1,23 @@
 import { normalizeText } from "./domain/normalization.ts";
-import { detectIntent, isHighValueIntent, needsHumanHandoff, isContinuationResponse, isContinuationText } from "./domain/intents.ts";
+import {
+  detectIntent,
+  isContinuationResponse,
+  isContinuationText,
+  isHighValueIntent,
+  needsHumanHandoff,
+} from "./domain/intents.ts";
 
-export type Stage = "INITIAL" | "DISCOVERY" | "QUALIFICATION" | "VALUE" | "TRIAL_OFFER" | "ACTIVATION" | "BOOKING" | "BOOKED" | "HANDOFF" | "CLOSED";
+export type Stage =
+  | "INITIAL"
+  | "DISCOVERY"
+  | "QUALIFICATION"
+  | "VALUE"
+  | "TRIAL_OFFER"
+  | "ACTIVATION"
+  | "BOOKING"
+  | "BOOKED"
+  | "HANDOFF"
+  | "CLOSED";
 
 export type ConversationState = {
   stage?: Stage;
@@ -25,30 +41,54 @@ export type ConversationResult = {
 
 const RESPONSES = {
   creatyv: {
-    greeting: ["¡Hola! 👋 Soy el asistente de Creatyv. Ayudamos a negocios a responder clientes automáticamente. ¿Qué tipo de negocio tienes?"],
-    pricing: ["El precio depende del volumen. Lo mejor es que te muestre el sistema. ¿Agendamos 15 min?"],
-    services: ["Creatyv responde mensajes 24/7, captura leads, agenda citas y envía recordatorios. ¿Qué te interesa más?"],
-    demo: ["¡Perfecto! Te muestro cómo funciona. ¿Tienes 15 minutos esta semana?"],
-    trial: ["¡Genial! El trial dura 7 días gratis. ¿Con qué canal quieres empezar?"],
-    valueMoreAppointments: ["Para conseguir más citas, este sistema responde al instante y da seguimiento automático. ¿Quieres verlo?"],
+    greeting: [
+      "¡Hola! 👋 Soy el asistente de Creatyv. Ayudamos a negocios a responder clientes automáticamente. ¿Qué tipo de negocio tienes?",
+    ],
+    pricing: [
+      "El precio depende del volumen. Lo mejor es que te muestre el sistema. ¿Agendamos 15 min?",
+    ],
+    services: [
+      "Creatyv responde mensajes 24/7, captura leads, agenda citas y envía recordatorios. ¿Qué te interesa más?",
+    ],
+    demo: [
+      "¡Perfecto! Te muestro cómo funciona. ¿Tienes 15 minutos esta semana?",
+    ],
+    trial: [
+      "¡Genial! El trial dura 7 días gratis. ¿Con qué canal quieres empezar?",
+    ],
+    valueMoreAppointments: [
+      "Para conseguir más citas, este sistema responde al instante y da seguimiento automático. ¿Quieres verlo?",
+    ],
     handoff: ["Te conecto con alguien del equipo. En breve te escriben."],
     fallback: ["Gracias por escribir. ¿En qué te puedo ayudar?"],
   },
   dental: {
     greeting: ["¡Hola! 👋 Bienvenido a la clínica. ¿En qué te puedo ayudar?"],
-    pricing: ["Los precios varían según el tratamiento. ¿Te gustaría agendar una cita de valoración sin costo?"],
-    services: ["Ofrecemos limpieza, blanqueamiento, ortodoncia, implantes y más. ¿Cuál te interesa?"],
-    bookAppointment: ["¡Claro! ¿Qué día te funciona mejor? Tenemos disponibilidad de lunes a viernes."],
-    hours: ["Nuestro horario es lunes a viernes 9am-6pm, sábados 9am-2pm. ¿Quieres agendar?"],
+    pricing: [
+      "Los precios varían según el tratamiento. ¿Te gustaría agendar una cita de valoración sin costo?",
+    ],
+    services: [
+      "Ofrecemos limpieza, blanqueamiento, ortodoncia, implantes y más. ¿Cuál te interesa?",
+    ],
+    bookAppointment: [
+      "¡Claro! ¿Qué día te funciona mejor? Tenemos disponibilidad de lunes a viernes.",
+    ],
+    hours: [
+      "Nuestro horario es lunes a viernes 9am-6pm, sábados 9am-2pm. ¿Quieres agendar?",
+    ],
     location: ["Estamos en [DIRECCIÓN]. ¿Te envío la ubicación por Maps?"],
-    emergency: ["⚠️ Para emergencias, llama directamente al [TELÉFONO]. ¿Es dolor fuerte?"],
+    emergency: [
+      "⚠️ Para emergencias, llama directamente al [TELÉFONO]. ¿Es dolor fuerte?",
+    ],
     handoff: ["Te comunico con alguien del equipo. En breve te contactan."],
     fallback: ["Gracias por escribirnos. ¿Buscas agendar una cita?"],
   },
   generic: {
     greeting: ["¡Hola! 👋 ¿En qué te puedo ayudar?"],
     pricing: ["Para darte precios, ¿me cuentas qué servicio te interesa?"],
-    services: ["Con gusto te cuento sobre nuestros servicios. ¿Algo específico?"],
+    services: [
+      "Con gusto te cuento sobre nuestros servicios. ¿Algo específico?",
+    ],
     handoff: ["Te conecto con alguien del equipo."],
     fallback: ["Gracias por tu mensaje. ¿En qué te puedo ayudar?"],
   },
@@ -102,7 +142,9 @@ function getCollectedName(state: ConversationState) {
   const collectedName = safeStr(state.collected?.full_name, "").trim();
   const stateName = safeStr((state as any)?.name, "").trim();
   const leadName = safeStr((state as any)?.full_name, "").trim();
-  if (collectedName && !collectedName.startsWith("Usuario ")) return collectedName;
+  if (collectedName && !collectedName.startsWith("Usuario ")) {
+    return collectedName;
+  }
   if (leadName && !leadName.startsWith("Usuario ")) return leadName;
   if (stateName && !stateName.startsWith("Usuario ")) return stateName;
   return "";
@@ -118,8 +160,21 @@ const DENTAL_SERVICES: Record<string, string[]> = {
   "Ortodoncia": ["ortodoncia", "brackets", "frenos", "braces"],
   "Blanqueamiento": ["blanqueamiento", "whitening", "blanqueo", "aclarar"],
   "Implantes": ["implante", "implantes", "implant"],
-  "Extracción": ["extracción", "extraccion", "sacar muela", "muela", "extraction"],
-  "Consulta general": ["consulta", "revisión", "revision", "chequeo", "checkup", "valoración"],
+  "Extracción": [
+    "extracción",
+    "extraccion",
+    "sacar muela",
+    "muela",
+    "extraction",
+  ],
+  "Consulta general": [
+    "consulta",
+    "revisión",
+    "revision",
+    "chequeo",
+    "checkup",
+    "valoración",
+  ],
   "Endodoncia": ["endodoncia", "root canal", "nervio"],
   "Corona": ["corona", "crown"],
   "Caries": ["caries", "empaste", "relleno", "filling"],
@@ -133,7 +188,9 @@ function detectService(text: string): string | null {
   return null;
 }
 
-function parseDateTimeFromMessage(text: string): { date: string; time: string } | null {
+function parseDateTimeFromMessage(
+  text: string,
+): { date: string; time: string } | null {
   const lower = safeStr(text, "").toLowerCase().trim();
   const now = new Date();
   const dayMap: Record<string, number> = {
@@ -184,7 +241,9 @@ function parseDateTimeFromMessage(text: string): { date: string; time: string } 
   if (ampm === "am" && hours === 12) hours = 0;
   if (!ampm && hours >= 1 && hours <= 7) hours += 12;
 
-  const timeStr = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  const timeStr = `${String(hours).padStart(2, "0")}:${
+    String(minutes).padStart(2, "0")
+  }`;
   const dateStr = targetDate.toISOString().slice(0, 10);
   return { date: dateStr, time: timeStr };
 }
@@ -199,7 +258,14 @@ function formatBookingDate(dateValue: string, timeValue: string) {
     weekday: "long",
     day: "numeric",
     month: "long",
-  }) + `, ${parsed.toLocaleTimeString("es-HN", { hour: "numeric", minute: "2-digit", hour12: true })}`;
+  }) +
+    `, ${
+      parsed.toLocaleTimeString("es-HN", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+    }`;
 }
 
 export function extractName(message: string): string | null {
@@ -207,30 +273,109 @@ export function extractName(message: string): string | null {
   if (!cleaned) return null;
 
   cleaned = cleaned
-    .replace(/^(hola|buenas|buenos dias|buen día|buenas tardes|buenas noches|hello|hi|hey)\s+/i, "")
+    .replace(
+      /^(hola|buenas|buenos dias|buen día|buenas tardes|buenas noches|hello|hi|hey)\s+/i,
+      "",
+    )
     .replace(/^(me llamo|soy|mi nombre es|i'm|my name is|i am)\s+/i, "")
     .replace(/[.,!?]+$/g, "")
     .trim();
 
   const rejected = [
-    "hola", "hols", "hol", "ola", "ols", "holaa", "holaaa",
-    "buenas", "bueenas", "wenas", "wuenas", "guenas",
-    "buenos dias", "buen dia", "buenas tardes", "buenas noches",
-    "saludos", "buen día", "que tal", "q tal",
-    "buenos", "como estas", "como andas", "hola buenas", "que hay",
-    "hello", "hi", "hey", "good morning", "good afternoon", "sup", "yo",
-    "si", "sí", "ok", "dale", "no", "gracias", "vale", "claro",
-    "por favor", "porfa", "ya", "listo", "bueno", "okey", "okay",
-    "bien", "mal", "mas o menos", "regular",
-    "info", "información", "quiero", "necesito", "busco",
-    "tengo", "pregunta", "ayuda", "help", "cita", "consulta",
-    "limpieza", "precio", "precios", "horario", "horarios",
-    "agendar", "reservar", "turno", "disponibilidad",
-    "ortodoncia", "implante", "implantes", "blanqueamiento",
-    "extracción", "extraccion", "corona", "endodoncia", "caries",
-    "como funciona", "que hacen", "que ofrecen", "cuanto cuesta",
-    "estan abiertos", "donde estan", "que servicios",
-    "a", "e", "o", "u", "y", "x", "q",
+    "hola",
+    "hols",
+    "hol",
+    "ola",
+    "ols",
+    "holaa",
+    "holaaa",
+    "buenas",
+    "bueenas",
+    "wenas",
+    "wuenas",
+    "guenas",
+    "buenos dias",
+    "buen dia",
+    "buenas tardes",
+    "buenas noches",
+    "saludos",
+    "buen día",
+    "que tal",
+    "q tal",
+    "buenos",
+    "como estas",
+    "como andas",
+    "hola buenas",
+    "que hay",
+    "hello",
+    "hi",
+    "hey",
+    "good morning",
+    "good afternoon",
+    "sup",
+    "yo",
+    "si",
+    "sí",
+    "ok",
+    "dale",
+    "no",
+    "gracias",
+    "vale",
+    "claro",
+    "por favor",
+    "porfa",
+    "ya",
+    "listo",
+    "bueno",
+    "okey",
+    "okay",
+    "bien",
+    "mal",
+    "mas o menos",
+    "regular",
+    "info",
+    "información",
+    "quiero",
+    "necesito",
+    "busco",
+    "tengo",
+    "pregunta",
+    "ayuda",
+    "help",
+    "cita",
+    "consulta",
+    "limpieza",
+    "precio",
+    "precios",
+    "horario",
+    "horarios",
+    "agendar",
+    "reservar",
+    "turno",
+    "disponibilidad",
+    "ortodoncia",
+    "implante",
+    "implantes",
+    "blanqueamiento",
+    "extracción",
+    "extraccion",
+    "corona",
+    "endodoncia",
+    "caries",
+    "como funciona",
+    "que hacen",
+    "que ofrecen",
+    "cuanto cuesta",
+    "estan abiertos",
+    "donde estan",
+    "que servicios",
+    "a",
+    "e",
+    "o",
+    "u",
+    "y",
+    "x",
+    "q",
   ];
   if (rejected.includes(cleaned.toLowerCase())) return null;
   if (cleaned.includes("?")) return null;
@@ -243,7 +388,9 @@ export function extractName(message: string): string | null {
   const words = cleaned.split(/\s+/).filter(Boolean);
   if (!words.length || words.length > 5) return null;
 
-  const validWords = words.every((word) => /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'’-]+$/.test(word));
+  const validWords = words.every((word) =>
+    /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'’-]+$/.test(word)
+  );
   if (!validWords) return null;
 
   return words
@@ -267,7 +414,9 @@ export function maybeHandleNameCapture(args: {
   const collected = { ...(state.collected ?? {}) };
   const channel = normalizeChannel(args.channel);
   const usesMetaProfile = channel === "messenger" || channel === "instagram";
-  const metaProfileLookupAttempted = Boolean((state as any)?.meta_profile_lookup_attempted);
+  const metaProfileLookupAttempted = Boolean(
+    (state as any)?.meta_profile_lookup_attempted,
+  );
 
   if (hasCollectedName(state)) return null;
   if (usesMetaProfile && !metaProfileLookupAttempted) return null;
@@ -275,13 +424,18 @@ export function maybeHandleNameCapture(args: {
   if (!asked.full_name) {
     asked.full_name = true;
     return {
-      replyText: "¡Hola! 👋 Bienvenido/a a nuestra clínica dental. ¿Cómo te llamas?",
+      replyText:
+        "¡Hola! 👋 Bienvenido/a a nuestra clínica dental. ¿Cómo te llamas?",
       statePatch: {
         asked,
         nextExpected: "full_name",
         lastIntent: "ask_name",
       },
-      debug: { intent: "ask_name", phase: state.stage ?? "DISCOVERY", route: "name_gate" },
+      debug: {
+        intent: "ask_name",
+        phase: state.stage ?? "DISCOVERY",
+        route: "name_gate",
+      },
     };
   }
 
@@ -300,7 +454,11 @@ export function maybeHandleNameCapture(args: {
           nextExpected: undefined,
           lastIntent: "provide_name",
         },
-        debug: { intent: "provide_name", phase: state.stage ?? "DISCOVERY", route: "name_capture" },
+        debug: {
+          intent: "provide_name",
+          phase: state.stage ?? "DISCOVERY",
+          route: "name_capture",
+        },
       };
     }
     return {
@@ -310,7 +468,11 @@ export function maybeHandleNameCapture(args: {
         nextExpected: "full_name",
         lastIntent: "ask_name_retry",
       },
-      debug: { intent: "ask_name_retry", phase: state.stage ?? "DISCOVERY", route: "name_retry" },
+      debug: {
+        intent: "ask_name_retry",
+        phase: state.stage ?? "DISCOVERY",
+        route: "name_retry",
+      },
     };
   }
 
@@ -330,8 +492,9 @@ export function runConversationEngine(args: {
   const text = normalizeText(args.inboundText);
   if (!text) return null;
 
-  const orgType = args.leadState?.orgType ?? determineOrgType(args.organizationId);
-  const responses = getResponses(orgType);
+  const orgType = args.leadState?.orgType ??
+    determineOrgType(args.organizationId);
+  const responses: any = getResponses(orgType);
   const state: ConversationState = {
     stage: "INITIAL",
     orgType,
@@ -356,7 +519,11 @@ export function runConversationEngine(args: {
     return {
       replyText: pickRandom(responses.handoff),
       statePatch: { stage: "HANDOFF", lastIntent: intent.intent },
-      debug: { intent: intent.intent, phase: "HANDOFF", route: "priority_handoff" },
+      debug: {
+        intent: intent.intent,
+        phase: "HANDOFF",
+        route: "priority_handoff",
+      },
       toolAction: { name: "request_handoff", payload: {} },
     };
   }
@@ -378,12 +545,16 @@ export function runConversationEngine(args: {
 
     if (state.nextExpected === "confirm_booking_suggestion") {
       const trimmed = text.trim().toLowerCase();
-      const isYes = /^(s[ií]|si|yes|ok|dale|claro|por\s*favor|porfavor|porfa|s[ií]\s+por\s+favo?r|perfecto|listo|quiero|me\s+interesa)\b/i.test(trimmed);
+      const isYes =
+        /^(s[ií]|si|yes|ok|dale|claro|por\s*favor|porfavor|porfa|s[ií]\s+por\s+favo?r|perfecto|listo|quiero|me\s+interesa)\b/i
+          .test(trimmed);
 
       if (isYes || isContinuationText(trimmed)) {
         return {
           replyText: hasCollectedName(state)
-            ? `¡Claro, ${getFirstName(state)}! ¿Qué servicio te interesa? Ofrecemos: limpieza, ortodoncia, blanqueamiento, implantes, extracciones y más.`
+            ? `¡Claro, ${
+              getFirstName(state)
+            }! ¿Qué servicio te interesa? Ofrecemos: limpieza, ortodoncia, blanqueamiento, implantes, extracciones y más.`
             : "¡Claro! ¿Qué servicio te interesa? Ofrecemos: limpieza, ortodoncia, blanqueamiento, implantes, extracciones y más.",
           statePatch: {
             stage: "BOOKING",
@@ -391,14 +562,22 @@ export function runConversationEngine(args: {
             nextExpected: "service",
             collected: { ...bookingCollected },
           },
-          debug: { intent: "book_appointment", phase: "BOOKING", route: "confirmed_suggestion" },
+          debug: {
+            intent: "book_appointment",
+            phase: "BOOKING",
+            route: "confirmed_suggestion",
+          },
         };
       }
+
+      state.nextExpected = undefined;
+      state.stage = "DISCOVERY";
     }
 
     if (state.nextExpected === "confirm_booking") {
       const trimmed = text.trim();
-      const isYes = /^(s[ií]|si|yes|ok|dale|claro|confirmo|perfecto|listo)\b/i.test(trimmed);
+      const isYes = /^(s[ií]|si|yes|ok|dale|claro|confirmo|perfecto|listo)\b/i
+        .test(trimmed);
       const isNo = /^(no|cancel|cambiar|otra)\b/i.test(trimmed);
 
       if (isYes) {
@@ -413,7 +592,8 @@ export function runConversationEngine(args: {
           toolAction: {
             name: "book_appointment",
             payload: {
-              patient_name: bookingCollected.full_name || state.full_name || state.name || null,
+              patient_name: bookingCollected.full_name || state.full_name ||
+                state.name || null,
               service: bookingCollected.service,
               reason: bookingCollected.service,
               title: bookingCollected.service || "Cita dental",
@@ -422,7 +602,11 @@ export function runConversationEngine(args: {
               channel: args.channel ?? "messenger",
             },
           },
-          debug: { intent: "booking_confirmed", phase: "BOOKED", route: "confirmed" },
+          debug: {
+            intent: "booking_confirmed",
+            phase: "BOOKED",
+            route: "confirmed",
+          },
         };
       }
 
@@ -440,18 +624,27 @@ export function runConversationEngine(args: {
               confirmed: false,
             },
           },
-          debug: { intent: "booking_cancelled", phase: "BOOKING", route: "change_time" },
+          debug: {
+            intent: "booking_cancelled",
+            phase: "BOOKING",
+            route: "change_time",
+          },
         };
       }
 
       return {
-        replyText: "Solo necesito que me confirmes con Sí o No para reservarte ese espacio.",
+        replyText:
+          "Solo necesito que me confirmes con Sí o No para reservarte ese espacio.",
         statePatch: {
           stage: "BOOKING",
           nextExpected: "confirm_booking",
           collected: { ...bookingCollected },
         },
-        debug: { intent: "booking_confirmed", phase: "BOOKING", route: "retry_confirm" },
+        debug: {
+          intent: "booking_confirmed",
+          phase: "BOOKING",
+          route: "retry_confirm",
+        },
       };
     }
 
@@ -472,7 +665,11 @@ export function runConversationEngine(args: {
           nextExpected: "service",
           collected: { ...bookingCollected },
         },
-        debug: { intent: "book_appointment", phase: "BOOKING", route: "ask_service" },
+        debug: {
+          intent: "book_appointment",
+          phase: "BOOKING",
+          route: "ask_service",
+        },
       };
     }
 
@@ -494,20 +691,32 @@ export function runConversationEngine(args: {
             nextExpected: "date_time",
             collected: { ...bookingCollected },
           },
-          debug: { intent: "book_appointment", phase: "BOOKING", route: "ask_datetime" },
+          debug: {
+            intent: "book_appointment",
+            phase: "BOOKING",
+            route: "ask_datetime",
+          },
         };
       }
     }
 
-    if (state.nextExpected === "date_time" && (!bookingCollected.preferred_date || !bookingCollected.preferred_time)) {
+    if (
+      state.nextExpected === "date_time" &&
+      (!bookingCollected.preferred_date || !bookingCollected.preferred_time)
+    ) {
       return {
-        replyText: "No entendí la fecha u hora. ¿Podrías decirme qué día y hora prefieres? Por ejemplo: martes a las 10:00.",
+        replyText:
+          "No entendí la fecha u hora. ¿Podrías decirme qué día y hora prefieres? Por ejemplo: martes a las 10:00.",
         statePatch: {
           stage: "BOOKING",
           nextExpected: "date_time",
           collected: { ...bookingCollected },
         },
-        debug: { intent: "book_appointment", phase: "BOOKING", route: "retry_datetime" },
+        debug: {
+          intent: "book_appointment",
+          phase: "BOOKING",
+          route: "retry_datetime",
+        },
       };
     }
 
@@ -517,7 +726,12 @@ export function runConversationEngine(args: {
       const summaryLines = [
         "Te confirmo tu cita:",
         `🦷 ${safeStr(bookingCollected.service, "Servicio dental")}`,
-        `📅 ${formatBookingDate(safeStr(bookingCollected.preferred_date, ""), safeStr(bookingCollected.preferred_time, ""))}`,
+        `📅 ${
+          formatBookingDate(
+            safeStr(bookingCollected.preferred_date, ""),
+            safeStr(bookingCollected.preferred_time, ""),
+          )
+        }`,
       ];
       if (address) summaryLines.push(`📍 ${address}`);
       if (phone) summaryLines.push(`📞 ${phone}`);
@@ -531,7 +745,11 @@ export function runConversationEngine(args: {
           nextExpected: "confirm_booking",
           collected: { ...bookingCollected },
         },
-        debug: { intent: "book_appointment", phase: "BOOKING", route: "confirm" },
+        debug: {
+          intent: "book_appointment",
+          phase: "BOOKING",
+          route: "confirm",
+        },
       };
     }
   }
@@ -542,9 +760,8 @@ export function runConversationEngine(args: {
       return {
         replyText: pickRandom(responses.pricing),
         statePatch: {
-          stage: orgType === "dental" ? "BOOKING" : "VALUE",
+          stage: orgType === "dental" ? "DISCOVERY" : "VALUE",
           lastIntent: "pricing",
-          nextExpected: orgType === "dental" ? "confirm_booking_suggestion" : "demo_interest",
         },
         debug: { intent: "pricing", phase: "VALUE", route: "high_value" },
       };
@@ -552,30 +769,44 @@ export function runConversationEngine(args: {
     if (intent.intent === "services") {
       return {
         replyText: pickRandom(responses.services),
-        statePatch: {
-          stage: orgType === "dental" ? "BOOKING" : "DISCOVERY",
-          lastIntent: "services",
-          nextExpected: orgType === "dental" ? "confirm_booking_suggestion" : undefined,
-        },
+        statePatch: { stage: "DISCOVERY", lastIntent: "services" },
         debug: { intent: "services", phase: "DISCOVERY", route: "high_value" },
       };
     }
     if (intent.intent === "book_appointment") {
-      const resp = orgType === "dental" ? responses.bookAppointment : responses.demo;
+      const resp = orgType === "dental"
+        ? responses.bookAppointment
+        : responses.demo;
       return {
         replyText: needsName
           ? "¡Claro! Antes de agendar, ¿me compartes tu nombre completo?"
           : pickRandom(resp ?? responses.fallback),
-        statePatch: { stage: "BOOKING", lastIntent: "book_appointment", nextExpected: "service" },
-        debug: { intent: "book_appointment", phase: "BOOKING", route: "booking" },
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "book_appointment",
+          nextExpected: "service",
+        },
+        debug: {
+          intent: "book_appointment",
+          phase: "BOOKING",
+          route: "booking",
+        },
       };
     }
-    if (intent.intent === "demo_interest" || intent.intent === "trial_interest") {
-      const resp = intent.intent === "demo_interest" ? responses.demo : responses.trial;
+    if (
+      intent.intent === "demo_interest" || intent.intent === "trial_interest"
+    ) {
+      const resp = intent.intent === "demo_interest"
+        ? responses.demo
+        : responses.trial;
       return {
         replyText: pickRandom(resp ?? responses.fallback),
         statePatch: { stage: "TRIAL_OFFER", lastIntent: intent.intent },
-        debug: { intent: intent.intent, phase: "TRIAL_OFFER", route: "high_value" },
+        debug: {
+          intent: intent.intent,
+          phase: "TRIAL_OFFER",
+          route: "high_value",
+        },
         toolAction: { name: "schedule_demo", payload: {} },
       };
     }
@@ -587,15 +818,27 @@ export function runConversationEngine(args: {
       const resp = responses.demo ?? responses.fallback;
       return {
         replyText: pickRandom(resp),
-        statePatch: { stage: "TRIAL_OFFER", lastIntent: "confirmation", collected: { ...collected, confirmed: true } },
-        debug: { intent: "confirmation", phase: "TRIAL_OFFER", route: "continuation" },
+        statePatch: {
+          stage: "TRIAL_OFFER",
+          lastIntent: "confirmation",
+          collected: { ...collected, confirmed: true },
+        },
+        debug: {
+          intent: "confirmation",
+          phase: "TRIAL_OFFER",
+          route: "continuation",
+        },
       };
     }
     if (intent.intent === "denial") {
       return {
         replyText: "Entendido. Si cambias de opinión, aquí estoy. 👋",
         statePatch: { lastIntent: "denial" },
-        debug: { intent: "denial", phase: state.stage ?? "DISCOVERY", route: "soft_close" },
+        debug: {
+          intent: "denial",
+          phase: state.stage ?? "DISCOVERY",
+          route: "soft_close",
+        },
       };
     }
   }
@@ -607,26 +850,35 @@ export function runConversationEngine(args: {
         replyText: needsName
           ? "¡Hola! 👋 Bienvenido a la clínica. Antes de ayudarte, ¿me compartes tu nombre completo?"
           : pickRandom(responses.greeting),
-        statePatch: { stage: "DISCOVERY", lastIntent: "greeting", nextExpected: orgType === "dental" ? undefined : "business_type", orgType },
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "greeting",
+          nextExpected: orgType === "dental" ? undefined : "business_type",
+          orgType,
+        },
         debug: { intent: "greeting", phase: "DISCOVERY", route: "initial" },
       };
     }
     return {
       replyText: "¿En qué más te puedo ayudar?",
       statePatch: { lastIntent: "greeting" },
-      debug: { intent: "greeting", phase: state.stage ?? "DISCOVERY", route: "skip_repeat" },
+      debug: {
+        intent: "greeting",
+        phase: state.stage ?? "DISCOVERY",
+        route: "skip_repeat",
+      },
     };
   }
 
   if (intent.intent === "hours" && responses.hours) {
     return {
       replyText: pickRandom(responses.hours),
-      statePatch: {
-        stage: orgType === "dental" ? "BOOKING" : state.stage,
-        lastIntent: "hours",
-        nextExpected: orgType === "dental" ? "confirm_booking_suggestion" : undefined,
+      statePatch: { stage: "DISCOVERY", lastIntent: "hours" },
+      debug: {
+        intent: "hours",
+        phase: state.stage ?? "DISCOVERY",
+        route: "info",
       },
-      debug: { intent: "hours", phase: state.stage ?? "DISCOVERY", route: "info" },
     };
   }
 
@@ -634,7 +886,11 @@ export function runConversationEngine(args: {
     return {
       replyText: pickRandom(responses.location),
       statePatch: { lastIntent: "location" },
-      debug: { intent: "location", phase: state.stage ?? "DISCOVERY", route: "info" },
+      debug: {
+        intent: "location",
+        phase: state.stage ?? "DISCOVERY",
+        route: "info",
+      },
     };
   }
 
@@ -650,7 +906,11 @@ export function runConversationEngine(args: {
     return {
       replyText: "¡Gracias a ti! 😊",
       statePatch: { lastIntent: "gratitude" },
-      debug: { intent: "gratitude", phase: state.stage ?? "DISCOVERY", route: "closing" },
+      debug: {
+        intent: "gratitude",
+        phase: state.stage ?? "DISCOVERY",
+        route: "closing",
+      },
     };
   }
 
@@ -660,8 +920,17 @@ export function runConversationEngine(args: {
       replyText: needsName
         ? "¡Hola! 👋 Gracias por escribirnos. Para ayudarte mejor, ¿me compartes tu nombre completo?"
         : pickRandom(responses.greeting),
-      statePatch: { stage: "DISCOVERY", lastIntent: "unknown", orgType, nextExpected: needsName ? "confirm_name" : undefined },
-      debug: { intent: "unknown", phase: "DISCOVERY", route: "fallback_greeting" },
+      statePatch: {
+        stage: "DISCOVERY",
+        lastIntent: "unknown",
+        orgType,
+        nextExpected: needsName ? "confirm_name" : undefined,
+      },
+      debug: {
+        intent: "unknown",
+        phase: "DISCOVERY",
+        route: "fallback_greeting",
+      },
     };
   }
 
@@ -675,9 +944,13 @@ export function runConversationEngine(args: {
       nextExpected: needsName
         ? "confirm_name"
         : orgType === "dental"
-          ? "confirm_booking_suggestion"
-          : state.nextExpected,
+        ? "confirm_booking_suggestion"
+        : state.nextExpected,
     },
-    debug: { intent: "unknown", phase: state.stage ?? "DISCOVERY", route: "fallback" },
+    debug: {
+      intent: "unknown",
+      phase: state.stage ?? "DISCOVERY",
+      route: "fallback",
+    },
   };
 }

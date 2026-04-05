@@ -1,7 +1,9 @@
 // src/components/CalendarBoard.tsx
+// ⚠️ Requiere columna `provider_name TEXT` en la tabla `appointments`.
+//    ALTER TABLE appointments ADD COLUMN IF NOT EXISTS provider_name TEXT;
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CalendarDays, ChevronDown, ChevronLeft, Clock, PencilLine, Plus, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, Clock, PencilLine, Plus, Trash2, User } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { dedupeByKey } from "../lib/dedupe";
@@ -12,6 +14,36 @@ import { Toast, type ToastKind } from "./ui/Toast";
 import PageHeader from "./PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
+
+// =============================================================================
+// PROVIDER / DOCTOR COLORS
+// =============================================================================
+
+const PROVIDER_COLORS = [
+  { bg: "bg-blue-500/15",    border: "border-blue-400/30",    dot: "bg-blue-400",    stripe: "bg-blue-500",    text: "text-blue-300" },
+  { bg: "bg-emerald-500/15", border: "border-emerald-400/30", dot: "bg-emerald-400", stripe: "bg-emerald-500", text: "text-emerald-300" },
+  { bg: "bg-purple-500/15",  border: "border-purple-400/30",  dot: "bg-purple-400",  stripe: "bg-purple-500",  text: "text-purple-300" },
+  { bg: "bg-amber-500/15",   border: "border-amber-400/30",   dot: "bg-amber-400",   stripe: "bg-amber-500",   text: "text-amber-300" },
+  { bg: "bg-rose-500/15",    border: "border-rose-400/30",    dot: "bg-rose-400",    stripe: "bg-rose-500",    text: "text-rose-300" },
+  { bg: "bg-cyan-500/15",    border: "border-cyan-400/30",    dot: "bg-cyan-400",    stripe: "bg-cyan-500",    text: "text-cyan-300" },
+  { bg: "bg-orange-500/15",  border: "border-orange-400/30",  dot: "bg-orange-400",  stripe: "bg-orange-500",  text: "text-orange-300" },
+  { bg: "bg-indigo-500/15",  border: "border-indigo-400/30",  dot: "bg-indigo-400",  stripe: "bg-indigo-500",  text: "text-indigo-300" },
+];
+
+const UNASSIGNED_COLOR = {
+  bg: "bg-white/5", border: "border-white/10", dot: "bg-white/30", stripe: "bg-white/20", text: "text-white/50",
+};
+
+function providerColor(name: string | null | undefined) {
+  if (!name?.trim()) return UNASSIGNED_COLOR;
+  let hash = 0;
+  for (const ch of name.trim().toLowerCase()) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+  return PROVIDER_COLORS[Math.abs(hash) % PROVIDER_COLORS.length];
+}
+
+// =============================================================================
+// TYPES
+// =============================================================================
 
 type ApptRow = {
   id: string;
@@ -26,6 +58,7 @@ type ApptRow = {
   appointment_time: string | null;
   patient_name: string | null;
   reason: string | null;
+  provider_name: string | null;
 };
 
 type ViewMode = "month" | "week" | "day";
@@ -40,7 +73,12 @@ type ApptForm = {
   time: string;
   patient_name: string;
   reason: string;
+  provider_name: string;
 };
+
+// =============================================================================
+// FORMATTING HELPERS
+// =============================================================================
 
 function fmtDayLabel(d: Date) {
   return d.toLocaleDateString("es", { weekday: "short" }).toUpperCase();
@@ -48,12 +86,6 @@ function fmtDayLabel(d: Date) {
 
 function fmtDayNum(d: Date) {
   return d.getDate();
-}
-
-function fmtRangeLabel(a: Date, b: Date) {
-  const left = a.toLocaleDateString("es", { day: "2-digit", month: "short" });
-  const right = b.toLocaleDateString("es", { day: "2-digit", month: "short", year: "numeric" });
-  return `${left} — ${right}`;
 }
 
 function fmtViewTitle(view: ViewMode, selected: Date, week: Date[]) {
@@ -169,6 +201,10 @@ const STATUS_OPTIONS = [
   { value: "requested", label: "Solicitada" },
 ];
 
+// =============================================================================
+// APPOINTMENT MODAL
+// =============================================================================
+
 function AppointmentModal({
   open,
   mode,
@@ -177,6 +213,7 @@ function AppointmentModal({
   availableTimes,
   loadingAvailability,
   busyTimeSet,
+  knownProviders,
   error,
   onChange,
   onClose,
@@ -192,6 +229,7 @@ function AppointmentModal({
   availableTimes: string[];
   loadingAvailability: boolean;
   busyTimeSet: Set<string>;
+  knownProviders: string[];
   error: string | null;
   onChange: (next: ApptForm) => void;
   onClose: () => void;
@@ -208,9 +246,12 @@ function AppointmentModal({
   const calendarMonth = useMemo(() => monthGrid(safeDate), [safeDate]);
   if (!open) return null;
 
+  const selectedProviderColor = providerColor(form.provider_name);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-xl sm:items-center sm:px-4">
       <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/10 bg-white/10 shadow-[0_24px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:h-auto sm:max-h-[92vh] sm:max-w-xl sm:rounded-3xl">
+        {/* Header */}
         <div className="sticky top-0 z-20 border-b border-white/10 bg-black/25 px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 backdrop-blur-lg sm:px-6 sm:pt-6 sm:pb-4 sm:border-b-0 sm:bg-transparent sm:backdrop-blur-0">
           <div className="flex items-center justify-between gap-2 md:hidden">
             <button
@@ -235,158 +276,188 @@ function AppointmentModal({
           </div>
 
           <div className="hidden items-center justify-between md:flex">
-          <div>
-            <div className="text-lg font-semibold text-white">
-              {mode === "create" ? "Nueva cita" : "Editar cita"}
+            <div>
+              <div className="text-lg font-semibold text-white">
+                {mode === "create" ? "Nueva cita" : "Editar cita"}
+              </div>
+              <div className="text-sm text-white/60">Actualiza detalles del paciente y la cita.</div>
             </div>
-            <div className="text-sm text-white/60">Actualiza detalles del paciente y la cita.</div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70 hover:bg-white/10"
-          >
-            Cerrar
-          </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70 hover:bg-white/10"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
 
+        {/* Body */}
         <div className="min-h-0 overflow-y-auto px-4 pb-28 pt-3 sm:px-6 sm:pb-24">
           <div className="grid gap-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium text-white/80">Paciente</label>
-              <input
-                value={form.patient_name}
-                onChange={(e) => onChange({ ...form, patient_name: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-                placeholder="Nombre del paciente"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-white/80">Motivo</label>
-              <input
-                value={form.reason}
-                onChange={(e) => onChange({ ...form, reason: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-                placeholder="Ej: limpieza, control, urgencia"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-white/80">Título</label>
-            <input
-              value={form.title}
-              onChange={(e) => onChange({ ...form, title: e.target.value })}
-              className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-              placeholder="Ej: Evaluación, Limpieza, Control"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div>
-              <label className="text-xs font-medium text-white/80">Fecha</label>
-              <div className="relative mt-2">
-                <button
-                  type="button"
-                  onClick={() => setCalendarOpen((v) => !v)}
-                  className="flex h-11 w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white/70"
-                >
-                  {form.date}
-                  <ChevronDown className="h-4 w-4" />
-                </button>
-                {calendarOpen ? (
-                  <div className="absolute left-0 top-[48px] z-[60] w-[290px] rounded-2xl border border-white/15 bg-zinc-900/95 p-3 shadow-2xl backdrop-blur-lg">
-                    <div className="mb-2 text-xs font-semibold text-white/90">
-                      {new Date(form.date).toLocaleDateString("es", { month: "long", year: "numeric" })}
-                    </div>
-                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-white/55">
-                      {["D", "L", "M", "X", "J", "V", "S"].map((d) => (
-                        <div key={d}>{d}</div>
-                      ))}
-                    </div>
-                    <div className="mt-1 grid grid-cols-7 gap-1">
-                      {calendarMonth.days.map((d) => {
-                        const key = toStartOfDay(d).toISOString().slice(0, 10);
-                        const selectedDay = key === form.date;
-                        const disabled = !availableDates.has(key);
-                        const inMonth = d.getMonth() === new Date(form.date).getMonth();
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => {
-                              onChange({ ...form, date: key, time: "" });
-                              setCalendarOpen(false);
-                            }}
-                            className={[
-                              "h-8 rounded-lg text-xs transition",
-                              selectedDay ? "bg-blue-600 text-white" : "",
-                              !selectedDay && disabled ? "bg-white/5 text-white/35" : "",
-                              !selectedDay && !disabled ? "text-white/90 hover:bg-white/10" : "",
-                              !inMonth ? "opacity-40" : "",
-                            ].join(" ")}
-                          >
-                            {d.getDate()}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
+            {/* Paciente + Motivo */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium text-white/80">Paciente</label>
+                <input
+                  value={form.patient_name}
+                  onChange={(e) => onChange({ ...form, patient_name: e.target.value })}
+                  className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+                  placeholder="Nombre del paciente"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-white/80">Motivo</label>
+                <input
+                  value={form.reason}
+                  onChange={(e) => onChange({ ...form, reason: e.target.value })}
+                  className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+                  placeholder="Ej: limpieza, control, urgencia"
+                />
               </div>
             </div>
-            <div>
-              <label className="text-xs font-medium text-white/80">Hora</label>
-              <select
-                value={form.time}
-                onChange={(e) => onChange({ ...form, time: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-              >
-                <option value="">{loadingAvailability ? "Cargando horarios..." : "Seleccionar hora"}</option>
-                {availableTimes.map((slot) => (
-                  <option key={slot} value={slot}>
-                    {slot}
-                    {busyTimeSet.has(slot) ? " (ocupada)" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-white/80">Estado</label>
-              <select
-                value={form.status}
-                onChange={(e) => onChange({ ...form, status: e.target.value })}
-                className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-              >
-                {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
 
-          <div>
-            <label className="text-xs font-medium text-white/80">Notas</label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => onChange({ ...form, notes: e.target.value })}
-              className="mt-2 min-h-[110px] w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-              placeholder="Detalles clínicos o preferencias del paciente"
-            />
-          </div>
-          {error ? (
-            <div className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {error}
+            {/* Título + Doctor */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium text-white/80">Título</label>
+                <input
+                  value={form.title}
+                  onChange={(e) => onChange({ ...form, title: e.target.value })}
+                  className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+                  placeholder="Ej: Evaluación, Limpieza, Control"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-white/80">
+                  Doctor / Proveedor
+                </label>
+                <div className="relative mt-2">
+                  <input
+                    list="provider-datalist"
+                    value={form.provider_name}
+                    onChange={(e) => onChange({ ...form, provider_name: e.target.value })}
+                    className="h-11 w-full rounded-2xl border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+                    placeholder="Seleccionar o escribir nombre"
+                  />
+                  <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
+                    <span className={["inline-block h-4 w-4 rounded-full", selectedProviderColor.dot].join(" ")} />
+                  </div>
+                  <datalist id="provider-datalist">
+                    {knownProviders.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
             </div>
-          ) : null}
+
+            {/* Fecha + Hora + Estado */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div>
+                <label className="text-xs font-medium text-white/80">Fecha</label>
+                <div className="relative mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setCalendarOpen((v) => !v)}
+                    className="flex h-11 w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white/70"
+                  >
+                    {form.date}
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                  {calendarOpen ? (
+                    <div className="absolute left-0 top-[48px] z-[60] w-[290px] rounded-2xl border border-white/15 bg-zinc-900/95 p-3 shadow-2xl backdrop-blur-lg">
+                      <div className="mb-2 text-xs font-semibold text-white/90">
+                        {new Date(form.date).toLocaleDateString("es", { month: "long", year: "numeric" })}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-white/55">
+                        {["D", "L", "M", "X", "J", "V", "S"].map((d) => (
+                          <div key={d}>{d}</div>
+                        ))}
+                      </div>
+                      <div className="mt-1 grid grid-cols-7 gap-1">
+                        {calendarMonth.days.map((d) => {
+                          const key = toStartOfDay(d).toISOString().slice(0, 10);
+                          const selectedDay = key === form.date;
+                          const disabled = !availableDates.has(key);
+                          const inMonth = d.getMonth() === new Date(form.date).getMonth();
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => {
+                                onChange({ ...form, date: key, time: "" });
+                                setCalendarOpen(false);
+                              }}
+                              className={[
+                                "h-8 rounded-lg text-xs transition",
+                                selectedDay ? "bg-blue-600 text-white" : "",
+                                !selectedDay && disabled ? "bg-white/5 text-white/35" : "",
+                                !selectedDay && !disabled ? "text-white/90 hover:bg-white/10" : "",
+                                !inMonth ? "opacity-40" : "",
+                              ].join(" ")}
+                            >
+                              {d.getDate()}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-white/80">Hora</label>
+                <select
+                  value={form.time}
+                  onChange={(e) => onChange({ ...form, time: e.target.value })}
+                  className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+                >
+                  <option value="">{loadingAvailability ? "Cargando horarios..." : "Seleccionar hora"}</option>
+                  {availableTimes.map((slot) => (
+                    <option key={slot} value={slot}>
+                      {slot}
+                      {busyTimeSet.has(slot) ? " (ocupada)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-white/80">Estado</label>
+                <select
+                  value={form.status}
+                  onChange={(e) => onChange({ ...form, status: e.target.value })}
+                  className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+                >
+                  {STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Notas */}
+            <div>
+              <label className="text-xs font-medium text-white/80">Notas</label>
+              <textarea
+                value={form.notes}
+                onChange={(e) => onChange({ ...form, notes: e.target.value })}
+                className="mt-2 min-h-[110px] w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+                placeholder="Detalles clínicos o preferencias del paciente"
+              />
+            </div>
+            {error ? (
+              <div className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                {error}
+              </div>
+            ) : null}
           </div>
         </div>
 
+        {/* Footer */}
         <div className="border-t border-white/10 bg-black/20 px-4 pt-3 pb-[calc(16px+env(safe-area-inset-bottom))] backdrop-blur-lg md:px-6">
           <div className="grid gap-2 md:flex md:items-center md:justify-between">
             {mode === "edit" ? (
@@ -427,6 +498,105 @@ function AppointmentModal({
   );
 }
 
+// =============================================================================
+// APPOINTMENT CARD (shared between week + day views)
+// =============================================================================
+
+function AppointmentCard({
+  a,
+  onEdit,
+  onQuickDelete,
+}: {
+  a: ApptRow;
+  onEdit: () => void;
+  onQuickDelete: () => void;
+}) {
+  const badge = statusBadge(a.status);
+  const iso = normalizedStartISO(a);
+  const time = iso ? fmtTimeFromISO(iso) : "—";
+  const patient = a.patient_name?.trim() ? a.patient_name : null;
+  const title = a.title?.trim() ? a.title : a.reason?.trim() ? a.reason : "Cita";
+  const subtitle = patient
+    ? `Paciente: ${patient}`
+    : a.lead_id
+    ? `Lead: ${a.lead_id}`
+    : "Sin paciente";
+  const pColor = providerColor(a.provider_name);
+
+  return (
+    <button
+      key={appointmentKey(a)}
+      type="button"
+      onClick={onEdit}
+      className="group relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
+    >
+      {/* Color stripe left */}
+      <div className={["absolute inset-y-0 left-0 w-1 rounded-l-2xl", pColor.stripe].join(" ")} />
+
+      <div className="px-5 py-4 pl-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-white">{title}</div>
+            <div className="mt-1 truncate text-xs text-white/60">{subtitle}</div>
+            {a.provider_name?.trim() ? (
+              <div className="mt-1.5 inline-flex items-center gap-1.5">
+                <span className={["inline-block h-2 w-2 rounded-full", pColor.dot].join(" ")} />
+                <span className={["text-[11px] font-medium", pColor.text].join(" ")}>
+                  {a.provider_name}
+                </span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="inline-flex items-center gap-2 text-xs text-white/60">
+                <Clock className="h-3.5 w-3.5" />
+                {time}
+              </div>
+              <div
+                className={[
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.18em] uppercase",
+                  badge.className,
+                ].join(" ")}
+              >
+                <span className={["h-2 w-2 rounded-full", badge.dot].join(" ")} />
+                {badge.label}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {a.notes?.trim() ? (
+          <div className="mt-3 whitespace-pre-wrap text-sm text-white/60">{a.notes}</div>
+        ) : null}
+
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold text-white/70">
+            <PencilLine className="h-4 w-4" />
+            Editar cita
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onQuickDelete();
+            }}
+            className="inline-flex items-center gap-1 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Borrar
+          </button>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+
 export default function CalendarBoard() {
   const navigate = useNavigate();
   const { clinic } = useClinic();
@@ -453,6 +623,7 @@ export default function CalendarBoard() {
     time: "09:00",
     patient_name: "",
     reason: "",
+    provider_name: "",
   });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -466,6 +637,10 @@ export default function CalendarBoard() {
   const touchStartX = useRef<number | null>(null);
   const patientFilter = searchParams.get("patient")?.trim() ?? "";
   const createForPatient = searchParams.get("createFor")?.trim() ?? "";
+
+  // Provider filter + known providers
+  const [providerFilter, setProviderFilter] = useState<string>("all");
+  const [knownProviders, setKnownProviders] = useState<string[]>([]);
 
   function goBack() {
     if (window.history.length > 1) {
@@ -557,6 +732,10 @@ export default function CalendarBoard() {
   const rangeStartISO = useMemo(() => rangeStart.toISOString(), [rangeStart]);
   const rangeEndISO = useMemo(() => rangeEnd.toISOString(), [rangeEnd]);
 
+  // -------------------------------------------------------------------------
+  // DATA LOADING
+  // -------------------------------------------------------------------------
+
   async function load() {
     setBusy(true);
     setError(null);
@@ -564,7 +743,7 @@ export default function CalendarBoard() {
     const q = await supabase
       .from("appointments")
       .select(
-        "id, organization_id, lead_id, start_at, starts_at, status, title, notes, appointment_date, appointment_time, patient_name, reason"
+        "id, organization_id, lead_id, start_at, starts_at, status, title, notes, appointment_date, appointment_time, patient_name, reason, provider_name"
       )
       .eq("organization_id", ORG)
       .or(`start_at.gte.${rangeStartISO},starts_at.gte.${rangeStartISO}`)
@@ -596,6 +775,39 @@ export default function CalendarBoard() {
 
     setAppts(sorted);
     setBusy(false);
+
+    // Extract known providers from loaded data
+    const providers = new Set<string>();
+    for (const r of sorted) {
+      const p = (r.provider_name ?? "").trim();
+      if (p) providers.add(p);
+    }
+    setKnownProviders((prev) => {
+      const merged = new Set([...prev, ...providers]);
+      return [...merged].sort((a, b) => a.localeCompare(b, "es"));
+    });
+  }
+
+  async function loadKnownProvidersGlobal() {
+    // Load all distinct provider names for this org (beyond current date range)
+    const res = await supabase
+      .from("appointments")
+      .select("provider_name")
+      .eq("organization_id", ORG)
+      .not("provider_name", "is", null)
+      .limit(200);
+
+    if (!res.error && Array.isArray(res.data)) {
+      const providers = new Set<string>();
+      for (const r of res.data as any[]) {
+        const p = (r.provider_name ?? "").trim();
+        if (p) providers.add(p);
+      }
+      setKnownProviders((prev) => {
+        const merged = new Set([...prev, ...providers]);
+        return [...merged].sort((a, b) => a.localeCompare(b, "es"));
+      });
+    }
   }
 
   async function loadOrgAvailabilitySettings() {
@@ -630,7 +842,7 @@ export default function CalendarBoard() {
     const open = dayHours.open ?? "08:00";
     const close = dayHours.close ?? "17:00";
     const allSlots = generateTimeSlots(open, close, 15);
-    const busy = new Set<string>();
+    const busySet = new Set<string>();
 
     const dayStart = toStartOfDay(selectedDate).toISOString();
     const dayEnd = toEndOfDay(selectedDate).toISOString();
@@ -665,13 +877,13 @@ export default function CalendarBoard() {
     );
 
     for (const row of rows) {
-        if (modalMode === "edit" && activeAppt?.id === row.id) continue;
-        const iso =
-          row.start_at ??
-          row.starts_at ??
-          buildLocalISO(row.appointment_date ?? date, row.appointment_time ?? "09:00");
-        if (!iso) continue;
-        busy.add(toTimeInput(iso));
+      if (modalMode === "edit" && activeAppt?.id === row.id) continue;
+      const iso =
+        row.start_at ??
+        row.starts_at ??
+        buildLocalISO(row.appointment_date ?? date, row.appointment_time ?? "09:00");
+      if (!iso) continue;
+      busySet.add(toTimeInput(iso));
     }
 
     if (googleCalendarConnected) {
@@ -684,15 +896,19 @@ export default function CalendarBoard() {
           const end = toTimeInput(range.end);
           const startM = slotToMinutes(start);
           const endM = slotToMinutes(end);
-          for (let m = startM; m < endM; m += 15) busy.add(minutesToSlot(m));
+          for (let m = startM; m < endM; m += 15) busySet.add(minutesToSlot(m));
         }
       }
     }
 
-    setBusyTimes(busy);
-    setAvailableTimes(allSlots.filter((s) => !busy.has(s)));
+    setBusyTimes(busySet);
+    setAvailableTimes(allSlots.filter((s) => !busySet.has(s)));
     setLoadingAvailability(false);
   }
+
+  // -------------------------------------------------------------------------
+  // EFFECTS
+  // -------------------------------------------------------------------------
 
   useEffect(() => {
     load();
@@ -701,6 +917,7 @@ export default function CalendarBoard() {
 
   useEffect(() => {
     loadOrgAvailabilitySettings();
+    loadKnownProvidersGlobal();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ORG]);
 
@@ -733,6 +950,10 @@ export default function CalendarBoard() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [view]);
 
+  // -------------------------------------------------------------------------
+  // MODAL ACTIONS
+  // -------------------------------------------------------------------------
+
   function openEdit(a: ApptRow) {
     const iso = normalizedStartISO(a) ?? new Date().toISOString();
     const existingTime = a.appointment_time?.slice(0, 5) || a.start_at?.slice(11, 16) || a.starts_at?.slice(11, 16) || "";
@@ -746,6 +967,7 @@ export default function CalendarBoard() {
       time: existingTime || toTimeInput(iso),
       patient_name: a.patient_name?.trim() || "",
       reason: a.reason?.trim() || "",
+      provider_name: a.provider_name?.trim() || "",
     });
     setModalError(null);
     setModalOpen(true);
@@ -763,6 +985,7 @@ export default function CalendarBoard() {
       time: "09:00",
       patient_name: createForPatient,
       reason: "",
+      provider_name: "",
     });
     setModalError(null);
     setModalOpen(true);
@@ -798,9 +1021,9 @@ export default function CalendarBoard() {
         appointment_time: form.time,
         patient_name: form.patient_name.trim() || null,
         reason: form.reason.trim() || null,
+        provider_name: form.provider_name.trim() || null,
       };
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.log("[agenda:create] payload", payload);
       }
       const ins = await supabase.from("appointments").upsert(payload).select("id").maybeSingle();
@@ -834,12 +1057,12 @@ export default function CalendarBoard() {
       appointment_time: form.time,
       patient_name: form.patient_name.trim() || null,
       reason: form.reason.trim() || null,
+      provider_name: form.provider_name.trim() || null,
     };
 
     if (activeAppt.starts_at) payload.starts_at = startISO;
 
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
       console.log("[agenda:update] payload", { id: activeAppt.id, organization_id: ORG, ...payload });
     }
     const upd = await supabase
@@ -903,6 +1126,10 @@ export default function CalendarBoard() {
     await load();
   }
 
+  // -------------------------------------------------------------------------
+  // DERIVED DATA
+  // -------------------------------------------------------------------------
+
   const dayAppts = useMemo(() => {
     const start = toStartOfDay(selected).getTime();
     const end = addDays(toStartOfDay(selected), 1).getTime();
@@ -911,15 +1138,34 @@ export default function CalendarBoard() {
       if (!iso) return false;
       const t = new Date(iso).getTime();
       if (t < start || t >= end) return false;
-      if (!patientFilter) return true;
-      const patient = (a.patient_name ?? "").toLowerCase();
-      return patient.includes(patientFilter.toLowerCase());
+      // Patient filter (from URL param)
+      if (patientFilter) {
+        const patient = (a.patient_name ?? "").toLowerCase();
+        if (!patient.includes(patientFilter.toLowerCase())) return false;
+      }
+      // Provider filter
+      if (providerFilter !== "all") {
+        if (providerFilter === "__none__") {
+          if (a.provider_name?.trim()) return false;
+        } else {
+          if ((a.provider_name ?? "").trim().toLowerCase() !== providerFilter.toLowerCase()) return false;
+        }
+      }
+      return true;
     });
-  }, [appts, selected, patientFilter]);
+  }, [appts, selected, patientFilter, providerFilter]);
 
   const countByDay = useMemo(() => {
     const map: Record<string, number> = {};
     for (const a of appts) {
+      // Respect provider filter in counts too
+      if (providerFilter !== "all") {
+        if (providerFilter === "__none__") {
+          if (a.provider_name?.trim()) continue;
+        } else {
+          if ((a.provider_name ?? "").trim().toLowerCase() !== providerFilter.toLowerCase()) continue;
+        }
+      }
       const iso = normalizedStartISO(a);
       if (!iso) continue;
       const d = toStartOfDay(new Date(iso));
@@ -927,7 +1173,7 @@ export default function CalendarBoard() {
       map[k] = (map[k] ?? 0) + 1;
     }
     return map;
-  }, [appts]);
+  }, [appts, providerFilter]);
 
   const modalAvailableDates = useMemo(() => {
     const baseDate = new Date(form.date || new Date().toISOString());
@@ -935,12 +1181,16 @@ export default function CalendarBoard() {
     const set = new Set<string>();
     for (const d of grid) {
       const key = toStartOfDay(d).toISOString().slice(0, 10);
-      const dayKey = getDayKey(d);
-      const dayCfg = hoursMap[dayKey] ?? { closed: false };
+      const dayK = getDayKey(d);
+      const dayCfg = hoursMap[dayK] ?? { closed: false };
       if (!dayCfg.closed) set.add(key);
     }
     return set;
   }, [form.date, hoursMap]);
+
+  // -------------------------------------------------------------------------
+  // RENDER
+  // -------------------------------------------------------------------------
 
   return (
     <div className="space-y-4 min-w-0 overflow-x-hidden">
@@ -958,6 +1208,7 @@ export default function CalendarBoard() {
       ) : null}
 
       <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
+        {/* TOOLBAR */}
         <div className="flex flex-col gap-3 border-b border-white/10 px-6 py-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="font-semibold text-white">Agenda</div>
@@ -965,6 +1216,25 @@ export default function CalendarBoard() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Provider filter */}
+            <div className="relative">
+              <select
+                value={providerFilter}
+                onChange={(e) => setProviderFilter(e.target.value)}
+                className="h-10 appearance-none rounded-2xl border border-white/10 bg-white/5 pl-9 pr-8 text-sm font-medium text-white/80 outline-none hover:bg-white/10 focus:border-[#3CBDB9] focus:ring-2 focus:ring-[#3CBDB9]/20"
+              >
+                <option value="all">Todos los doctores</option>
+                {knownProviders.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+                <option value="__none__">Sin doctor asignado</option>
+              </select>
+              <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
+            </div>
+
+            {/* View mode */}
             <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-white/5 p-1">
               {(["month", "week", "day"] as ViewMode[]).map((k) => {
                 const active = view === k;
@@ -984,6 +1254,7 @@ export default function CalendarBoard() {
               })}
             </div>
 
+            {/* Prev / Next */}
             <div className="flex items-center gap-1 rounded-2xl border border-white/20 bg-white/10 p-1">
               <button
                 type="button"
@@ -1015,6 +1286,7 @@ export default function CalendarBoard() {
               </button>
             </div>
 
+            {/* Today */}
             <button
               type="button"
               onClick={() => setSelected(toStartOfDay(new Date()))}
@@ -1024,6 +1296,7 @@ export default function CalendarBoard() {
               Hoy
             </button>
 
+            {/* New appointment */}
             <button
               type="button"
               onClick={openCreate}
@@ -1035,6 +1308,45 @@ export default function CalendarBoard() {
           </div>
         </div>
 
+        {/* Provider legend (when filter is "all" and there are providers) */}
+        {providerFilter === "all" && knownProviders.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3 border-b border-white/5 px-6 py-2.5">
+            {knownProviders.map((p) => {
+              const pc = providerColor(p);
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setProviderFilter(p)}
+                  className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium transition hover:bg-white/5"
+                >
+                  <span className={["inline-block h-2 w-2 rounded-full", pc.dot].join(" ")} />
+                  <span className={pc.text}>{p}</span>
+                </button>
+              );
+            })}
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-white/30">
+              <span className="inline-block h-2 w-2 rounded-full bg-white/30" />
+              Sin asignar
+            </span>
+          </div>
+        ) : providerFilter !== "all" ? (
+          <div className="flex items-center gap-2 border-b border-white/5 px-6 py-2.5">
+            <span className={["inline-block h-2.5 w-2.5 rounded-full", providerColor(providerFilter === "__none__" ? null : providerFilter).dot].join(" ")} />
+            <span className="text-xs font-medium text-white/70">
+              {providerFilter === "__none__" ? "Sin doctor asignado" : providerFilter}
+            </span>
+            <button
+              type="button"
+              onClick={() => setProviderFilter("all")}
+              className="ml-1 rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-white/60 hover:bg-white/10"
+            >
+              Limpiar filtro
+            </button>
+          </div>
+        ) : null}
+
+        {/* =============== MONTH VIEW =============== */}
         {view === "month" ? (
           <div className="px-6 py-6">
             <div className="flex items-center justify-between">
@@ -1103,6 +1415,7 @@ export default function CalendarBoard() {
           </div>
         ) : null}
 
+        {/* =============== WEEK VIEW =============== */}
         {view === "week" ? (
           <>
             <div className="border-b border-white/10 px-6 py-4">
@@ -1168,76 +1481,21 @@ export default function CalendarBoard() {
                     </button>
                   </div>
                 ) : (
-                  dayAppts.map((a) => {
-                    const badge = statusBadge(a.status);
-                    const iso = normalizedStartISO(a);
-                    const time = iso ? fmtTimeFromISO(iso) : "—";
-                    const patient = a.patient_name?.trim() ? a.patient_name : null;
-                    const title = a.title?.trim() ? a.title : a.reason?.trim() ? a.reason : "Cita";
-                    const subtitle = patient ? `Paciente: ${patient}` : a.lead_id ? `Lead: ${a.lead_id}` : "Sin paciente";
-
-                    return (
-                      <button
-                        key={appointmentKey(a)}
-                        type="button"
-                        onClick={() => openEdit(a)}
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-white">{title}</div>
-                            <div className="mt-1 truncate text-xs text-white/60">{subtitle}</div>
-                          </div>
-
-                          <div className="shrink-0">
-                            <div className="flex items-center gap-3">
-                              <div className="inline-flex items-center gap-2 text-xs text-white/60">
-                                <Clock className="h-3.5 w-3.5" />
-                                {time}
-                              </div>
-                              <div
-                                className={[
-                                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.18em] uppercase",
-                                  badge.className,
-                                ].join(" ")}
-                              >
-                                <span className={["h-2 w-2 rounded-full", badge.dot].join(" ")} />
-                                {badge.label}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {a.notes?.trim() ? (
-                          <div className="mt-3 whitespace-pre-wrap text-sm text-white/60">{a.notes}</div>
-                        ) : null}
-
-                        <div className="mt-4 flex items-center justify-between gap-2">
-                          <div className="inline-flex items-center gap-2 text-xs font-semibold text-white/70">
-                            <PencilLine className="h-4 w-4" />
-                            Editar cita
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              quickDeleteAppointment(a.id);
-                            }}
-                            className="inline-flex items-center gap-1 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Borrar
-                          </button>
-                        </div>
-                      </button>
-                    );
-                  })
+                  dayAppts.map((a) => (
+                    <AppointmentCard
+                      key={appointmentKey(a)}
+                      a={a}
+                      onEdit={() => openEdit(a)}
+                      onQuickDelete={() => quickDeleteAppointment(a.id)}
+                    />
+                  ))
                 )}
               </div>
             </div>
           </>
         ) : null}
 
+        {/* =============== DAY VIEW =============== */}
         {view === "day" ? (
           <div className="px-6 py-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <div className="flex items-center justify-between">
@@ -1281,70 +1539,14 @@ export default function CalendarBoard() {
                   <div className="mt-1 text-sm text-white/60">Crea una cita para comenzar la agenda.</div>
                 </div>
               ) : (
-                dayAppts.map((a) => {
-                  const badge = statusBadge(a.status);
-                  const iso = normalizedStartISO(a);
-                  const time = iso ? fmtTimeFromISO(iso) : "—";
-                  const patient = a.patient_name?.trim() ? a.patient_name : null;
-                  const title = a.title?.trim() ? a.title : a.reason?.trim() ? a.reason : "Cita";
-                  const subtitle = patient ? `Paciente: ${patient}` : a.lead_id ? `Lead: ${a.lead_id}` : "Sin paciente";
-
-                  return (
-                    <button
-                      key={appointmentKey(a)}
-                      type="button"
-                      onClick={() => openEdit(a)}
-                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-white">{title}</div>
-                          <div className="mt-1 truncate text-xs text-white/60">{subtitle}</div>
-                        </div>
-
-                        <div className="shrink-0">
-                          <div className="flex items-center gap-3">
-                            <div className="inline-flex items-center gap-2 text-xs text-white/60">
-                              <Clock className="h-3.5 w-3.5" />
-                              {time}
-                            </div>
-                            <div
-                              className={[
-                                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.18em] uppercase",
-                                badge.className,
-                              ].join(" ")}
-                            >
-                              <span className={["h-2 w-2 rounded-full", badge.dot].join(" ")} />
-                              {badge.label}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {a.notes?.trim() ? (
-                        <div className="mt-3 whitespace-pre-wrap text-sm text-white/60">{a.notes}</div>
-                      ) : null}
-
-                      <div className="mt-4 flex items-center justify-between gap-2">
-                        <div className="inline-flex items-center gap-2 text-xs font-semibold text-white/70">
-                          <PencilLine className="h-4 w-4" />
-                          Editar cita
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            quickDeleteAppointment(a.id);
-                          }}
-                          className="inline-flex items-center gap-1 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/20"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Borrar
-                        </button>
-                      </div>
-                    </button>
-                  );
-                })
+                dayAppts.map((a) => (
+                  <AppointmentCard
+                    key={appointmentKey(a)}
+                    a={a}
+                    onEdit={() => openEdit(a)}
+                    onQuickDelete={() => quickDeleteAppointment(a.id)}
+                  />
+                ))
               )}
             </div>
           </div>
@@ -1359,6 +1561,7 @@ export default function CalendarBoard() {
         availableTimes={availableTimes}
         loadingAvailability={loadingAvailability}
         busyTimeSet={busyTimes}
+        knownProviders={knownProviders}
         error={modalError}
         onChange={setForm}
         onClose={() => setModalOpen(false)}

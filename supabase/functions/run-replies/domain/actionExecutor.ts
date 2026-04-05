@@ -1,12 +1,15 @@
-import { createClient, type SupabaseClient as SupabaseClientBase } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
-  startTrial,
+  createClient,
+  type SupabaseClient as SupabaseClientBase,
+} from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
   beginOnboarding,
+  bookAppointment,
   captureBusinessType,
   captureLeadGoal,
-  showDemo,
-  bookAppointment,
   createTrialAccount,
+  showDemo,
+  startTrial,
 } from "./tools.ts";
 import { syncCalendarEvent } from "./calendar/calendarSync.ts";
 import { CreateCalendarEventInput } from "./calendar/types.ts";
@@ -37,7 +40,11 @@ export type ActionExecutionResult = {
   replyOverride?: string;
 };
 
-function buildEventPayload(action: ToolActionExecution, toolResult: Json | undefined, now: string): Json {
+function buildEventPayload(
+  action: ToolActionExecution,
+  toolResult: Json | undefined,
+  now: string,
+): Json {
   return {
     action: action.name,
     tool_payload: action.payload ?? {},
@@ -68,15 +75,19 @@ export async function executeToolAction(params: {
       case "create_trial_account": {
         const email = String(action.payload?.email ?? "").trim().toLowerCase();
         const name = String(action.payload?.name ?? "").trim();
-        const businessType = String(action.payload?.business_type ?? "dental").trim();
+        const businessType = String(action.payload?.business_type ?? "dental")
+          .trim();
 
         if (!email || !email.includes("@")) {
-          console.warn("[actionExecutor] create_trial_account: invalid email", { email, leadId });
+          console.warn("[actionExecutor] create_trial_account: invalid email", {
+            email,
+            leadId,
+          });
           break;
         }
 
         const result = await createTrialAccount({
-          supabase,
+          supabase: supabase as any,
           organizationId,
           leadId,
           email,
@@ -100,7 +111,9 @@ export async function executeToolAction(params: {
           eventType = "trial_signup_link_sent";
 
           // Override del reply para incluir el link real
-          replyOverride = `¡Perfecto${name ? `, ${name}` : ""}! Creé tu cuenta de prueba. 
+          replyOverride = `¡Perfecto${
+            name ? `, ${name}` : ""
+          }! Creé tu cuenta de prueba. 
 
 Entra aquí para configurar tu clínica:
 ${result.signupUrl}
@@ -109,7 +122,10 @@ Una vez dentro, podrás conectar tu página de Facebook/Instagram para empezar a
 
 Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.creatyv_main}`;
         } else {
-          console.warn("[actionExecutor] create_trial_account failed:", result.error);
+          console.warn(
+            "[actionExecutor] create_trial_account failed:",
+            result.error,
+          );
         }
         break;
       }
@@ -174,18 +190,27 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
         const endsAtPayload = String(payload.ends_at ?? "").trim();
         const patientName = String(payload.patient_name ?? "").trim();
         const service = String(payload.service ?? payload.reason ?? "").trim();
-        const durationMin = Number.isFinite(Number(payload.duration_min ?? 0)) && Number(payload.duration_min ?? 0) > 0
-          ? Number(payload.duration_min ?? 0)
-          : 60;
+        const durationMin =
+          Number.isFinite(Number(payload.duration_min ?? 0)) &&
+            Number(payload.duration_min ?? 0) > 0
+            ? Number(payload.duration_min ?? 0)
+            : 60;
         const channel = String(payload.channel ?? "messenger");
-        const startIso = buildIsoTimestamp(appointmentDate, appointmentTime, startsAtPayload);
+        const startIso = buildIsoTimestamp(
+          appointmentDate,
+          appointmentTime,
+          startsAtPayload,
+        );
         const endIso = buildEndIso(endsAtPayload, startIso, durationMin);
-        
+
         if (!startIso) {
-          console.warn("[actionExecutor] missing start time", { leadId, organizationId });
+          console.warn("[actionExecutor] missing start time", {
+            leadId,
+            organizationId,
+          });
           break;
         }
-        
+
         toolResult = await bookAppointment({
           organization_id: organizationId,
           lead_id: leadId,
@@ -193,65 +218,96 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
           end_at: endIso ?? undefined,
           channel,
         });
-        
+
         const metadata: Record<string, unknown> = {
           channel,
           duration_min: durationMin,
           source: "run_replies",
         };
-        const providerValue = String(payload.calendar_provider ?? payload.provider ?? "").trim();
+        const providerValue = String(
+          payload.calendar_provider ?? payload.provider ?? "",
+        ).trim();
         const calendarIdValue = String(payload.calendar_id ?? "").trim();
         if (providerValue) metadata.calendar_provider = providerValue;
         if (calendarIdValue) metadata.calendar_id = calendarIdValue;
-        
+
+        // ============================================
+        // UPSERT: update existing or insert new
+        // ============================================
         let appointmentId: string | null = null;
         try {
-          const insertResult = await supabase
+          const existingAppt = await supabase
             .from("appointments")
-            .insert({
-              organization_id: organizationId,
-              lead_id: leadId,
-              patient_name: patientName || null,
-              reason: service || null,
-              start_at: startIso,
-              starts_at: startIso,
-              end_at: endIso,
-              ends_at: endIso,
-              status: "confirmed",
-              appointment_date: appointmentDate || startIso.slice(0, 10),
-              appointment_time: appointmentTime || startIso.slice(11, 16),
-              title: service || "Cita dental",
-              metadata,
-              calendar_provider: providerValue || null,
-              calendar_id: calendarIdValue || null,
-              calendar_sync_status: "pending",
-            })
             .select("id")
-            .single();
-          appointmentId = insertResult.data?.id ?? null;
+            .eq("organization_id", organizationId)
+            .eq("lead_id", leadId)
+            .not("status", "in", '("cancelled","completed")')
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const appointmentFields = {
+            organization_id: organizationId,
+            lead_id: leadId,
+            patient_name: patientName || null,
+            reason: service || null,
+            start_at: startIso,
+            starts_at: startIso,
+            end_at: endIso,
+            ends_at: String(endIso ?? startIso),
+            status: "confirmed",
+            appointment_date: appointmentDate || startIso.slice(0, 10),
+            appointment_time: appointmentTime || startIso.slice(11, 16),
+            title: service || "Cita dental",
+            metadata,
+            calendar_provider: providerValue || null,
+            calendar_id: calendarIdValue || null,
+            calendar_sync_status: "pending",
+          };
+
+          if (existingAppt.data?.id) {
+            const updateResult = await supabase
+              .from("appointments")
+              .update(appointmentFields)
+              .eq("id", existingAppt.data.id)
+              .select("id")
+              .single();
+            appointmentId = updateResult.data?.id ?? null;
+            console.log("[actionExecutor] appointment_updated", {
+              appointmentId,
+              leadId,
+            });
+          } else {
+            const insertResult = await supabase
+              .from("appointments")
+              .insert(appointmentFields)
+              .select("id")
+              .single();
+            appointmentId = insertResult.data?.id ?? null;
+          }
         } catch (error) {
-          console.warn("[actionExecutor] appointment_insert_failed", {
+          console.warn("[actionExecutor] appointment_upsert_failed", {
             error: safeString(error),
             leadId,
             organizationId,
           });
         }
-        
+
         const syncInput: CreateCalendarEventInput & { provider?: string } = {
           provider: providerValue,
           calendar_id: calendarIdValue,
           organization_id: organizationId,
-          title: payload.title ?? "Cita",
-          description: payload.description ?? "",
+          title: String(payload.title ?? "Cita"),
+          description: String(payload.description ?? ""),
           starts_at: startIso,
-          ends_at: endIso,
-          patient_name: payload.patient_name ?? "",
-          patient_email: payload.patient_email ?? "",
-          patient_phone: payload.patient_phone ?? "",
+          ends_at: String(endIso ?? startIso),
+          patient_name: String(payload.patient_name ?? ""),
+          patient_email: String(payload.patient_email ?? ""),
+          patient_phone: String(payload.patient_phone ?? ""),
           metadata,
         };
         const syncResult = await syncCalendarEvent(syncInput as any);
-        
+
         if (appointmentId) {
           await supabase
             .from("appointments")
@@ -265,7 +321,7 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
             })
             .eq("id", appointmentId);
         }
-        
+
         statePatch = {
           collected: {
             appointment_scheduled: true,
@@ -274,7 +330,7 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
               preferred_time: appointmentTime || null,
               starts_at: startIso,
               start_at: startIso,
-              ends_at: endIso,
+              ends_at: String(endIso ?? startIso),
               end_at: endIso,
               duration_min: durationMin,
               last_question_key: "booking_confirmed",
@@ -326,7 +382,11 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
   return { statePatch, replyOverride };
 }
 
-function buildIsoTimestamp(date: string, time: string, overrideValue: string): string | null {
+function buildIsoTimestamp(
+  date: string,
+  time: string,
+  overrideValue: string,
+): string | null {
   const candidate = overrideValue?.trim();
   if (candidate && isIsoTs(candidate)) return candidate;
   if (date && time) {
@@ -339,13 +399,19 @@ function buildIsoTimestamp(date: string, time: string, overrideValue: string): s
   return null;
 }
 
-function buildEndIso(overrideValue: string, startIso: string | null, durationMin: number): string | null {
+function buildEndIso(
+  overrideValue: string,
+  startIso: string | null,
+  durationMin: number,
+): string | null {
   const candidate = overrideValue?.trim();
   if (candidate && isIsoTs(candidate)) return candidate;
   if (startIso) {
     const base = new Date(startIso);
     if (!Number.isNaN(base.valueOf())) {
-      const endTs = new Date(base.getTime() + Math.max(1, durationMin) * 60 * 1000);
+      const endTs = new Date(
+        base.getTime() + Math.max(1, durationMin) * 60 * 1000,
+      );
       return endTs.toISOString();
     }
   }
