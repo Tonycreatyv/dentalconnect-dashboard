@@ -513,7 +513,7 @@ function AppointmentCard({
 }) {
   const badge = statusBadge(a.status);
   const iso = normalizedStartISO(a);
-  const time = iso ? fmtTimeFromISO(iso) : "—";
+  const time = (a as any).appointment_time || (iso ? fmtTimeFromISO(iso) : "—");
   const patient = a.patient_name?.trim() ? a.patient_name : null;
   const title = a.title?.trim() ? a.title : a.reason?.trim() ? a.reason : "Cita";
   const subtitle = patient

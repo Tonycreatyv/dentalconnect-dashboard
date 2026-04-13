@@ -15,25 +15,53 @@ type HoursMap = Record<string, HoursDay>;
 type ServiceItem = { name: string; duration_min: number; price: string; active: boolean };
 
 const DEFAULT_HOURS: HoursMap = {
-  lunes: { closed: false, open: "08:00", close: "17:00" },
-  martes: { closed: false, open: "08:00", close: "17:00" },
+  lunes:     { closed: false, open: "08:00", close: "17:00" },
+  martes:    { closed: false, open: "08:00", close: "17:00" },
   miercoles: { closed: false, open: "08:00", close: "17:00" },
-  jueves: { closed: false, open: "08:00", close: "17:00" },
-  viernes: { closed: false, open: "08:00", close: "17:00" },
-  sabado: { closed: false, open: "08:00", close: "12:00" },
-  domingo: { closed: true },
+  jueves:    { closed: false, open: "08:00", close: "17:00" },
+  viernes:   { closed: false, open: "08:00", close: "17:00" },
+  sabado:    { closed: false, open: "08:00", close: "12:00" },
+  domingo:   { closed: true },
 };
 
 const DEFAULT_SERVICES: ServiceItem[] = [
-  { name: "Limpieza dental", duration_min: 45, price: "", active: true },
-  { name: "Consulta general", duration_min: 30, price: "", active: true },
-  { name: "Blanqueamiento", duration_min: 60, price: "", active: true },
-  { name: "Ortodoncia consulta", duration_min: 30, price: "", active: true },
-  { name: "Extracción simple", duration_min: 45, price: "", active: true },
-  { name: "Implante dental", duration_min: 60, price: "", active: false },
-  { name: "Endodoncia", duration_min: 60, price: "", active: false },
-  { name: "Corona dental", duration_min: 45, price: "", active: false },
-  { name: "Caries / Relleno", duration_min: 30, price: "", active: false },
+  { name: "Limpieza dental",      duration_min: 45, price: "", active: true  },
+  { name: "Consulta general",     duration_min: 30, price: "", active: true  },
+  { name: "Blanqueamiento",       duration_min: 60, price: "", active: true  },
+  { name: "Ortodoncia consulta",  duration_min: 30, price: "", active: true  },
+  { name: "Extracción simple",    duration_min: 45, price: "", active: true  },
+  { name: "Implante dental",      duration_min: 60, price: "", active: false },
+  { name: "Endodoncia",           duration_min: 60, price: "", active: false },
+  { name: "Corona dental",        duration_min: 45, price: "", active: false },
+  { name: "Caries / Relleno",     duration_min: 30, price: "", active: false },
+];
+
+// ─── Country → Timezone map ───────────────────────────────
+const COUNTRY_TIMEZONES: { label: string; country: string; timezone: string }[] = [
+  { label: "🇺🇸 USA — Este (NY, Miami, Atlanta)",      country: "US", timezone: "America/New_York"              },
+  { label: "🇺🇸 USA — Centro (Chicago, Dallas)",       country: "US", timezone: "America/Chicago"               },
+  { label: "🇺🇸 USA — Montaña (Denver, Phoenix)",      country: "US", timezone: "America/Denver"                },
+  { label: "🇺🇸 USA — Pacífico (LA, Seattle)",         country: "US", timezone: "America/Los_Angeles"           },
+  { label: "🇲🇽 México — CDMX / General",              country: "MX", timezone: "America/Mexico_City"           },
+  { label: "🇲🇽 México — Zona Noroeste (Tijuana)",     country: "MX", timezone: "America/Tijuana"               },
+  { label: "🇬🇹 Guatemala",                             country: "GT", timezone: "America/Guatemala"             },
+  { label: "🇸🇻 El Salvador",                           country: "SV", timezone: "America/El_Salvador"          },
+  { label: "🇭🇳 Honduras",                              country: "HN", timezone: "America/Tegucigalpa"          },
+  { label: "🇳🇮 Nicaragua",                             country: "NI", timezone: "America/Managua"              },
+  { label: "🇨🇷 Costa Rica",                            country: "CR", timezone: "America/Costa_Rica"           },
+  { label: "🇵🇦 Panamá",                                country: "PA", timezone: "America/Panama"               },
+  { label: "🇨🇴 Colombia",                              country: "CO", timezone: "America/Bogota"               },
+  { label: "🇻🇪 Venezuela",                             country: "VE", timezone: "America/Caracas"              },
+  { label: "🇵🇪 Perú",                                  country: "PE", timezone: "America/Lima"                 },
+  { label: "🇪🇨 Ecuador",                               country: "EC", timezone: "America/Guayaquil"            },
+  { label: "🇧🇴 Bolivia",                               country: "BO", timezone: "America/La_Paz"               },
+  { label: "🇨🇱 Chile",                                 country: "CL", timezone: "America/Santiago"             },
+  { label: "🇦🇷 Argentina",                             country: "AR", timezone: "America/Argentina/Buenos_Aires"},
+  { label: "🇺🇾 Uruguay",                               country: "UY", timezone: "America/Montevideo"           },
+  { label: "🇧🇷 Brasil — São Paulo / Brasília",         country: "BR", timezone: "America/Sao_Paulo"            },
+  { label: "🇩🇴 República Dominicana",                  country: "DO", timezone: "America/Santo_Domingo"        },
+  { label: "🇵🇷 Puerto Rico",                           country: "PR", timezone: "America/Puerto_Rico"          },
+  { label: "🇪🇸 España",                                country: "ES", timezone: "Europe/Madrid"                },
 ];
 
 function slugifyClinicName(input: string) {
@@ -63,15 +91,12 @@ export default function Onboarding() {
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
+  const [timezone, setTimezone] = useState("America/New_York");
   const [hours, setHours] = useState<HoursMap>(DEFAULT_HOURS);
   const [services, setServices] = useState<ServiceItem[]>(DEFAULT_SERVICES);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(ONBOARDING_FLAG, "1");
-    } catch {
-      // ignore
-    }
+    try { localStorage.setItem(ONBOARDING_FLAG, "1"); } catch { }
   }, []);
 
   useEffect(() => {
@@ -88,24 +113,25 @@ export default function Onboarding() {
     void (async () => {
       const res = await supabase
         .from("org_settings")
-        .select("brand_name, meta_page_id, messenger_enabled")
+        .select("brand_name, meta_page_id, messenger_enabled, timezone")
         .eq("organization_id", orgId)
         .maybeSingle();
       if (!res.error && res.data) {
         if (!clinicName && typeof res.data.brand_name === "string") setClinicName(res.data.brand_name);
+        if (res.data.timezone) setTimezone(res.data.timezone);
         setMessengerConnected(Boolean(res.data.meta_page_id) && Boolean(res.data.messenger_enabled));
       }
     })();
   }, [activeOrgId, clinic?.organization_id, createdOrgId, clinicName]);
 
-  const openDays = useMemo(() => Object.values(hours).filter((day) => !day.closed).length, [hours]);
-  const activeServices = useMemo(() => services.filter((service) => service.active), [services]);
+  const openDays = useMemo(() => Object.values(hours).filter((d) => !d.closed).length, [hours]);
+  const activeServices = useMemo(() => services.filter((s) => s.active), [services]);
   const canProceed = useMemo(() => {
-    if (step === 1) return clinicName.trim().length >= 3;
+    if (step === 1) return clinicName.trim().length >= 3 && !!timezone;
     if (step === 2) return openDays > 0;
     if (step === 3) return activeServices.length > 0;
     return true;
-  }, [step, clinicName, openDays, activeServices.length]);
+  }, [step, clinicName, timezone, openDays, activeServices.length]);
 
   async function provisionClinic() {
     if (!user) throw new Error("No hay sesión activa.");
@@ -132,16 +158,16 @@ export default function Onboarding() {
       is_trial_active: true,
       trial_started_at: now,
       trial_ends_at: trialEnds,
+      timezone,
+      phone: phone.trim() || null,
+      address: [address.trim(), city.trim()].filter(Boolean).join(", ") || null,
       updated_at: now,
     });
     if (orgSettingsInsert.error) throw new Error(orgSettingsInsert.error.message);
 
     const clinicInsert = await supabase
       .from("clinics")
-      .insert({
-        name: clinicName.trim(),
-        organization_id: orgId,
-      })
+      .insert({ name: clinicName.trim(), organization_id: orgId })
       .select("id")
       .single();
     if (clinicInsert.error) throw new Error(clinicInsert.error.message);
@@ -151,31 +177,23 @@ export default function Onboarding() {
       phone: phone.trim() || null,
       address: [address.trim(), city.trim()].filter(Boolean).join(", ") || null,
       hours,
-      services: activeServices.map((service) => ({
-        name: service.name,
-        duration_min: service.duration_min,
-        price: service.price.trim() || null,
+      services: activeServices.map((s) => ({
+        name: s.name,
+        duration_min: s.duration_min,
+        price: s.price.trim() || null,
       })),
       updated_at: now,
     });
     if (clinicSettingsInsert.error) throw new Error(clinicSettingsInsert.error.message);
 
     const profileUpsert = await supabase.from("user_profiles").upsert(
-      {
-        user_id: user.id,
-        is_admin: true,
-        default_org_id: orgId,
-      },
+      { user_id: user.id, is_admin: true, default_org_id: orgId },
       { onConflict: "user_id" }
     );
     if (profileUpsert.error) throw new Error(profileUpsert.error.message);
 
     const orgMemberUpsert = await supabase.from("org_members").upsert(
-      {
-        organization_id: orgId,
-        user_id: user.id,
-        role: "owner",
-      },
+      { organization_id: orgId, user_id: user.id, role: "owner" },
       { onConflict: "organization_id,user_id" }
     );
     if (orgMemberUpsert.error) throw new Error(orgMemberUpsert.error.message);
@@ -201,7 +219,6 @@ export default function Onboarding() {
   async function handleNext() {
     if (!canProceed) return;
     setError(null);
-
     if (step === 3) {
       try {
         setSaving(true);
@@ -214,27 +231,18 @@ export default function Onboarding() {
       }
       return;
     }
-
-    if (step === 4) {
-      await finishOnboarding();
-      return;
-    }
-
+    if (step === 4) { await finishOnboarding(); return; }
     setStep((prev) => prev + 1);
   }
 
   async function finishOnboarding() {
     try {
       setSaving(true);
-      if (!createdOrgId) {
-        await provisionClinic();
-      }
+      if (!createdOrgId) await provisionClinic();
       try {
         localStorage.removeItem(ONBOARDING_FLAG);
         localStorage.removeItem(META_REDIRECT_FLAG);
-      } catch {
-        // ignore
-      }
+      } catch { }
       navigate("/hoy", { replace: true });
     } catch (err: any) {
       setError(String(err?.message ?? err));
@@ -247,9 +255,7 @@ export default function Onboarding() {
     try {
       setError(null);
       const orgId = createdOrgId || activeOrgId;
-      if (!orgId) {
-        throw new Error("Primero debemos crear la clínica antes de conectar Messenger.");
-      }
+      if (!orgId) throw new Error("Primero debemos crear la clínica antes de conectar Messenger.");
       localStorage.setItem(META_REDIRECT_FLAG, "/onboarding?connected=1");
       await startMetaOAuth(orgId);
     } catch (err: any) {
@@ -258,19 +264,17 @@ export default function Onboarding() {
   }
 
   function updateService(index: number, patch: Partial<ServiceItem>) {
-    setServices((prev) => prev.map((service, i) => (i === index ? { ...service, ...patch } : service)));
+    setServices((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   }
-
   function addCustomService() {
-    setServices((prev) => [
-      ...prev,
-      { name: "", duration_min: 30, price: "", active: true },
-    ]);
+    setServices((prev) => [...prev, { name: "", duration_min: 30, price: "", active: true }]);
   }
-
   function removeService(index: number) {
     setServices((prev) => prev.filter((_, i) => i !== index));
   }
+
+  const inputCls = "h-11 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder-white/30 focus:border-[#3CBDB9] outline-none";
+  const labelCls = "mb-1 block text-sm text-white/60";
 
   return (
     <div className="min-h-screen bg-[#0B1117] text-white">
@@ -278,37 +282,60 @@ export default function Onboarding() {
         <div className="w-full rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-black/30 sm:p-8">
           <div className="text-sm text-white/40 mb-2">Paso {step} de {totalSteps}</div>
           <div className="mb-8 flex gap-2">
-            {[1, 2, 3, 4].map((item) => (
+            {[1,2,3,4].map((item) => (
               <div key={item} className={`h-1 flex-1 rounded-full ${item <= step ? "bg-[#3CBDB9]" : "bg-white/10"}`} />
             ))}
           </div>
 
-          {step === 1 ? (
+          {/* ── Step 1 ── */}
+          {step === 1 && (
             <div className="space-y-4">
               <h2 className="text-xl font-semibold text-white">¿Cómo se llama tu clínica?</h2>
               <p className="text-white/50 text-sm">Esta información aparecerá cuando el bot se comunique con tus pacientes.</p>
               <div className="space-y-3">
                 <div>
-                  <label className="mb-1 block text-sm text-white/60">Nombre de la clínica *</label>
-                  <input value={clinicName} onChange={(e) => setClinicName(e.target.value)} className="h-11 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder-white/30 focus:border-[#3CBDB9] outline-none" placeholder="Ej: Clínica Dental Sonrisas" />
+                  <label className={labelCls}>Nombre de la clínica *</label>
+                  <input value={clinicName} onChange={(e) => setClinicName(e.target.value)}
+                    className={inputCls} placeholder="Ej: Clínica Dental Sonrisas" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm text-white/60">Teléfono</label>
-                  <input value={phone} onChange={(e) => setPhone(e.target.value)} className="h-11 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder-white/30 focus:border-[#3CBDB9] outline-none" placeholder="+504 9999-9999" />
+                  <label className={labelCls}>País y zona horaria *</label>
+                  <select
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-white/10 bg-[#0B1117] px-4 text-sm text-white focus:border-[#3CBDB9] outline-none"
+                  >
+                    {COUNTRY_TIMEZONES.map((opt) => (
+                      <option key={opt.timezone} value={opt.timezone}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-white/30">
+                    El bot agendará citas en esta zona horaria.
+                  </p>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm text-white/60">Dirección</label>
-                  <input value={address} onChange={(e) => setAddress(e.target.value)} className="h-11 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder-white/30 focus:border-[#3CBDB9] outline-none" placeholder="Colonia, calle, edificio" />
+                  <label className={labelCls}>Teléfono</label>
+                  <input value={phone} onChange={(e) => setPhone(e.target.value)}
+                    className={inputCls} placeholder="+1 (555) 000-0000" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm text-white/60">Ciudad</label>
-                  <input value={city} onChange={(e) => setCity(e.target.value)} className="h-11 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder-white/30 focus:border-[#3CBDB9] outline-none" placeholder="Tegucigalpa, San Pedro Sula, etc." />
+                  <label className={labelCls}>Dirección</label>
+                  <input value={address} onChange={(e) => setAddress(e.target.value)}
+                    className={inputCls} placeholder="Calle, número, colonia" />
+                </div>
+                <div>
+                  <label className={labelCls}>Ciudad</label>
+                  <input value={city} onChange={(e) => setCity(e.target.value)}
+                    className={inputCls} placeholder="Miami, Tegucigalpa, Ciudad de México..." />
                 </div>
               </div>
             </div>
-          ) : null}
+          )}
 
-          {step === 2 ? (
+          {/* ── Step 2 ── */}
+          {step === 2 && (
             <div className="space-y-4">
               <h2 className="text-xl font-semibold text-white">¿Cuál es tu horario de atención?</h2>
               <p className="text-white/50 text-sm">El asistente solo ofrecerá citas dentro de estos horarios.</p>
@@ -324,9 +351,13 @@ export default function Onboarding() {
                     <span className="w-24 text-sm capitalize text-white">{day}</span>
                     {!config.closed ? (
                       <>
-                        <input type="time" value={config.open ?? "08:00"} onChange={(e) => setHours((prev) => ({ ...prev, [day]: { ...prev[day], closed: false, open: e.target.value } }))} className="h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white" />
+                        <input type="time" value={config.open ?? "08:00"}
+                          onChange={(e) => setHours((prev) => ({ ...prev, [day]: { ...prev[day], closed: false, open: e.target.value } }))}
+                          className="h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white" />
                         <span className="text-white/40">a</span>
-                        <input type="time" value={config.close ?? "17:00"} onChange={(e) => setHours((prev) => ({ ...prev, [day]: { ...prev[day], closed: false, close: e.target.value } }))} className="h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white" />
+                        <input type="time" value={config.close ?? "17:00"}
+                          onChange={(e) => setHours((prev) => ({ ...prev, [day]: { ...prev[day], closed: false, close: e.target.value } }))}
+                          className="h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white" />
                       </>
                     ) : (
                       <span className="text-sm text-white/30">Cerrado</span>
@@ -335,9 +366,10 @@ export default function Onboarding() {
                 ))}
               </div>
             </div>
-          ) : null}
+          )}
 
-          {step === 3 ? (
+          {/* ── Step 3 ── */}
+          {step === 3 && (
             <div className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold text-white">¿Qué servicios ofreces?</h2>
@@ -348,64 +380,78 @@ export default function Onboarding() {
                   <div key={`${service.name}-${index}`} className={`rounded-xl border p-3 ${service.active ? "border-[#3CBDB9]/30 bg-[#3CBDB9]/10" : "border-white/10 bg-white/5"}`}>
                     <div className="flex flex-wrap items-center gap-3">
                       <Toggle enabled={service.active} onChange={(active) => updateService(index, { active })} />
-                      <input value={service.name} onChange={(e) => updateService(index, { name: e.target.value })} className={`h-10 min-w-[180px] flex-1 rounded-lg border px-3 text-sm outline-none ${service.active ? "border-[#3CBDB9]/30 bg-white/5 text-white" : "border-white/10 bg-white/5 text-white/50"}`} placeholder="Nombre del servicio" />
-                      {service.active ? (
+                      <input value={service.name} onChange={(e) => updateService(index, { name: e.target.value })}
+                        className={`h-10 min-w-[180px] flex-1 rounded-lg border px-3 text-sm outline-none ${service.active ? "border-[#3CBDB9]/30 bg-white/5 text-white" : "border-white/10 bg-white/5 text-white/50"}`}
+                        placeholder="Nombre del servicio" />
+                      {service.active && (
                         <>
-                          <input value={service.duration_min} type="number" min={10} onChange={(e) => updateService(index, { duration_min: Number(e.target.value) || 30 })} className="h-10 w-20 rounded-lg border border-white/10 bg-white/5 px-2 text-center text-sm text-white" />
+                          <input value={service.duration_min} type="number" min={10}
+                            onChange={(e) => updateService(index, { duration_min: Number(e.target.value) || 30 })}
+                            className="h-10 w-20 rounded-lg border border-white/10 bg-white/5 px-2 text-center text-sm text-white" />
                           <span className="text-xs text-white/40">min</span>
-                          <input value={service.price} onChange={(e) => updateService(index, { price: e.target.value })} className="h-10 w-28 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-white/30" placeholder="Precio" />
+                          <input value={service.price} onChange={(e) => updateService(index, { price: e.target.value })}
+                            className="h-10 w-28 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-white/30"
+                            placeholder="Precio" />
                         </>
-                      ) : null}
-                      {index >= DEFAULT_SERVICES.length ? (
-                        <button type="button" onClick={() => removeService(index)} className="rounded-lg border border-rose-400/20 bg-rose-500/10 p-2 text-rose-300 hover:bg-rose-500/20">
+                      )}
+                      {index >= DEFAULT_SERVICES.length && (
+                        <button type="button" onClick={() => removeService(index)}
+                          className="rounded-lg border border-rose-400/20 bg-rose-500/10 p-2 text-rose-300 hover:bg-rose-500/20">
                           <Trash2 className="h-4 w-4" />
                         </button>
-                      ) : null}
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
-              <button type="button" onClick={addCustomService} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10">
-                <Plus className="h-4 w-4" />
-                Agregar servicio
+              <button type="button" onClick={addCustomService}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10">
+                <Plus className="h-4 w-4" /> Agregar servicio
               </button>
             </div>
-          ) : null}
+          )}
 
-          {step === 4 ? (
+          {/* ── Step 4 ── */}
+          {step === 4 && (
             <div className="space-y-4 text-center">
               <h2 className="text-xl font-semibold text-white">Conecta tu página de Facebook</h2>
               <p className="text-sm text-white/50">
                 Para que el asistente pueda responder mensajes de tus pacientes, necesitamos conectar la página de Facebook de tu clínica.
               </p>
               <div className="py-8">
-                <button onClick={connectMessenger} className="mx-auto flex items-center gap-2 rounded-xl bg-[#1877F2] px-6 py-3 text-sm font-medium text-white hover:bg-[#1664d9]">
+                <button onClick={connectMessenger}
+                  className="mx-auto flex items-center gap-2 rounded-xl bg-[#1877F2] px-6 py-3 text-sm font-medium text-white hover:bg-[#1664d9]">
                   <MessageCircle className="h-5 w-5" />
                   Conectar Facebook Messenger
                 </button>
               </div>
               <p className="text-xs text-white/30">También puedes hacer esto después desde Configuración.</p>
-              <button onClick={finishOnboarding} className="rounded-xl bg-[#3CBDB9] px-6 py-3 text-sm font-semibold text-[#0B1117] hover:bg-[#35a9a5]">
+              <button onClick={finishOnboarding}
+                className="rounded-xl bg-[#3CBDB9] px-6 py-3 text-sm font-semibold text-[#0B1117] hover:bg-[#35a9a5]">
                 {messengerConnected ? "Ir al Dashboard" : "Omitir por ahora"}
               </button>
             </div>
-          ) : null}
+          )}
 
-          {error ? (
+          {error && (
             <div className="mt-6 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {error}
             </div>
-          ) : null}
+          )}
 
           <div className="mt-8 flex gap-3">
-            {step > 1 ? (
-              <button onClick={() => setStep((prev) => prev - 1)} className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/70 hover:bg-white/10">
+            {step > 1 && (
+              <button onClick={() => setStep((prev) => prev - 1)}
+                className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/70 hover:bg-white/10">
                 Anterior
               </button>
-            ) : null}
-            <button onClick={handleNext} disabled={!canProceed || saving} className="flex-1 rounded-xl bg-[#3CBDB9] px-5 py-3 text-sm font-semibold text-[#0B1117] hover:bg-[#35a9a5] disabled:opacity-60">
-              {saving ? "Guardando..." : step === totalSteps ? "Finalizar" : "Continuar"}
-            </button>
+            )}
+            {step < 4 && (
+              <button onClick={handleNext} disabled={!canProceed || saving}
+                className="flex-1 rounded-xl bg-[#3CBDB9] px-5 py-3 text-sm font-semibold text-[#0B1117] hover:bg-[#35a9a5] disabled:opacity-60">
+                {saving ? "Guardando..." : "Continuar"}
+              </button>
+            )}
           </div>
         </div>
       </div>

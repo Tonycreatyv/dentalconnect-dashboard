@@ -39,111 +39,196 @@ export type LlmTurnResult = {
   decision_meta: DecisionMeta;
 };
 
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
-const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+// --- CONFIGURACIÓN DE GROQ 2026 ---
+const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") ?? "";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 const DEFAULT_PROMPTS: Record<string, string> = {
-  creatyv:
-    `Eres el asistente de ventas de Creatyv AI. Tu objetivo es explicar el producto y guiar al prospecto a probar el sistema.
-
-PRODUCTO: Sistema de IA que responde mensajes automáticamente, agenda citas, y da seguimiento a clientes.
-
-REGLAS:
-- Español amigable y profesional
-- Respuestas cortas (2-3 oraciones máximo)
-- Siempre termina con una pregunta o llamado a acción
-- Si dicen "sí/ok/dale", continúa el flujo (NO reinicies)
-- Si preguntan precio, ofrece demo para cotización
-
-RESPONDE SOLO JSON:
-{"reply":"texto","state_patch":{"stage":"...","nextExpected":"..."},"tool_calls":[],"decision_meta":{"reason":"...","confidence":0.9}}`,
-
-  dental:
-    `Eres la recepcionista de una clínica dental. Tu objetivo es atender pacientes y ayudarles a agendar citas.
-
-REGLAS:
-- Español cálido y profesional
-- Respuestas cortas
-- NO repitas preguntas ya respondidas
-- Si dicen "sí/ok/dale", continúa el flujo
-- Para agendar: pide nombre, servicio, día y hora preferidos
-- Si es emergencia, prioriza atención rápida
-
-RESPONDE SOLO JSON:
-{"reply":"texto","state_patch":{"stage":"...","collected":{"name":"...","service":"..."}},"tool_calls":[],"decision_meta":{"reason":"...","confidence":0.9}}`,
-
-  generic:
-    `Eres un asistente virtual amigable. Responde dudas y guía al usuario.
-
-RESPONDE SOLO JSON:
-{"reply":"texto","state_patch":{},"tool_calls":[],"decision_meta":{"reason":"...","confidence":0.9}}`,
+  creatyv: `Eres el asistente de ventas de Creatyv AI. RESPONDE SOLO JSON.`,
+  dental: `Eres la recepcionista de una clínica dental. RESPONDE SOLO JSON.`,
+  generic: `Eres un asistente virtual amigable. RESPONDE SOLO JSON.`,
 };
 
 function getSystemPrompt(orgSettings?: OrgSettings): string {
   const sp = orgSettings?.system_prompt;
-
-  if (typeof sp === "string" && sp.length > 100) {
+  if (typeof sp === "string" && sp.trim().length > 0) {
     return sp;
   }
+  const bizType = String(orgSettings?.business_type ?? "generic").toLowerCase();
+  if (bizType.includes("dental") || bizType.includes("clinic"))
+    return DEFAULT_PROMPTS.dental;
+  if (bizType.includes("agency") || bizType.includes("creatyv"))
+    return DEFAULT_PROMPTS.creatyv;
+  return DEFAULT_PROMPTS.generic;
+}
 
-  if (sp && typeof sp === "object") {
-    const config = sp as Record<string, unknown>;
-    if (Array.isArray(config.rules)) {
-      const rulesText = (config.rules as string[]).map((r) => `- ${r}`).join(
-        "\n",
-      );
-      const openingQ = config.opening_question
-        ? `\nPregunta de apertura sugerida: ${config.opening_question}`
-        : "";
+// =============================================================================
+// CLINIC CONTEXT BUILDER — reads clinic_settings and builds a text block
+// =============================================================================
 
-      return `${DEFAULT_PROMPTS.creatyv}\n\nREGLAS ESPECÍFICAS:\n${rulesText}${openingQ}`;
+function buildClinicContext(clinicSettings?: Record<string, unknown>): string {
+  if (!clinicSettings || Object.keys(clinicSettings).length === 0) return "";
+
+  const parts: string[] = [];
+
+  // Hours
+  const hours = clinicSettings.hours as Record<string, any> | undefined;
+  if (hours && typeof hours === "object") {
+    const dayNames: Record<string, string> = {
+      mon: "Lunes",
+      tue: "Martes",
+      wed: "Miércoles",
+      thu: "Jueves",
+      fri: "Viernes",
+      sat: "Sábado",
+      sun: "Domingo",
+    };
+    const lines: string[] = [];
+    for (const [key, label] of Object.entries(dayNames)) {
+      const day = hours[key];
+      if (!day) continue;
+      if (day.closed) {
+        lines.push(`- ${label}: CERRADO`);
+      } else {
+        lines.push(`- ${label}: ${day.open || "08:00"} - ${day.close || "17:00"}`);
+      }
+    }
+    if (lines.length > 0) {
+      parts.push(`HORARIO DE LA CLÍNICA:\n${lines.join("\n")}`);
     }
   }
 
-  const bizType = String(orgSettings?.business_type ?? "generic").toLowerCase();
-  if (bizType.includes("dental") || bizType.includes("clinic")) {
-    return DEFAULT_PROMPTS.dental;
+  // Services with prices
+  const services = clinicSettings.services as any[] | undefined;
+  if (Array.isArray(services) && services.length > 0) {
+    const lines: string[] = [];
+    for (const svc of services) {
+      const name = String(svc.name ?? "").trim();
+      if (!name) continue;
+      const currency = String(svc.currency ?? "HNL");
+      const from = svc.price_from;
+      const to = svc.price_to;
+      const dur = svc.duration_min;
+      const notes = String(svc.notes ?? "").trim();
+
+      let priceStr = "";
+      if (from && to) {
+        priceStr = `${currency} ${from} - ${currency} ${to}`;
+      } else if (from) {
+        priceStr = `desde ${currency} ${from}`;
+      } else {
+        priceStr = "consultar precio";
+      }
+
+      let line = `- ${name}: ${priceStr}`;
+      if (dur) line += ` (${dur} min)`;
+      if (notes) line += `. ${notes}`;
+      lines.push(line);
+    }
+    if (lines.length > 0) {
+      parts.push(
+        `SERVICIOS Y PRECIOS:\n${lines.join("\n")}\nCuando pregunten precio, SIEMPRE da el rango real de arriba. NUNCA digas "los precios varían, preguntá al doctor".`
+      );
+    }
   }
-  if (bizType.includes("agency") || bizType.includes("creatyv")) {
-    return DEFAULT_PROMPTS.creatyv;
+
+  // Phone
+  const phone = clinicSettings.phone as string | undefined;
+  if (phone && String(phone).trim()) {
+    parts.push(`TELÉFONO: ${String(phone).trim()}`);
   }
-  return DEFAULT_PROMPTS.generic;
+
+  // Address
+  const address = clinicSettings.address as string | undefined;
+  if (address && String(address).trim()) {
+    parts.push(`DIRECCIÓN: ${String(address).trim()}`);
+  }
+
+  // Emergency
+  const emergency = clinicSettings.emergency as string | undefined;
+  if (emergency && String(emergency).trim()) {
+    parts.push(`EMERGENCIAS: ${String(emergency).trim()}`);
+  }
+
+  // Policies
+  const policies = clinicSettings.policies as Record<string, string> | undefined;
+  if (policies && typeof policies === "object") {
+    const pLines: string[] = [];
+    for (const [, val] of Object.entries(policies)) {
+      if (val) pLines.push(`- ${val}`);
+    }
+    if (pLines.length > 0) {
+      parts.push(`POLÍTICAS:\n${pLines.join("\n")}`);
+    }
+  }
+
+  // FAQs
+  const faqs = clinicSettings.faqs as any[] | undefined;
+  if (Array.isArray(faqs) && faqs.length > 0) {
+    const fLines: string[] = [];
+    for (const faq of faqs) {
+      const q = String(faq.q ?? "").trim();
+      const a = String(faq.a ?? "").trim();
+      if (q && a) fLines.push(`- "${q}" → "${a}"`);
+    }
+    if (fLines.length > 0) {
+      parts.push(`PREGUNTAS FRECUENTES:\n${fLines.join("\n")}`);
+    }
+  }
+
+  if (parts.length === 0) return "";
+  return "\n\nCONTEXTO DE LA CLÍNICA (datos reales, úsalos siempre):\n" + parts.join("\n\n");
 }
+
+// =============================================================================
+// USER PROMPT BUILDER
+// =============================================================================
 
 function buildUserPrompt(args: {
   inboundText: string;
   leadState: ConversationState | null;
   recentMessages?: RecentMessage[];
+  clinicContext?: string;
 }): string {
   const history = (args.recentMessages ?? [])
     .slice(-6)
-    .map((msg) =>
-      `${msg.role === "user" ? "Usuario" : "Asistente"}: ${msg.content}`
+    .map(
+      (msg) =>
+        `${msg.role === "user" ? "Usuario" : "Asistente"}: ${msg.content}`
     )
     .join("\n");
-
   const state = args.leadState ?? {};
+  const nowDate = new Date();
+  const now = nowDate.toLocaleString("es-HN", { timeZone: "America/Tegucigalpa" });
+  const dayNames = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const hoyLocal = new Date(nowDate.toLocaleString("en-US", { timeZone: "America/Tegucigalpa" }));
+  const mananaLocal = new Date(hoyLocal.getTime() + 86400000);
+  const hoyStr = `${dayNames[hoyLocal.getDay()]} ${hoyLocal.getDate()} de ${hoyLocal.toLocaleString("es-HN", { month: "long", timeZone: "America/Tegucigalpa" })} ${hoyLocal.getFullYear()}`;
+  const mananaStr = `${dayNames[mananaLocal.getDay()]} ${mananaLocal.getDate()} de ${mananaLocal.toLocaleString("es-HN", { month: "long", timeZone: "America/Tegucigalpa" })} ${mananaLocal.getFullYear()}`;
 
-  return `ESTADO ACTUAL:
-- Etapa: ${state.stage || "INITIAL"}
-- Último intent: ${state.lastIntent || "ninguno"}
-- Esperando: ${state.nextExpected || "nada"}
-- Info recolectada: ${JSON.stringify(state.collected || {})}
+  let prompt = `FECHA/HORA ACTUAL: ${now}\nHOY ES: ${hoyStr}\nMAÑANA ES: ${mananaStr}\nESTADO: ${JSON.stringify(state)}\nHISTORIAL:\n${history || "(Primera vez)"}\nMENSAJE: "${args.inboundText}"`;
 
-HISTORIAL RECIENTE:
-${history || "(Primera interacción)"}
+  if (args.clinicContext) {
+    prompt += `\n${args.clinicContext}`;
+  }
 
-MENSAJE DEL USUARIO:
-"${args.inboundText}"
-
-Responde con JSON válido.`;
+  prompt += `\nRESPONDE EN JSON VÁLIDO.`;
+  return prompt;
 }
+
+// =============================================================================
+// JSON PARSER
+// =============================================================================
 
 function tryParseJson(raw: string): LlmTurnResult | null {
   try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return null;
-
+    const cleanRaw = raw
+      .replace(/```json|```/g, "")
+      .replace(/\)\s*([,}\]])/g, "}$1")
+      .replace(/\)\s*$/g, "}")
+      .replace(/(["'\d])\)/g, "$1}")
+      .trim();
+    const parsed = JSON.parse(cleanRaw);
     return {
       reply: String(parsed.reply ?? ""),
       state_patch: (parsed.state_patch ?? {}) as StatePatch,
@@ -153,10 +238,20 @@ function tryParseJson(raw: string): LlmTurnResult | null {
         confidence: Number(parsed.decision_meta?.confidence ?? 0.7),
       },
     };
-  } catch {
+  } catch (e) {
+    console.error(
+      "[llmTurn] ERROR DE PARSEO JSON:",
+      e.message,
+      "RAW CONTENT:",
+      raw
+    );
     return null;
   }
 }
+
+// =============================================================================
+// MAIN LLM TURN
+// =============================================================================
 
 export async function runLlmTurn(args: {
   organizationId: string;
@@ -164,54 +259,67 @@ export async function runLlmTurn(args: {
   leadState: ConversationState | null;
   orgSettings?: OrgSettings;
   recentMessages?: RecentMessage[];
+  clinicSettings?: Record<string, unknown>;
+  context?: any;
 }): Promise<LlmTurnResult | null> {
-  if (!OPENAI_API_KEY) {
-    console.warn("[llmTurn] Missing OPENAI_API_KEY");
+  try {
+    if (!GROQ_API_KEY) {
+      console.error("[llmTurn] ERROR: GROQ_API_KEY NO ENCONTRADA EN ENTORNO.");
+      return null;
+    }
+
+    if (args.orgSettings?.llm_brain_enabled !== true) {
+      console.log("[llmTurn] IA deshabilitada en base de datos para esta org.");
+      return null;
+    }
+
+    const systemPrompt = getSystemPrompt(args.orgSettings);
+    const clinicContext = buildClinicContext(args.clinicSettings);
+    const userPrompt = buildUserPrompt({
+      inboundText: args.inboundText,
+      leadState: args.leadState,
+      recentMessages: args.recentMessages,
+      clinicContext,
+    });
+
+    console.log(`[llmTurn] Intentando Groq con modelo: ${GROQ_MODEL}`);
+
+    const res = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`Groq API Error ${res.status}: ${errBody}`);
+    }
+
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("Groq devolvió una respuesta vacía (sin content).");
+    }
+
+    return tryParseJson(content);
+  } catch (e) {
+    console.error("[llmTurn] ERROR CRÍTICO EN FETCH O PARSE:", e.message);
+    console.error("[llmTurn] STACK:", e.stack);
     return null;
   }
-
-  if (args.orgSettings?.llm_brain_enabled !== true) {
-    console.log("[llmTurn] LLM disabled for org");
-    return null;
-  }
-
-  const systemPrompt = getSystemPrompt(args.orgSettings);
-  const userPrompt = buildUserPrompt({
-    inboundText: args.inboundText,
-    leadState: args.leadState,
-    recentMessages: args.recentMessages,
-  });
-
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    console.error("[llmTurn] OpenAI error:", res.status, errText);
-    return null;
-  }
-
-  const data = await res.json().catch(() => null);
-  const content = data?.choices?.[0]?.message?.content;
-
-  if (!content || typeof content !== "string") {
-    console.warn("[llmTurn] Missing content");
-    return null;
-  }
-
-  return tryParseJson(content);
 }

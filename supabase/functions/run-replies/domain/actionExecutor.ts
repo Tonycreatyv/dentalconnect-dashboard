@@ -12,10 +12,8 @@ import {
   startTrial,
 } from "./tools.ts";
 import { syncCalendarEvent } from "./calendar/calendarSync.ts";
-import { CreateCalendarEventInput } from "./calendar/types.ts";
 
 type Json = Record<string, unknown>;
-
 type SupabaseClientType = SupabaseClientBase<any, "public", any>;
 
 const nowIso = () => new Date().toISOString();
@@ -27,7 +25,9 @@ export type ToolActionName =
   | "capture_business_type"
   | "capture_lead_goal"
   | "book_appointment"
-  | "create_trial_account";
+  | "cancel_appointment" 
+  | "create_trial_account"
+  | "get_clinic_info"; // Nueva herramienta para que la IA pregunte precios/horarios
 
 export type ToolActionExecution = {
   name: ToolActionName;
@@ -40,17 +40,26 @@ export type ActionExecutionResult = {
   replyOverride?: string;
 };
 
-function buildEventPayload(
-  action: ToolActionExecution,
-  toolResult: Json | undefined,
-  now: string,
-): Json {
-  return {
-    action: action.name,
-    tool_payload: action.payload ?? {},
-    result: toolResult ?? {},
-    timestamp: now,
-  };
+/**
+ * Función para obtener el contexto real de la clínica (Precios, Horarios, Info)
+ */
+async function getClinicContext(supabase: SupabaseClientType, organizationId: string) {
+  const { data: org } = await supabase.from('org_settings').select('name, address, phone, specialties, timezone').eq('organization_id', organizationId).single();
+  const { data: services } = await supabase.from('services').select('name, price, duration_min').eq('organization_id', organizationId);
+  const { data: hours } = await supabase.from('business_hours').select('day_of_week, open_time, close_time, is_closed').eq('organization_id', organizationId);
+
+  const servicesText = services?.map(s => `- ${s.name}: ${s.price} LPS (${s.duration_min} min)`).join('\n') || "No hay servicios listados.";
+  const hoursText = hours?.map(h => `Día ${h.day_of_week}: ${h.is_closed ? 'Cerrado' : `${h.open_time} - ${h.close_time}`}`).join('\n') || "Horarios no configurados.";
+
+  return `
+    CLÍNICA: ${org?.name || 'DentalConnect Clinic'}
+    UBICACIÓN: ${org?.address || 'No especificada'}
+    TELÉFONO: ${org?.phone || 'No especificado'}
+    SERVICIOS Y PRECIOS:
+    ${servicesText}
+    HORARIOS DE ATENCIÓN:
+    ${hoursText}
+  `;
 }
 
 export async function executeToolAction(params: {
@@ -64,121 +73,17 @@ export async function executeToolAction(params: {
   const now = nowIso();
   let statePatch: Json | undefined;
   let eventType: string | undefined;
-  let toolResult: Json | undefined;
   let replyOverride: string | undefined;
+
+  // Obtener info de la organización (Timezone)
+  const { data: orgData } = await supabase.from("org_settings").select("timezone").eq("organization_id", organizationId).single();
+  const orgTimezone = orgData?.timezone || "America/Tegucigalpa";
 
   try {
     switch (action.name) {
-      // ============================================
-      // CREATE TRIAL ACCOUNT - Nuevo tool
-      // ============================================
-      case "create_trial_account": {
-        const email = String(action.payload?.email ?? "").trim().toLowerCase();
-        const name = String(action.payload?.name ?? "").trim();
-        const businessType = String(action.payload?.business_type ?? "dental")
-          .trim();
-
-        if (!email || !email.includes("@")) {
-          console.warn("[actionExecutor] create_trial_account: invalid email", {
-            email,
-            leadId,
-          });
-          break;
-        }
-
-        const result = await createTrialAccount({
-          supabase: supabase as any,
-          organizationId,
-          leadId,
-          email,
-          name,
-          businessType,
-        });
-
-        toolResult = result as unknown as Json;
-
-        if (result.ok && result.signupUrl) {
-          statePatch = {
-            stage: "SIGNUP_LINK_SENT",
-            collected: {
-              email,
-              name: name || null,
-              business_type: businessType,
-              signup_url: result.signupUrl,
-              signup_requested_at: now,
-            },
-          };
-          eventType = "trial_signup_link_sent";
-
-          // Override del reply para incluir el link real
-          replyOverride = `¡Perfecto${
-            name ? `, ${name}` : ""
-          }! Creé tu cuenta de prueba. 
-
-Entra aquí para configurar tu clínica:
-${result.signupUrl}
-
-Una vez dentro, podrás conectar tu página de Facebook/Instagram para empezar a recibir mensajes automáticamente.
-
-Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.creatyv_main}`;
-        } else {
-          console.warn(
-            "[actionExecutor] create_trial_account failed:",
-            result.error,
-          );
-        }
-        break;
-      }
-
-      case "start_trial": {
-        toolResult = await startTrial(leadId);
-        statePatch = {
-          stage: "ACTIVATION",
-          collected: {
-            trial_offered: true,
-            trial_offered_at: now,
-          },
-        };
-        eventType = "trial_offered";
-        break;
-      }
-
-      case "begin_onboarding": {
-        toolResult = await beginOnboarding(leadId);
-        statePatch = {
-          stage: "ACTIVATION",
-          collected: {
-            onboarding_started: true,
-            onboarding_started_at: now,
-          },
-        };
-        eventType = "onboarding_started";
-        break;
-      }
-
-      case "capture_business_type": {
-        const businessType = String(action.payload?.businessType ?? "").trim();
-        toolResult = await captureBusinessType(leadId, businessType);
-        statePatch = {
-          business_type: businessType || null,
-          collected: {
-            business_type: businessType || null,
-          },
-        };
-        eventType = "business_type_captured";
-        break;
-      }
-
-      case "capture_lead_goal": {
-        const goal = String(action.payload?.goal ?? "").trim();
-        toolResult = await captureLeadGoal(leadId, goal);
-        statePatch = {
-          collected: {
-            selected_pain: goal || null,
-            last_pain_selected_at: now,
-          },
-        };
-        eventType = "lead_goal_captured";
+      case "get_clinic_info": {
+        const context = await getClinicContext(supabase, organizationId);
+        replyOverride = `Aquí tienes la información oficial: ${context}`;
         break;
       }
 
@@ -186,248 +91,119 @@ Si quieres ver más sobre nuestros productos, visita: ${result.productUrls?.crea
         const payload: Record<string, unknown> = action.payload ?? {};
         const appointmentDate = String(payload.appointment_date ?? "").trim();
         const appointmentTime = String(payload.appointment_time ?? "").trim();
-        const startsAtPayload = String(payload.starts_at ?? "").trim();
-        const endsAtPayload = String(payload.ends_at ?? "").trim();
         const patientName = String(payload.patient_name ?? "").trim();
-        const service = String(payload.service ?? payload.reason ?? "").trim();
-        const durationMin =
-          Number.isFinite(Number(payload.duration_min ?? 0)) &&
-            Number(payload.duration_min ?? 0) > 0
-            ? Number(payload.duration_min ?? 0)
-            : 60;
-        const channel = String(payload.channel ?? "messenger");
-        const startIso = buildIsoTimestamp(
-          appointmentDate,
-          appointmentTime,
-          startsAtPayload,
-        );
-        const endIso = buildEndIso(endsAtPayload, startIso, durationMin);
+        const service = String(payload.service ?? payload.reason ?? "Consulta General").trim();
+        
+        const startIso = buildIsoTimestamp(appointmentDate, appointmentTime, String(payload.starts_at ?? ""), orgTimezone);
+        const durationMin = Number(payload.duration_min) || 60;
+        const endIso = buildEndIso(String(payload.ends_at ?? ""), startIso, durationMin);
 
-        if (!startIso) {
-          console.warn("[actionExecutor] missing start time", {
-            leadId,
-            organizationId,
-          });
-          break;
-        }
+        if (!startIso) break;
 
-        toolResult = await bookAppointment({
+        const appointmentFields = {
           organization_id: organizationId,
           lead_id: leadId,
-          start_at: startIso ?? undefined,
-          end_at: endIso ?? undefined,
-          channel,
-        });
-
-        const metadata: Record<string, unknown> = {
-          channel,
-          duration_min: durationMin,
-          source: "run_replies",
-        };
-        const providerValue = String(
-          payload.calendar_provider ?? payload.provider ?? "",
-        ).trim();
-        const calendarIdValue = String(payload.calendar_id ?? "").trim();
-        if (providerValue) metadata.calendar_provider = providerValue;
-        if (calendarIdValue) metadata.calendar_id = calendarIdValue;
-
-        // ============================================
-        // UPSERT: update existing or insert new
-        // ============================================
-        let appointmentId: string | null = null;
-        try {
-          const existingAppt = await supabase
-            .from("appointments")
-            .select("id")
-            .eq("organization_id", organizationId)
-            .eq("lead_id", leadId)
-            .not("status", "in", '("cancelled","completed")')
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          const appointmentFields = {
-            organization_id: organizationId,
-            lead_id: leadId,
-            patient_name: patientName || null,
-            reason: service || null,
-            start_at: startIso,
-            starts_at: startIso,
-            end_at: endIso,
-            ends_at: String(endIso ?? startIso),
-            status: "confirmed",
-            appointment_date: appointmentDate || startIso.slice(0, 10),
-            appointment_time: appointmentTime || startIso.slice(11, 16),
-            title: service || "Cita dental",
-            metadata,
-            calendar_provider: providerValue || null,
-            calendar_id: calendarIdValue || null,
-            calendar_sync_status: "pending",
-          };
-
-          if (existingAppt.data?.id) {
-            const updateResult = await supabase
-              .from("appointments")
-              .update(appointmentFields)
-              .eq("id", existingAppt.data.id)
-              .select("id")
-              .single();
-            appointmentId = updateResult.data?.id ?? null;
-            console.log("[actionExecutor] appointment_updated", {
-              appointmentId,
-              leadId,
-            });
-          } else {
-            const insertResult = await supabase
-              .from("appointments")
-              .insert(appointmentFields)
-              .select("id")
-              .single();
-            appointmentId = insertResult.data?.id ?? null;
-          }
-        } catch (error) {
-          console.warn("[actionExecutor] appointment_upsert_failed", {
-            error: safeString(error),
-            leadId,
-            organizationId,
-          });
-        }
-
-        const syncInput: CreateCalendarEventInput & { provider?: string } = {
-          provider: providerValue,
-          calendar_id: calendarIdValue,
-          organization_id: organizationId,
-          title: String(payload.title ?? "Cita"),
-          description: String(payload.description ?? ""),
+          patient_name: patientName || null,
+          reason: service,
+          start_at: startIso,
           starts_at: startIso,
-          ends_at: String(endIso ?? startIso),
-          patient_name: String(payload.patient_name ?? ""),
-          patient_email: String(payload.patient_email ?? ""),
-          patient_phone: String(payload.patient_phone ?? ""),
-          metadata,
+          end_at: endIso,
+          ends_at: endIso || startIso,
+          status: "confirmed",
+          appointment_date: appointmentDate || startIso.slice(0, 10),
+          appointment_time: appointmentTime || startIso.slice(11, 16),
+          title: `Cita: ${service}`,
+          updated_at: now,
         };
-        const syncResult = await syncCalendarEvent(syncInput as any);
+
+        const { data: existingAppt } = await supabase.from("appointments").select("id").eq("lead_id", leadId).eq("organization_id", organizationId).in("status", ["confirmed", "pending"]).maybeSingle();
+
+        let appointmentId: string | null = null;
+        if (existingAppt?.id) {
+          const { data } = await supabase.from("appointments").update(appointmentFields).eq("id", existingAppt.id).select("id").single();
+          appointmentId = data?.id ?? null;
+        } else {
+          const { data } = await supabase.from("appointments").insert({ ...appointmentFields, created_at: now }).select("id").single();
+          appointmentId = data?.id ?? null;
+        }
 
         if (appointmentId) {
-          await supabase
-            .from("appointments")
-            .update({
-              calendar_provider: providerValue || syncResult.provider || null,
-              calendar_id: calendarIdValue || null,
-              calendar_event_id: syncResult.event_id ?? null,
-              calendar_sync_status: syncResult.sync_status,
-              calendar_sync_error: syncResult.error ?? null,
-              calendar_last_synced_at: nowIso(),
-            })
-            .eq("id", appointmentId);
+          await syncCalendarEvent({
+            organization_id: organizationId,
+            title: appointmentFields.title,
+            starts_at: startIso,
+            ends_at: endIso || startIso,
+            patient_name: patientName,
+            metadata: { source: "groq_ai_bot", appointment_id: appointmentId }
+          } as any);
         }
 
-        statePatch = {
-          collected: {
-            appointment_scheduled: true,
-            booking: {
-              preferred_date: appointmentDate || null,
-              preferred_time: appointmentTime || null,
-              starts_at: startIso,
-              start_at: startIso,
-              ends_at: String(endIso ?? startIso),
-              end_at: endIso,
-              duration_min: durationMin,
-              last_question_key: "booking_confirmed",
-              completed: true,
-            },
-          },
-        };
+        statePatch = { stage: "BOOKING_CONFIRMED", collected: { booking: { completed: true, date: appointmentDate, time: appointmentTime } } };
         eventType = "appointment_booked";
+        replyOverride = `¡Listo! He agendado tu cita de ${service} para el ${appointmentDate} a las ${appointmentTime}. ¡Te esperamos! 🦷✨`;
         break;
       }
 
-      case "show_demo": {
-        toolResult = await showDemo();
-        eventType = "demo_interest_detected";
+      case "create_trial_account": {
+        const email = String(action.payload?.email ?? "").trim().toLowerCase();
+        const name = String(action.payload?.name ?? "").trim();
+        if (!email.includes("@") || name.length < 2) {
+          replyOverride = "Por favor, dime tu nombre y tu correo para prepararte el acceso correctamente. 😊";
+          break;
+        }
+        await supabase.from("leads").upsert({ organization_id: organizationId, email, full_name: name, status: "interested", updated_at: now }, { onConflict: "email" });
+        const result = await createTrialAccount({ supabase: supabase as any, organizationId, leadId, email, name, businessType: "dental" });
+        if (result.ok) {
+          const finalUrl = `https://dental.creatyv.io/signup?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`;
+          statePatch = { stage: "SIGNUP_LINK_SENT", collected: { email, signup_url: finalUrl } };
+          eventType = "trial_signup_link_sent";
+          replyOverride = `¡Excelente, ${name}! He preparado tu acceso de prueba por 14 días. Entra aquí: ${finalUrl} \n\nConfigura tu clínica en 5 minutos. 🚀`;
+        }
         break;
       }
-
-      default:
-        break;
+      default: break;
     }
   } catch (error) {
-    console.warn("[actionExecutor] tool call failed", {
-      action: action.name,
-      leadId,
-      organizationId,
-      error: safeString(error),
-    });
+    console.error("[actionExecutor] ERROR:", error);
   }
 
   if (eventType) {
-    const payload = buildEventPayload(action, toolResult, now);
     try {
-      await supabase.from("lead_events").insert({
-        organization_id: organizationId,
-        lead_id: leadId,
-        event_type: eventType,
-        payload,
-        created_at: now,
-      });
-    } catch (error) {
-      console.warn("[actionExecutor] lead_events insert failed", {
-        error: safeString(error),
-        eventType,
-        leadId,
-      });
-    }
-    return { statePatch, event: { type: eventType, payload }, replyOverride };
+      await supabase.from("lead_events").insert({ organization_id: organizationId, lead_id: leadId, event_type: eventType, payload: { action: action.name, timestamp: now } });
+    } catch (e) { console.warn("Error logueando evento"); }
+    return { statePatch, event: { type: eventType, payload: { action: action.name } }, replyOverride };
   }
   return { statePatch, replyOverride };
 }
 
-function buildIsoTimestamp(
-  date: string,
-  time: string,
-  overrideValue: string,
-): string | null {
-  const candidate = overrideValue?.trim();
-  if (candidate && isIsoTs(candidate)) return candidate;
-  if (date && time) {
-    const constructed = `${date}T${time}:00`;
-    const parsed = new Date(constructed);
-    if (!Number.isNaN(parsed.valueOf())) {
-      return parsed.toISOString();
-    }
+function buildIsoTimestamp(date: string, time: string, override: string, timezone: string): string | null {
+  if (override && /^\d{4}-\d{2}-\d{2}T/.test(override)) return override;
+  if (!date || !time) return null;
+  const tzOffsets: Record<string, string> = {
+    "America/Tegucigalpa": "-06:00",
+    "America/Guatemala": "-06:00",
+    "America/Costa_Rica": "-06:00",
+    "America/Mexico_City": "-06:00",
+    "America/Bogota": "-05:00",
+    "America/Lima": "-05:00",
+    "America/New_York": "-04:00",
+    "America/Chicago": "-05:00",
+    "America/Denver": "-06:00",
+    "America/Los_Angeles": "-07:00",
+  };
+  const offset = tzOffsets[timezone] || "-06:00";
+  const timeNorm = time.includes(":") ? time : `${time}:00`;
+  const timeWithSec = timeNorm.length === 5 ? `${timeNorm}:00` : timeNorm;
+  const constructed = `${date}T${timeWithSec}${offset}`;
+  const parsed = new Date(constructed);
+  if (!Number.isNaN(parsed.valueOf())) {
+    return parsed.toISOString();
   }
   return null;
 }
 
-function buildEndIso(
-  overrideValue: string,
-  startIso: string | null,
-  durationMin: number,
-): string | null {
-  const candidate = overrideValue?.trim();
-  if (candidate && isIsoTs(candidate)) return candidate;
-  if (startIso) {
-    const base = new Date(startIso);
-    if (!Number.isNaN(base.valueOf())) {
-      const endTs = new Date(
-        base.getTime() + Math.max(1, durationMin) * 60 * 1000,
-      );
-      return endTs.toISOString();
-    }
-  }
-  return null;
-}
-
-function isIsoTs(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value);
-}
-
-function safeString(value: unknown) {
-  if (typeof value === "string") return value;
-  if (value == null) return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+function buildEndIso(override: string, startIso: string | null, duration: number): string | null {
+  if (override && /^\d{4}-\d{2}-\d{2}T/.test(override)) return override;
+  if (!startIso) return null;
+  return new Date(new Date(startIso).getTime() + duration * 60000).toISOString();
 }

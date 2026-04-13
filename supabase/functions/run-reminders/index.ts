@@ -100,15 +100,23 @@ serve(async (req) => {
           || "";
 
         const apptDate = new Date(appt.start_at);
+        const { data: tzData } = await supabase
+          .from("org_settings")
+          .select("timezone")
+          .eq("organization_id", appt.organization_id)
+          .maybeSingle();
+        const tz = safeStr(tzData?.timezone, "America/Tegucigalpa");
         const dateStr = apptDate.toLocaleDateString("es-HN", {
           weekday: "long",
           day: "numeric",
           month: "long",
+          timeZone: tz,
         });
         const timeStr = apptDate.toLocaleTimeString("es-HN", {
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
+          timeZone: tz,
         });
         const service = safeStr(appt.reason, "") || safeStr(appt.title, "") || "tu cita";
 

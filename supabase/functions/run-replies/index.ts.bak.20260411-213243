@@ -766,7 +766,6 @@ async function generateReply(
         leadState: leadState as any,
         orgSettings,
         recentMessages,
-        clinicSettings,
       });
 
       if (llmResult) {
