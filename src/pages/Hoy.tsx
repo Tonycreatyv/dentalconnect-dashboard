@@ -110,7 +110,7 @@ function ApptCard({ appt, doctors, onConfirm, onComplete, onCancel, onMessage }:
   const [open, setOpen] = useState(false);
   const status = getStatus(appt.status);
   const st = STATUS_STYLES[status];
-  const time = fmtTime(apptISO(appt));
+  const time = (appt as any).appointment_time || fmtTime(apptISO(appt));
   const docName = appt.provider_name || "Sin asignar";
   const dc = appt.provider_name ? docColor(docName, doctors) : "bg-white/5 text-white/30 border-white/10";
 
@@ -232,7 +232,7 @@ function WeekCalendar({ weekAppts, selectedDate, onDayClick, docFilter }: {
                   const st = STATUS_STYLES[getStatus(a.status)];
                   return (
                     <div key={ai} className={`text-[9px] truncate px-1 py-0.5 rounded bg-white/5 ${st.week}`}>
-                      {fmtTime(apptISO(a))} {a.patient_name?.split(" ")[0] ?? "—"}
+                      {(a as any).appointment_time || fmtTime(apptISO(a))} {a.patient_name?.split(" ")[0] ?? "—"}
                     </div>
                   );
                 })}
@@ -294,12 +294,12 @@ export default function Hoy() {
 
     const [apptsRes, weekRes, msgsRes, outboxRes, alertsRes, tmrwRes, weekCountRes] = await Promise.all([
       supabase.from("appointments")
-        .select("id, organization_id, lead_id, patient_name, title, reason, status, start_at, starts_at, provider_name")
+        .select("id, organization_id, lead_id, patient_name, title, reason, status, start_at, starts_at, provider_name, appointment_time")
         .eq("organization_id", orgId)
         .gte("start_at", todayStart).lte("start_at", todayEnd)
         .order("start_at", { ascending: true }),
       supabase.from("appointments")
-        .select("id, start_at, starts_at, status, patient_name, provider_name")
+        .select("id, start_at, starts_at, status, patient_name, provider_name, appointment_time")
         .eq("organization_id", orgId)
         .gte("start_at", monday.toISOString()).lte("start_at", sunday.toISOString())
         .neq("status", "cancelled"),
