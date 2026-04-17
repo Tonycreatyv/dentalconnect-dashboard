@@ -13,15 +13,13 @@ const DEFAULT_ORG = "clinic-demo";
 type BillingStatus = "trialing" | "active" | "past_due" | "canceled";
 
 const FEATURES = [
-  { icon: Bot, text: "Asistente IA 24/7 en Messenger y WhatsApp" },
+  { icon: Bot, text: "Asistente IA 24/7 en Messenger" },
   { icon: MessageCircle, text: "Inbox centralizado — todos los mensajes en un solo lugar" },
   { icon: Calendar, text: "Agenda inteligente con vista día, semana y mes" },
-  { icon: Bell, text: "Recordatorios automáticos 72h, 24h y 2h antes" },
-  { icon: Users, text: "CRM de pacientes con historial completo" },
+  { icon: Bell, text: "Recordatorios automáticos antes de cada cita" },
+  { icon: Users, text: "Gestión de pacientes y leads" },
   { icon: TrendingUp, text: "Leads ilimitados — nunca pierdas un paciente" },
-  { icon: Sparkles, text: "Marketing IA — genera contenido para redes" },
-  { icon: BarChart3, text: "Reportes y métricas de tu clínica" },
-  { icon: Zap, text: "Automatizaciones y follow-ups inteligentes" },
+  { icon: Zap, text: "Follow-ups automáticos inteligentes" },
   { icon: Headphones, text: "Soporte dedicado" },
 ];
 
@@ -29,10 +27,9 @@ const COMPARISON = [
   { label: "Responde 24/7", creatyv: true, recep: false, agency: false },
   { label: "Agenda citas automáticamente", creatyv: true, recep: true, agency: false },
   { label: "Recordatorios automáticos", creatyv: true, recep: false, agency: true },
-  { label: "CRM de pacientes", creatyv: true, recep: false, agency: false },
-  { label: "Messenger + WhatsApp", creatyv: true, recep: false, agency: true },
-  { label: "Marketing IA", creatyv: true, recep: false, agency: true },
-  { label: "Reportes y métricas", creatyv: true, recep: false, agency: true },
+  { label: "Gestión de pacientes", creatyv: true, recep: false, agency: false },
+  { label: "Messenger integrado", creatyv: true, recep: false, agency: true },
+  { label: "Follow-ups automáticos", creatyv: true, recep: false, agency: false },
   { label: "Nunca se enferma ni falta", creatyv: true, recep: false, agency: false },
 ];
 
@@ -53,8 +50,8 @@ const PLANS = [
     name: "Starter",
     price: 79,
     foundersPrice: 49,
-    description: "1 doctor, Messenger incluido",
-    features: ["1 doctor", "Messenger", "Reminders automáticos", "CRM básico", "Soporte por email"],
+    description: "1 doctor, secretarias ilimitadas",
+    features: ["1 doctor", "Secretarias ilimitadas", "Messenger 24/7", "Recordatorios automáticos", "Soporte por email"],
     highlight: false,
   },
   {
@@ -62,8 +59,8 @@ const PLANS = [
     name: "Clínica",
     price: 149,
     foundersPrice: 89,
-    description: "Hasta 4 doctores, WhatsApp + Messenger",
-    features: ["Hasta 4 doctores", "WhatsApp + Messenger", "Reminders 72h/24h/2h", "CRM completo", "Reportes", "Soporte prioritario"],
+    description: "Hasta 5 doctores, ideal para clínicas",
+    features: ["Hasta 5 doctores", "Secretarias ilimitadas", "Messenger 24/7", "Recordatorios automáticos", "Gestión de pacientes", "Soporte prioritario"],
     highlight: true,
   },
   {
@@ -71,8 +68,8 @@ const PLANS = [
     name: "Elite",
     price: 249,
     foundersPrice: 149,
-    description: "Doctores ilimitados, todo incluido",
-    features: ["Doctores ilimitados", "WhatsApp + Messenger", "Google Calendar sync", "Marketing IA", "Analíticas avanzadas", "Soporte VIP 24/7"],
+    description: "Hasta 15 doctores, multi-sucursal",
+    features: ["Hasta 15 doctores", "Secretarias ilimitadas", "Messenger 24/7", "Multi-sucursal", "Recordatorios automáticos", "Soporte prioritario 24/7"],
     highlight: false,
   },
 ];
