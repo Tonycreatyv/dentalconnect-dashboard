@@ -68,7 +68,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <NavItem to="/inbox" icon={Inbox} label="Inbox" onNavigate={onNavigate} />
         <NavItem to="/leads" icon={Users} label="Leads" onNavigate={onNavigate} />
         <NavItem to="/agenda" icon={CalendarDays} label="Agenda" onNavigate={onNavigate} />
-        <NavItem to="/marketing" icon={Sparkles} label="Marketing IA" onNavigate={onNavigate} />
+        {/* <NavItem to="/marketing" icon={Sparkles} label="Marketing IA" onNavigate={onNavigate} /> */}
         <NavItem to="/patients" icon={UserRound} label="Patients" onNavigate={onNavigate} />
         <NavItem to="/billing" icon={CreditCard} label="Billing" onNavigate={onNavigate} />
         <NavItem to="/settings" icon={Settings} label="Settings" onNavigate={onNavigate} />

@@ -67,7 +67,7 @@ type TabKey = "integraciones" | "clinica" | "horario" | "servicios" | "faqs" | "
 const INTEGRATIONS = [
   { key: "messenger" as const, name: "Messenger", description: "Centraliza mensajes de Facebook.", icon: MessagesSquare },
   { key: "instagram" as const, name: "Instagram", description: "Responde desde Instagram.", icon: Instagram },
-  { key: "whatsapp" as const, name: "WhatsApp", description: "Conecta para confirmar citas.", icon: MessageCircle },
+  { key: "whatsapp" as const, name: "WhatsApp (Próximamente)", description: "Integración en proceso. Se activa con tu mismo número.", icon: MessageCircle },
   { key: "google_calendar" as const, name: "Google Calendar", description: "Sincroniza citas.", icon: CalendarDays },
 ];
 
