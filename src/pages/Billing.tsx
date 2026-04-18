@@ -47,29 +47,29 @@ const CLAIMED_SLOTS = 7;
 const PLANS = [
   {
     id: "starter", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/3d164ed5-85ac-4a42-a94c-a34ade5c4fc7",
-    name: "Starter",
+    name: "Especialista",
     price: 79,
-    foundersPrice: 49,
-    description: "1 doctor, secretarias ilimitadas",
-    features: ["1 doctor", "Secretarias ilimitadas", "Messenger 24/7", "Recordatorios automáticos", "Soporte por email"],
+    doctorLimit: 1,
+    description: "1 doctor + 1 recepcionista",
+    features: ["1 doctor", "1 recepcionista", "Messenger", "Reminders automáticos", "CRM básico", "Soporte por email"],
     highlight: false,
   },
   {
     id: "growth", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/151e1ebc-2a05-4dc0-8ad0-c8d289ecaf9e",
-    name: "Clínica",
+    name: "Clínica Pro",
     price: 149,
-    foundersPrice: 89,
-    description: "Hasta 5 doctores, ideal para clínicas",
-    features: ["Hasta 5 doctores", "Secretarias ilimitadas", "Messenger 24/7", "Recordatorios automáticos", "Gestión de pacientes", "Soporte prioritario"],
+    doctorLimit: 5,
+    description: "Hasta 5 doctores + 1 recepcionista",
+    features: ["Hasta 5 doctores", "1 recepcionista", "Messenger", "Reminders 72h/24h/2h", "CRM completo", "Reportes", "Soporte prioritario"],
     highlight: true,
   },
   {
     id: "pro", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/b370f675-8b53-4bcb-b4ef-0546f4016675",
-    name: "Elite",
-    price: 249,
-    foundersPrice: 149,
-    description: "Hasta 15 doctores, multi-sucursal",
-    features: ["Hasta 15 doctores", "Secretarias ilimitadas", "Messenger 24/7", "Multi-sucursal", "Recordatorios automáticos", "Soporte prioritario 24/7"],
+    name: "Full Clinic",
+    price: 299,
+    doctorLimit: 15,
+    description: "Hasta 15 doctores, todo incluido",
+    features: ["Hasta 15 doctores", "Recepcionistas ilimitadas", "WhatsApp + Messenger", "Google Calendar sync", "Reminders 72h/24h/2h", "CRM completo", "Soporte VIP 24/7"],
     highlight: false,
   },
 ];
@@ -84,7 +84,6 @@ export default function Billing() {
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isFounders, setIsFounders] = useState(true);
 
   const spotsLeft = TOTAL_SLOTS - CLAIMED_SLOTS;
   const progressPercent = (CLAIMED_SLOTS / TOTAL_SLOTS) * 100;
@@ -137,20 +136,6 @@ export default function Billing() {
         </div>
       )}
 
-      {/* Founders toggle */}
-      <div className="flex items-center justify-center gap-4">
-        <span className={`text-sm ${!isFounders ? "text-white" : "text-white/40"}`}>Precio regular</span>
-        <button
-          onClick={() => setIsFounders(!isFounders)}
-          className={`relative h-7 w-14 rounded-full border transition-all duration-300 ${isFounders ? "border-[#3CBDB9]/60 bg-[#3CBDB9]/20" : "border-white/10 bg-white/5"}`}
-        >
-          <span className={`absolute top-0.5 h-6 w-6 rounded-full transition-all duration-300 ${isFounders ? "left-7 bg-[#59E0B8] shadow-[0_0_10px_rgba(89,224,184,0.5)]" : "left-0.5 bg-white/50"}`} />
-        </button>
-        <span className={`text-sm flex items-center gap-1 ${isFounders ? "text-[#59E0B8] font-semibold" : "text-white/40"}`}>
-          <Star className="h-3 w-3" /> Founders Price
-        </span>
-      </div>
-
       {/* Urgency bar */}
       <div className="rounded-2xl border border-[#3CBDB9]/20 bg-[#3CBDB9]/5 px-6 py-4">
         <div className="flex justify-between text-xs mb-2">
@@ -166,7 +151,7 @@ export default function Billing() {
       {/* Plans grid */}
       <div className="grid gap-4 lg:grid-cols-3">
         {PLANS.map((plan) => {
-          const price = isFounders ? plan.foundersPrice : plan.price;
+          const price = plan.price;
           const isActive = currentPlan === plan.id && (status === "active" || status === "trialing");
 
           return (
@@ -191,14 +176,6 @@ export default function Billing() {
                     <span className="text-4xl font-extrabold text-white">${price}</span>
                     <span className="text-white/40">/mes</span>
                   </div>
-                  {isFounders && (
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="text-xs text-white/30 line-through">${plan.price}/mes</span>
-                      <span className="rounded-full bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-                        Founders price
-                      </span>
-                    </div>
-                  )}
                   <div className="mt-1 text-xs text-white/40">{plan.description}</div>
                 </div>
 
