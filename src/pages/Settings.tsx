@@ -118,6 +118,8 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
 
+  useEffect(() => { fetchDoctors(); }, [ORG]);
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("connected") === "1") {
