@@ -560,32 +560,46 @@ export default function Settings() {
                           return (
                             <div key={key} className={"rounded-xl border p-2 text-center text-xs " + (isClosed ? "border-white/5 bg-white/[0.02] text-zinc-600" : "border-[#3CBDB9]/20 bg-[#3CBDB9]/5 text-zinc-300")}>
                               <div className="font-medium mb-1">{label}</div>
-                              <button onClick={async () => {
-                                const newSched = { ...sched };
-                                if (isClosed) {
-                                  const open = prompt(label + " — Hora de entrada (ej: 08:00):", "08:00");
-                                  if (!open) return;
-                                  const close = prompt(label + " — Hora de salida (ej: 17:00):", "17:00");
-                                  if (!close) return;
-                                  newSched[key] = { open, close, closed: false };
-                                } else {
-                                  const action = prompt("Opciones:\n1 = Cambiar horario\n2 = Marcar como cerrado\n\nEscribe 1 o 2:", "1");
-                                  if (action === "2") {
+                              {isClosed ? (
+                                <button onClick={async () => {
+                                  const newSched = { ...sched };
+                                  newSched[key] = { open: "08:00", close: "17:00", closed: false };
+                                  await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
+                                  const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                                  setDoctors(data || []);
+                                }} className="cursor-pointer text-zinc-500 hover:text-white">Cerrado</button>
+                              ) : (
+                                <div className="space-y-1">
+                                  <div className="flex gap-1 items-center">
+                                    <select value={day.open || "08:00"} onChange={async (e) => {
+                                      const newSched = { ...sched };
+                                      newSched[key] = { ...day, open: e.target.value };
+                                      await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
+                                      const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                                      setDoctors(data || []);
+                                    }} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
+                                      <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
+                                    </select>
+                                    <span className="text-zinc-500">-</span>
+                                    <select value={day.close || "17:00"} onChange={async (e) => {
+                                      const newSched = { ...sched };
+                                      newSched[key] = { ...day, close: e.target.value };
+                                      await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
+                                      const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                                      setDoctors(data || []);
+                                    }} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
+                                      <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
+                                    </select>
+                                  </div>
+                                  <button onClick={async () => {
+                                    const newSched = { ...sched };
                                     newSched[key] = { closed: true };
-                                  } else if (action === "1") {
-                                    const open = prompt(label + " — Hora de entrada:", day.open || "08:00");
-                                    if (!open) return;
-                                    const close = prompt(label + " — Hora de salida:", day.close || "17:00");
-                                    if (!close) return;
-                                    newSched[key] = { open, close, closed: false };
-                                  } else { return; }
-                                }
-                                await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
-                                const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                                setDoctors(data || []);
-                              }} className="cursor-pointer">
-                                {isClosed ? "Cerrado" : (day.open + " - " + day.close)}
-                              </button>
+                                    await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
+                                    const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                                    setDoctors(data || []);
+                                  }} className="text-[9px] text-red-400/60 hover:text-red-400 cursor-pointer">Cerrar día</button>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
