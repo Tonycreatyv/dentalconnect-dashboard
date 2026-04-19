@@ -176,6 +176,39 @@ function buildClinicContext(clinicSettings?: Record<string, unknown>): string {
     }
   }
 
+  // Providers (doctors)
+  const providers = clinicSettings.providers as any[] | undefined;
+  if (Array.isArray(providers) && providers.length > 0) {
+    const dayNames: Record<string, string> = {
+      mon: "Lunes", tue: "Martes", wed: "Miércoles", thu: "Jueves",
+      fri: "Viernes", sat: "Sábado", sun: "Domingo",
+    };
+    const docLines: string[] = [];
+    for (const doc of providers) {
+      const name = String(doc.name ?? "").trim();
+      if (!name) continue;
+      const svcs = Array.isArray(doc.services) ? doc.services.join(", ") : "todos";
+      const sched = doc.schedule as Record<string, any> | undefined;
+      let daysStr = "";
+      if (sched && typeof sched === "object") {
+        const activeDays: string[] = [];
+        for (const [key, label] of Object.entries(dayNames)) {
+          const day = sched[key];
+          if (day && !day.closed) {
+            activeDays.push(`${label} ${day.open}-${day.close}`);
+          }
+        }
+        daysStr = activeDays.length > 0 ? activeDays.join(", ") : "sin horario definido";
+      }
+      docLines.push(`- ${name}: servicios [${svcs}]. Horario: ${daysStr}`);
+    }
+    if (docLines.length > 0) {
+      parts.push(
+        `DOCTORES DISPONIBLES (asigná automáticamente según servicio y día):\n${docLines.join("\n")}\nCuando agendés, incluí provider_name en el tool_call payload. Si el servicio lo atienden varios doctores, elegí el que tenga disponibilidad ese día.`
+      );
+    }
+  }
+
   if (parts.length === 0) return "";
   return "\n\nCONTEXTO DE LA CLÍNICA (datos reales, úsalos siempre):\n" + parts.join("\n\n");
 }

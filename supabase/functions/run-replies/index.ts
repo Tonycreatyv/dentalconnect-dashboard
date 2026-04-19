@@ -1306,6 +1306,16 @@ Deno.serve(async (req: Request) => {
       organization_id,
     );
     const clinicSettings = await loadClinicSettings(supabase, organization_id);
+    // Load providers for auto-assignment
+    const { data: providersData } = await supabase
+      .from("providers")
+      .select("name, services, schedule, specialty, active")
+      .eq("organization_id", organization_id)
+      .eq("active", true)
+      .eq("role", "doctor");
+    if (providersData && providersData.length > 0) {
+      (clinicSettings as any).providers = providersData;
+    }
 
     const limit = Math.max(1, Math.min(Number(body?.limit ?? 10) || 10, 50));
     const lockTtlSeconds = Math.max(

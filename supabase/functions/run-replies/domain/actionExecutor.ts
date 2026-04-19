@@ -100,10 +100,12 @@ export async function executeToolAction(params: {
 
         if (!startIso) break;
 
-        const appointmentFields = {
+        let providerName = String(payload.provider_name ?? "").trim();
+        const appointmentFields: Record<string, any> = {
           organization_id: organizationId,
           lead_id: leadId,
           patient_name: patientName || null,
+          provider_name: providerName || null,
           reason: service,
           start_at: startIso,
           starts_at: startIso,
@@ -116,6 +118,92 @@ export async function executeToolAction(params: {
           updated_at: now,
         };
 
+        // Smart conflict resolution with doctor fallback
+        if (appointmentDate && appointmentTime && startIso) {
+          const [reqH, reqM] = appointmentTime.split(":").map(Number);
+          const reqMins = reqH * 60 + (reqM || 0);
+          const days = ["sun","mon","tue","wed","thu","fri","sat"];
+          const dateObj = new Date(appointmentDate + "T12:00:00Z");
+          const dayKey = days[dateObj.getUTCDay()];
+
+          // Load all doctors who do this service and work this day
+          const { data: allProviders } = await supabase
+            .from("providers")
+            .select("name, services, schedule")
+            .eq("organization_id", organizationId)
+            .eq("active", true)
+            .eq("role", "doctor");
+
+          const eligibleDocs = (allProviders || []).filter((p: any) => {
+            const svcs = Array.isArray(p.services) ? p.services : [];
+            const sched = p.schedule ? (p.schedule as any)[dayKey] : null;
+            return svcs.some((s: string) => s.toLowerCase() === service.toLowerCase()) && sched && !sched.closed;
+          });
+
+          if (eligibleDocs.length > 0) {
+            // Load all booked appointments for this date
+            const { data: dayAppts } = await supabase
+              .from("appointments")
+              .select("id, appointment_time, provider_name")
+              .eq("organization_id", organizationId)
+              .eq("appointment_date", appointmentDate)
+              .in("status", ["confirmed", "pending"]);
+
+            const bookedSlots = (dayAppts || []).map((a: any) => ({
+              provider: String(a.provider_name ?? ""),
+              time: String(a.appointment_time ?? ""),
+            }));
+
+            const isSlotFree = (doc: string, timeMins: number) => {
+              return !bookedSlots.some((b: any) => {
+                if (b.provider !== doc) return false;
+                const [bH, bM] = b.time.split(":").map(Number);
+                return Math.abs((bH * 60 + (bM || 0)) - timeMins) < durationMin;
+              });
+            };
+
+            // Try requested time with preferred or any eligible doctor
+            const preferredDoc = providerName || (eligibleDocs[0] as any).name;
+            let assignedDoc = "";
+
+            if (isSlotFree(preferredDoc, reqMins)) {
+              assignedDoc = preferredDoc;
+            } else {
+              // Try other doctors at same time
+              const altDoc = eligibleDocs.find((d: any) => d.name !== preferredDoc && isSlotFree(d.name, reqMins));
+              if (altDoc) {
+                assignedDoc = (altDoc as any).name;
+              }
+            }
+
+            if (assignedDoc) {
+              // Update provider_name in the appointment
+              appointmentFields.provider_name = assignedDoc;
+              providerName = assignedDoc;
+              console.log("[actionExecutor] auto-assigned:", assignedDoc);
+            } else {
+              // No doctor free at requested time - suggest alternatives
+              const suggestions: string[] = [];
+              for (const doc of eligibleDocs) {
+                const sched = (doc as any).schedule[dayKey];
+                const openH = parseInt(sched.open?.split(":")[0] ?? "8");
+                const closeH = parseInt(sched.close?.split(":")[0] ?? "17");
+                for (let h = openH; h < closeH; h++) {
+                  if (isSlotFree((doc as any).name, h * 60) && suggestions.length < 3) {
+                    suggestions.push(h.toString().padStart(2, "0") + ":00 con " + (doc as any).name);
+                  }
+                }
+              }
+              if (suggestions.length > 0) {
+                replyOverride = "Esa hora no está disponible. Tengo: " + suggestions.join(", ") + ". ¿Cuál te queda mejor?";
+              } else {
+                replyOverride = "No hay horarios disponibles para " + service + " ese día. ¿Te gustaría ver otro día?";
+              }
+              eventType = "appointment_conflict";
+              break;
+            }
+          }
+        }
         const { data: existingAppt } = await supabase.from("appointments").select("id").eq("lead_id", leadId).eq("organization_id", organizationId).in("status", ["confirmed", "pending"]).maybeSingle();
 
         let appointmentId: string | null = null;

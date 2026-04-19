@@ -62,7 +62,7 @@ function defaultHours(): HoursMap {
 
 const dayLabels: Record<string, string> = { mon: "Lunes", tue: "Martes", wed: "Miércoles", thu: "Jueves", fri: "Viernes", sat: "Sábado", sun: "Domingo" };
 
-type TabKey = "integraciones" | "clinica" | "horario" | "servicios" | "faqs" | "cuenta";
+type TabKey = "integraciones" | "clinica" | "equipo" | "equipo" | "equipo" | "horario" | "servicios" | "faqs" | "cuenta";
 
 const INTEGRATIONS = [
   { key: "messenger" as const, name: "Messenger", description: "Centraliza mensajes de Facebook.", icon: MessagesSquare },
@@ -94,6 +94,12 @@ export default function Settings() {
   const [emergency, setEmergency] = useState("Si es urgencia, cuéntanos síntomas.");
   const [policiesCancel, setPoliciesCancel] = useState("Avisa con 2 horas de anticipación.");
   const [policiesDeposit, setPoliciesDeposit] = useState("Algunos tratamientos requieren depósito.");
+
+  const [doctors, setDoctors] = useState<any[]>([]);
+  async function fetchDoctors() {
+    const { data } = await supabase.from('providers').select('*').eq('organization_id', ORG).eq('role', 'doctor');
+    if (data) setDoctors(data);
+  }
 
   const [orgIntegration, setOrgIntegration] = useState<OrgIntegrationState>({
     meta_page_id: null,
@@ -245,6 +251,7 @@ export default function Settings() {
     { key: "clinica" as const, label: "Clínica" },
     { key: "horario" as const, label: "Horario" },
     { key: "servicios" as const, label: "Servicios" },
+    { key: "equipo" as const, label: "Equipo" },
     { key: "faqs" as const, label: "FAQs" },
     { key: "cuenta" as const, label: "Cuenta" },
   ];
@@ -468,7 +475,116 @@ export default function Settings() {
       {tab === "clinica" && renderClinica()}
       {tab === "horario" && renderHorario()}
       {tab === "servicios" && renderServicios()}
-      {tab === "faqs" && renderFaqs()}
+      
+        {tab === "equipo" && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-medium text-white">Equipo Médico</h3>
+                <p className="text-sm text-zinc-400">Doctores, servicios que atienden y horarios.</p>
+              </div>
+              <button onClick={async () => {
+                const name = prompt("Nombre del doctor (ej: Dr. García):");
+                if (!name?.trim()) return;
+                const { error } = await supabase.from("providers").insert({
+                  organization_id: ORG, name: name.trim(), role: "doctor", active: true,
+                  services: [], schedule: {"mon":{"open":"08:00","close":"17:00"},"tue":{"open":"08:00","close":"17:00"},"wed":{"open":"08:00","close":"17:00"},"thu":{"open":"08:00","close":"17:00"},"fri":{"open":"08:00","close":"17:00"},"sat":{"closed":true},"sun":{"closed":true}},
+                  color: "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6,"0"),
+                });
+                if (!error) { const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor"); setDoctors(data || []); }
+              }} className="bg-[#3CBDB9] hover:bg-[#35a9a5] text-white px-4 py-2 rounded-xl text-sm font-medium">
+                + Agregar Doctor
+              </button>
+            </div>
+            <div className="space-y-4">
+              {doctors.length === 0 ? (
+                <div className="py-10 text-center border-2 border-dashed border-white/10 rounded-xl">
+                  <p className="text-zinc-500">No hay doctores registrados. Agregá uno para empezar.</p>
+                </div>
+              ) : (
+                doctors.map((doc) => {
+                  const dayNames: Record<string,string> = {"mon":"Lunes","tue":"Martes","wed":"Miércoles","thu":"Jueves","fri":"Viernes","sat":"Sábado","sun":"Domingo"};
+                  const sched = doc.schedule || {};
+                  const svcs = Array.isArray(doc.services) ? doc.services : [];
+                  return (
+                  <div key={doc.id} className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3 h-3 rounded-full" style={{backgroundColor: doc.color || "#3CBDB9"}} />
+                        <h3 className="text-white font-medium text-lg">{doc.name}</h3>
+                        <span className="text-xs text-zinc-400 bg-white/5 px-2 py-1 rounded-lg">{doc.specialty || "General"}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={async () => {
+                          if (!confirm("¿Eliminar a " + doc.name + "?")) return;
+                          await supabase.from("providers").delete().eq("id", doc.id);
+                          const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                          setDoctors(data || []);
+                        }} className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded-lg border border-red-500/20">Eliminar</button>
+                      </div>
+                    </div>
+                    
+                    <div className="mb-4">
+                      <div className="text-xs text-zinc-400 mb-2">Servicios que atiende</div>
+                      <div className="flex flex-wrap gap-2">
+                        {svcs.map((s: string) => (
+                          <span key={s} className="text-xs bg-[#3CBDB9]/10 text-[#3CBDB9] px-3 py-1 rounded-full border border-[#3CBDB9]/20 flex items-center gap-1">
+                            {s}
+                            <button onClick={async () => {
+                              const newSvcs = svcs.filter((x: string) => x !== s);
+                              await supabase.from("providers").update({ services: newSvcs }).eq("id", doc.id);
+                              const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                              setDoctors(data || []);
+                            }} className="ml-1 text-zinc-400 hover:text-red-400">×</button>
+                          </span>
+                        ))}
+                        <button onClick={async () => {
+                          const svc = prompt("Nombre del servicio (ej: Blanqueamiento):");
+                          if (!svc?.trim()) return;
+                          const newSvcs = [...svcs, svc.trim()];
+                          await supabase.from("providers").update({ services: newSvcs }).eq("id", doc.id);
+                          const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                          setDoctors(data || []);
+                        }} className="text-xs text-zinc-400 hover:text-white px-3 py-1 rounded-full border border-dashed border-white/20">+ Servicio</button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-zinc-400 mb-2">Horario</div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {Object.entries(dayNames).map(([key, label]) => {
+                          const day = sched[key] || { closed: true };
+                          const isClosed = !!day.closed;
+                          return (
+                            <div key={key} className={"rounded-xl border p-2 text-center text-xs " + (isClosed ? "border-white/5 bg-white/[0.02] text-zinc-600" : "border-[#3CBDB9]/20 bg-[#3CBDB9]/5 text-zinc-300")}>
+                              <div className="font-medium mb-1">{label}</div>
+                              <button onClick={async () => {
+                                const newSched = { ...sched };
+                                if (isClosed) {
+                                  newSched[key] = { open: "08:00", close: "17:00", closed: false };
+                                } else {
+                                  newSched[key] = { closed: true };
+                                }
+                                await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
+                                const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+                                setDoctors(data || []);
+                              }} className="cursor-pointer">
+                                {isClosed ? "Cerrado" : (day.open + " - " + day.close)}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === "faqs" && renderFaqs()}
       {tab === "cuenta" && renderCuenta()}
 
       <Modal open={guideOpen !== null} title="Guía de integración" description="Pasos para conectar." onClose={() => setGuideOpen(null)} actions={<button onClick={() => setGuideOpen(null)} className="rounded-xl bg-[#3CBDB9] px-4 py-2 text-sm font-medium text-white hover:bg-[#35a9a5]">Entendido</button>}>
