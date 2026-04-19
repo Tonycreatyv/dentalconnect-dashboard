@@ -34,7 +34,7 @@ export async function startMetaOAuth(organizationId: string) {
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&state=${encodeURIComponent(signedState)}` +
     `&response_type=code` +
-    `&scope=pages_show_list`;
+    `&scope=pages_show_list,pages_messaging,pages_manage_metadata`;
 
   window.location.href = authUrl;
 }

@@ -360,6 +360,16 @@ Deno.serve(async (req) => {
         return json(req, 500, { error: "org_settings_upsert_failed", details: secretRes.error });
       }
 
+      // Auto-subscribe page to webhook
+      try {
+        const subUrl = "https://graph.facebook.com/v19.0/" + page.id + "/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_deliveries&access_token=" + page.access_token;
+        const subRes = await fetch(subUrl, { method: "POST" });
+        const subData = await subRes.json();
+        console.log("[meta-oauth] webhook subscription:", subData);
+      } catch (subErr) {
+        console.error("[meta-oauth] webhook subscription failed:", subErr);
+      }
+
       return json(req, 200, {
         ok: true,
         connected: true,
@@ -441,6 +451,16 @@ Deno.serve(async (req) => {
           { onConflict: "organization_id" }
         );
         return json(req, 500, { error: "org_settings_upsert_failed", details: secretRes.error });
+      }
+
+      // Auto-subscribe page to webhook
+      try {
+        const subUrl = "https://graph.facebook.com/v19.0/" + pageId + "/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_deliveries&access_token=" + pageAccessToken;
+        const subRes = await fetch(subUrl, { method: "POST" });
+        const subData = await subRes.json();
+        console.log("[meta-oauth] save_page webhook subscription:", subData);
+      } catch (subErr) {
+        console.error("[meta-oauth] save_page webhook subscription failed:", subErr);
       }
 
       return json(req, 200, { ok: true, page_id: pageId, token_saved: secretRes.tokenStored });
