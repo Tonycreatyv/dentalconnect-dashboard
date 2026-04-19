@@ -561,9 +561,22 @@ export default function Settings() {
                               <button onClick={async () => {
                                 const newSched = { ...sched };
                                 if (isClosed) {
-                                  newSched[key] = { open: "08:00", close: "17:00", closed: false };
+                                  const open = prompt(label + " — Hora de entrada (ej: 08:00):", "08:00");
+                                  if (!open) return;
+                                  const close = prompt(label + " — Hora de salida (ej: 17:00):", "17:00");
+                                  if (!close) return;
+                                  newSched[key] = { open, close, closed: false };
                                 } else {
-                                  newSched[key] = { closed: true };
+                                  const action = prompt("Opciones:\n1 = Cambiar horario\n2 = Marcar como cerrado\n\nEscribe 1 o 2:", "1");
+                                  if (action === "2") {
+                                    newSched[key] = { closed: true };
+                                  } else if (action === "1") {
+                                    const open = prompt(label + " — Hora de entrada:", day.open || "08:00");
+                                    if (!open) return;
+                                    const close = prompt(label + " — Hora de salida:", day.close || "17:00");
+                                    if (!close) return;
+                                    newSched[key] = { open, close, closed: false };
+                                  } else { return; }
                                 }
                                 await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
                                 const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
