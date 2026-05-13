@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { useClinic } from "../context/ClinicContext";
 
-const ORG_ID = "barber-demo";
+const SELECTED_ORG_STORAGE_KEY = "selected_organization_id";
+const FALLBACK_ORG_ID = "barber-demo";
 
 type AppointmentRow = {
   id: string;
@@ -96,15 +98,38 @@ function barberText(a: AppointmentRow): string {
 }
 
 export default function Appointments() {
+  const { activeOrgId, clinic } = useClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<AppointmentRow[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [barberFilter, setBarberFilter] = useState<string>("all");
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
+
+  useEffect(() => {
+    function syncSelectedOrg() {
+      try {
+        setSelectedOrgId(localStorage.getItem(SELECTED_ORG_STORAGE_KEY) ?? "");
+      } catch {
+        setSelectedOrgId("");
+      }
+    }
+    syncSelectedOrg();
+    window.addEventListener("storage", syncSelectedOrg);
+    window.addEventListener("dev-org-changed", syncSelectedOrg);
+    return () => {
+      window.removeEventListener("storage", syncSelectedOrg);
+      window.removeEventListener("dev-org-changed", syncSelectedOrg);
+    };
+  }, []);
+
+  const effectiveOrgId = useMemo(() => {
+    return selectedOrgId || activeOrgId || clinic?.organization_id || FALLBACK_ORG_ID;
+  }, [selectedOrgId, activeOrgId, clinic?.organization_id]);
 
   useEffect(() => {
     let mounted = true;
@@ -114,7 +139,7 @@ export default function Appointments() {
       const { data, error } = await supabase
         .from("appointments")
         .select("id, organization_id, lead_id, patient_name, reason, title, appointment_date, appointment_time, starts_at, ends_at, provider_id, provider_name, status, created_at, updated_at")
-        .eq("organization_id", ORG_ID)
+        .eq("organization_id", effectiveOrgId)
         .order("starts_at", { ascending: true, nullsFirst: false })
         .order("appointment_date", { ascending: true, nullsFirst: false });
       if (!mounted) return;
@@ -130,7 +155,7 @@ export default function Appointments() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [effectiveOrgId]);
 
   const mapped = useMemo(() => {
     return rows
@@ -211,6 +236,7 @@ export default function Appointments() {
       <section className="rounded-3xl border border-slate-800 bg-slate-950/70 px-5 py-5 sm:px-6">
         <h1 className="text-2xl font-semibold text-slate-100">BarberLine Appointments</h1>
         <p className="mt-1 text-sm text-slate-400">Citas creadas automáticamente desde WhatsApp</p>
+        <p className="mt-2 text-xs font-medium text-emerald-300">Viewing: {effectiveOrgId === "barber-demo" ? "Barbería Demo" : effectiveOrgId}</p>
       </section>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
