@@ -6,6 +6,9 @@ export type Intent =
   | "pricing"
   | "services"
   | "book_appointment"
+  | "cancel_appointment"
+  | "reschedule_appointment"
+  | "appointment_lookup"
   | "demo_interest"
   | "trial_interest"
   | "how_it_works"
@@ -42,7 +45,29 @@ const intentPatterns: Array<{
   {
     intent: "emergency",
     priority: 1,
-    patterns: ["urgencia", "emergencia", "dolor fuerte", "me duele mucho", "es urgente"],
+    patterns: [
+      "no puedo respirar",
+      "sangrado que no para",
+      "accidente fuerte",
+      "hinchazon en garganta",
+      "hinchazón en garganta",
+      "muchisima sangre",
+      "muchísima sangre",
+      "dolor fuerte",
+      "me duele mucho",
+      "cara inflamada",
+      "infeccion",
+      "infección",
+      "sangrado",
+      "me quebre un diente",
+      "me quebré un diente",
+      "diente quebrado",
+      "se me cayo un diente",
+      "se me cayó un diente",
+      "pus",
+      "absceso",
+      "no aguanto el dolor",
+    ],
   },
   {
     intent: "pricing",
@@ -52,12 +77,105 @@ const intentPatterns: Array<{
   {
     intent: "services",
     priority: 2,
-    patterns: ["qué servicios", "que servicios", "qué ofrecen", "que ofrecen", "servicios", "tratamientos"],
+    patterns: ["qué servicios", "que servicios", "qué ofrecen", "que ofrecen", "servicios", "tratamientos", "más info", "mas info", "más información", "mas informacion"],
   },
   {
     intent: "book_appointment",
     priority: 2,
-    patterns: ["agendar cita", "reservar cita", "quiero una cita", "necesito una cita", "sacar turno"],
+    patterns: ["agendar cita", "reservar cita", "quiero una cita", "necesito una cita", "necesito cita", "sacar turno"],
+  },
+  {
+    intent: "cancel_appointment",
+    priority: 2,
+    patterns: [
+      "quiero cancelar",
+      "cancelar",
+      "cancelar mi cita",
+      "quiero cancelar mi cita",
+      "cancelar cita",
+      "ya no quiero la cita",
+      "anular cita",
+      "cancelar turno",
+    ],
+  },
+  {
+    intent: "reschedule_appointment",
+    priority: 2,
+    patterns: [
+      "quiero reagendarla",
+      "quiero reagendar",
+      "reagendame",
+      "reagéndame",
+      "re agendame",
+      "re-agendame",
+      "reagendame la cita",
+      "reagenda mi cita",
+      "reagendame mi cita",
+      "reagéndame mi cita",
+      "teagenda mi cita",
+      "te agenda mi cita",
+      "sabes que reagendame la cita",
+      "cambiar mi cita",
+      "quiero cambiar mi cita",
+      "reagendar mi cita",
+      "reagendar",
+      "reagendarla",
+      "re agendar",
+      "re-agendar",
+      "cambiarla",
+      "moverla",
+      "pasarla",
+      "pasame la cita",
+      "cambiamela",
+      "movemela",
+      "cambiar",
+      "mover",
+      "mover mi cita",
+      "pasar mi cita",
+      "cambiar horario",
+      "cambiar fecha",
+      "reprogramar cita",
+      "mover cita",
+    ],
+  },
+  {
+    intent: "appointment_lookup",
+    priority: 2,
+    patterns: [
+      "que cita tengo",
+      "qué cita tengo",
+      "q cita tengo",
+      "ke cita tengo",
+      "k cita tengo",
+      "tengo cita",
+      "tengo cita hoy",
+      "a que hora es mi cita",
+      "a qué hora es mi cita",
+      "para cuando es mi cita",
+      "para cuándo es mi cita",
+      "me puede confirmar mi cita",
+      "confirmame mi cita",
+      "cual es mi cita",
+      "cuál es mi cita",
+      "cuando tengo cita",
+      "cuándo tengo cita",
+      "me podés recordar mi cita",
+      "me podes recordar mi cita",
+      "me podés recordar cual es la cita que tengo",
+      "me podes recordar cual es la cita que tengo",
+      "para que fecha quedo mi cita",
+      "para qué fecha quedó mi cita",
+      "en que fecha quedo mi cita",
+      "en qué fecha quedó mi cita",
+      "cuando quedo mi cita",
+      "cuándo quedó mi cita",
+      "a que hora quedo mi cita",
+      "a qué hora quedó mi cita",
+      "que dia quedo mi cita",
+      "qué día quedó mi cita",
+      "tengo cita",
+      "tengo cita?",
+    ],
   },
   {
     intent: "demo_interest",
@@ -124,7 +242,7 @@ const intentPatterns: Array<{
   {
     intent: "confusion",
     priority: 8,
-    patterns: ["no entiendo", "me perdí", "qué?"],
+    patterns: ["no entiendo", "me perdí", "qué?", "que cosa", "qué cosa"],
   },
   {
     intent: "greeting",
@@ -158,11 +276,19 @@ export function detectIntent(text: string, context?: { nextExpected?: string }):
 }
 
 export function isHighValueIntent(intent: Intent): boolean {
-  return ["pricing", "book_appointment", "demo_interest", "trial_interest", "services"].includes(intent);
+  return [
+    "pricing",
+    "book_appointment",
+    "cancel_appointment",
+    "reschedule_appointment",
+    "demo_interest",
+    "trial_interest",
+    "services",
+  ].includes(intent);
 }
 
 export function needsHumanHandoff(intent: Intent): boolean {
-  return intent === "human_handoff" || intent === "emergency";
+  return intent === "human_handoff";
 }
 
 export function isContinuationResponse(intent: Intent): boolean {

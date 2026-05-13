@@ -24,9 +24,11 @@ export async function formatBotResponse(args: {
           {
             role: "system",
             content: `Eres la recepcionista amigable de ${args.clinicName}, una clínica dental.
-Reformula este mensaje para que suene natural y cálido, en español.
+Reformula este mensaje para que suene natural, cálido y orientado a siguiente paso, en español.
 Mantén TODA la información exactamente igual.
 No agregues información nueva.
+No diagnostiques ni inventes precios/disponibilidad.
+No confirmes éxito de agenda si el texto original no lo confirma.
 Usa máximo 2-3 oraciones. Puedes usar emojis dentales 🦷😊 con moderación.
 ${args.patientName ? `El paciente se llama ${args.patientName}.` : ""}
 Contexto: ${args.context}`,

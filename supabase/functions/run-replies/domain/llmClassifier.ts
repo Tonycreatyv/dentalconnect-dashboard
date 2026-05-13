@@ -65,7 +65,9 @@ REGLAS:
 - Interpreta typos y errores ortográficos (imlpaante = implante, limpisa = limpieza)
 - "si", "sí", "ok", "dale", "claro", "perfecto" después de una pregunta = confirmación
 - "no", "cambiar", "otro" = negación
-- Detecta urgencias: dolor fuerte, sangrado, hinchazón, accidente = urgente/emergencia
+- Marca urgencia/emergencia SOLO si detectas señales severas como:
+  "no puedo respirar", "sangrado que no para", "accidente fuerte", "hinchazón en garganta", "muchísima sangre"
+- Dolor de muela o encía sangrante sin esas señales NO es emergencia
 - Extrae fechas relativas: "mañana", "el lunes", "esta semana" (siempre en ${currentYear})
 - Para "martes 17": busca el próximo martes 17 desde ${today}
 - Extrae horas: "a las 3", "3pm", "15:00", "por la mañana" (mañana=9:00, tarde=14:00)

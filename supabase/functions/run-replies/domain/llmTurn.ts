@@ -12,6 +12,7 @@ export type OrgSettings = {
 
 export type RecentMessage = {
   role: "user" | "assistant";
+  actor?: "user" | "bot" | "staff" | "operator";
   content: string;
   timestamp: string;
 };
@@ -45,7 +46,39 @@ const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 const DEFAULT_PROMPTS: Record<string, string> = {
   creatyv: `Eres el asistente de ventas de Creatyv AI. RESPONDE SOLO JSON.`,
-  dental: `Eres la recepcionista de una clínica dental. RESPONDE SOLO JSON.`,
+  dental: `Eres una asistente dental de alta conversión para WhatsApp.
+Tu objetivo es guiar al paciente hacia el siguiente paso (idealmente agendar), con tono humano y cálido.
+
+TONO:
+- Español natural, frases cortas, cercano, claro, tranquilizador
+- Empático, ligeramente upbeat, nunca frío/robótico
+- Emojis con moderación (máximo 1 cuando aporte)
+
+ESTRUCTURA DE RESPUESTA:
+1) Conexión/empatía breve
+2) Explicación simple y segura
+3) Dirección clara
+4) Cierre con siguiente paso concreto (CTA)
+
+REGLAS DE SEGURIDAD:
+- NUNCA diagnostiques ni des tratamiento médico definitivo
+- NUNCA inventes precios, horarios, ubicaciones o disponibilidad
+- Si falta precio exacto, indica evaluación/valoración
+- Para síntomas (dolor, sangrado, etc.) usa lenguaje seguro y sugiere valoración
+
+REGLAS DE CONVERSIÓN:
+- No hagas preguntas vagas; facilita elección con 1-2 opciones máximas
+- Ante interés, guía directamente a agendar o continuar
+- Ante duda/objeción, reduce fricción y ofrece ayuda concreta
+- Siempre termina con un siguiente paso
+
+GUARDRAILS DE ARQUITECTURA (OBLIGATORIO):
+- Tú NO decides lógica de negocio
+- Tú NO puedes confirmar una cita como agendada por tu cuenta
+- Nunca afirmes "✅ Tu cita ha sido agendada" salvo que el sistema ya haya confirmado inserción exitosa
+- Puedes proponer confirmación del usuario, pero no éxito final de booking
+
+Responde SIEMPRE en JSON válido con las llaves esperadas por el sistema. RESPONDE SOLO JSON.`,
   generic: `Eres un asistente virtual amigable. RESPONDE SOLO JSON.`,
 };
 
@@ -217,27 +250,38 @@ function buildClinicContext(clinicSettings?: Record<string, unknown>): string {
 // USER PROMPT BUILDER
 // =============================================================================
 
-function buildUserPrompt(args: {
+type BuildUserPromptArgs = {
   inboundText: string;
   leadState: ConversationState | null;
   recentMessages?: RecentMessage[];
   clinicContext?: string;
-}): string {
+  timezone?: string;
+};
+
+function buildUserPrompt(args: BuildUserPromptArgs): string {
   const history = (args.recentMessages ?? [])
     .slice(-6)
     .map(
-      (msg) =>
-        `${msg.role === "user" ? "Usuario" : "Asistente"}: ${msg.content}`
+      (msg) => {
+        const actor = String(msg.actor ?? "").toLowerCase();
+        const speaker = actor === "staff" || actor === "operator"
+          ? "Staff"
+          : msg.role === "user"
+          ? "Usuario"
+          : "Asistente";
+        return `${speaker}: ${msg.content}`;
+      }
     )
     .join("\n");
   const state = args.leadState ?? {};
   const nowDate = new Date();
-  const now = nowDate.toLocaleString("es-HN", { timeZone: "America/Tegucigalpa" });
+  const tz = String(args.timezone ?? "America/Tegucigalpa").trim() || "America/Tegucigalpa";
+  const now = nowDate.toLocaleString("es-HN", { timeZone: tz });
   const dayNames = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
-  const hoyLocal = new Date(nowDate.toLocaleString("en-US", { timeZone: "America/Tegucigalpa" }));
+  const hoyLocal = new Date(nowDate.toLocaleString("en-US", { timeZone: tz }));
   const mananaLocal = new Date(hoyLocal.getTime() + 86400000);
-  const hoyStr = `${dayNames[hoyLocal.getDay()]} ${hoyLocal.getDate()} de ${hoyLocal.toLocaleString("es-HN", { month: "long", timeZone: "America/Tegucigalpa" })} ${hoyLocal.getFullYear()}`;
-  const mananaStr = `${dayNames[mananaLocal.getDay()]} ${mananaLocal.getDate()} de ${mananaLocal.toLocaleString("es-HN", { month: "long", timeZone: "America/Tegucigalpa" })} ${mananaLocal.getFullYear()}`;
+  const hoyStr = `${dayNames[hoyLocal.getDay()]} ${hoyLocal.getDate()} de ${hoyLocal.toLocaleString("es-HN", { month: "long", timeZone: tz })} ${hoyLocal.getFullYear()}`;
+  const mananaStr = `${dayNames[mananaLocal.getDay()]} ${mananaLocal.getDate()} de ${mananaLocal.toLocaleString("es-HN", { month: "long", timeZone: tz })} ${mananaLocal.getFullYear()}`;
 
   let prompt = `FECHA/HORA ACTUAL: ${now}\nHOY ES: ${hoyStr}\nMAÑANA ES: ${mananaStr}\nESTADO: ${JSON.stringify(state)}\nHISTORIAL:\n${history || "(Primera vez)"}\nMENSAJE: "${args.inboundText}"`;
 
@@ -271,7 +315,7 @@ function tryParseJson(raw: string): LlmTurnResult | null {
         confidence: Number(parsed.decision_meta?.confidence ?? 0.7),
       },
     };
-  } catch (e) {
+  } catch (e: any) {
     console.error(
       "[llmTurn] ERROR DE PARSEO JSON:",
       e.message,
@@ -350,7 +394,7 @@ export async function runLlmTurn(args: {
     }
 
     return tryParseJson(content);
-  } catch (e) {
+  } catch (e: any) {
     console.error("[llmTurn] ERROR CRÍTICO EN FETCH O PARSE:", e.message);
     console.error("[llmTurn] STACK:", e.stack);
     return null;
