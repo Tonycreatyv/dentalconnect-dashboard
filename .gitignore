@@ -27,3 +27,8 @@ dist-ssr
 
 # Local Netlify folder
 .netlify
+
+# Local/generated files
+supabase/.temp/
+*.bak
+*.bak.*
