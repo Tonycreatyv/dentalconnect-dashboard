@@ -1,8 +1,33 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient"; // IMPORTANT: usa UN solo client
 import { useAuth } from "./AuthContext";
+import { getDetectedVerticalConfig, type BusinessType } from "../config/verticalConfig";
 
 const ACTIVE_ORG_STORAGE_KEY = "active_org_id";
+const SELECTED_ORG_STORAGE_KEY = "selected_organization_id";
+const SELECTED_BUSINESS_TYPE_STORAGE_KEY = "selected_business_type";
+const PLATFORM_ADMIN_EMAILS = new Set(["joseduran1791@gmail.com"]);
+const ORG_TYPE_FALLBACK: Record<string, "dental" | "barbershop"> = {
+  "barber-demo": "barbershop",
+  "barber-demo-wimaeil": "barbershop",
+  "clinic-demo": "dental",
+  "creatyv-product": "dental",
+  "testing-mxp0snq": "barbershop",
+  "testing-mnxp0snq": "barbershop",
+  "org-359ba3c4": "dental",
+  "irvin-mazariegos-clinic": "dental",
+};
+const ORG_NAME_FALLBACK: Record<string, string> = {
+  "barber-demo": "Barbería Premium 504",
+  "barber-demo-wimaeil": "Barbería WIMAEIL",
+  "clinic-demo": "Dental Demo",
+  "creatyv-product": "Creatyv Product",
+  "testing-mxp0snq": "Testing Barber Demo",
+  "testing-mnxp0snq": "Testing Barber Demo",
+  "org-359ba3c4": "Org 359 Test",
+  "irvin-mazariegos-clinic": "Irvin Mazariegos Clinic",
+};
+const BARBERSHOP_GENERIC_NAME_RE = /\b(cl[ií]nica|dentalconnect|dental demo|pacientes?|doctores?|dental)\b/i;
 
 export type ClinicProfile = {
   id: string;
@@ -14,12 +39,16 @@ export type ClinicProfile = {
 type OrgOption = {
   organization_id: string;
   role?: string | null;
+  business_type?: "dental" | "barbershop" | null;
+  name?: string | null;
 };
 
 type ClinicContextValue = {
   clinic: ClinicProfile | null;
   clinicId: string | null;
   activeOrgId: string | null;
+  activeBusinessType: "dental" | "barbershop" | null;
+  activeOrgName: string | null;
   isAdmin: boolean;
   availableOrgs: OrgOption[];
   loading: boolean;
@@ -30,14 +59,37 @@ type ClinicContextValue = {
   setActiveOrgId: (organizationId: string) => Promise<void>;
 };
 
+function fallbackBusinessType(organizationId: string): BusinessType {
+  const detectedVertical = getDetectedVerticalConfig();
+  return ORG_TYPE_FALLBACK[organizationId] ??
+    (organizationId.startsWith("barber-") ? "barbershop" : detectedVertical.businessType ?? "dental");
+}
+
+function safeOrgName(
+  organizationId: string,
+  businessType: "dental" | "barbershop",
+  candidate?: string | null,
+): string {
+  if (businessType === "barbershop" && ORG_NAME_FALLBACK[organizationId]) return ORG_NAME_FALLBACK[organizationId];
+  const name = String(candidate ?? "").trim();
+  if (businessType === "barbershop") {
+    if (!name || BARBERSHOP_GENERIC_NAME_RE.test(name)) return ORG_NAME_FALLBACK[organizationId] ?? "Barbería";
+    return name;
+  }
+  return name || ORG_NAME_FALLBACK[organizationId] || "Clínica";
+}
+
 const ClinicContext = createContext<ClinicContextValue | undefined>(undefined);
 
 export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const detectedVertical = useMemo(() => getDetectedVerticalConfig(), []);
 
   const [clinic, setClinic] = useState<ClinicProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [availableOrgs, setAvailableOrgs] = useState<OrgOption[]>([]);
+  const [activeBusinessType, setActiveBusinessType] = useState<"dental" | "barbershop" | null>(null);
+  const [activeOrgName, setActiveOrgName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const clinicId = clinic?.id ?? null;
@@ -69,9 +121,11 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
+    const fallbackType = fallbackBusinessType(organizationId);
+    const fallbackName = safeOrgName(organizationId, fallbackType, null);
     const created = await supabase
       .from("clinics")
-      .insert({ name: "Clínica", organization_id: organizationId })
+      .insert({ name: fallbackName, organization_id: organizationId })
       .select("id, name, domain, organization_id")
       .maybeSingle();
 
@@ -79,7 +133,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
     return {
       id: created.data.id,
-      name: created.data.name ?? "Clínica",
+      name: created.data.name ?? fallbackName,
       domain: created.data.domain ?? null,
       organization_id: created.data.organization_id ?? organizationId,
     };
@@ -89,8 +143,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     const org = String(organizationId ?? "").trim();
     if (!org) return;
 
+    if (import.meta.env.DEV) {
+      try {
+        localStorage.setItem(ACTIVE_ORG_STORAGE_KEY, org);
+      } catch {
+        // ignore
+      }
+    }
     try {
-      localStorage.setItem(ACTIVE_ORG_STORAGE_KEY, org);
+      localStorage.setItem(SELECTED_ORG_STORAGE_KEY, org);
     } catch {
       // ignore
     }
@@ -99,6 +160,22 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     if (!clinicForOrg) return;
 
     setClinic(clinicForOrg);
+    const selectedMeta = availableOrgs.find((item) => item.organization_id === org);
+    if (detectedVertical.businessType && selectedMeta?.business_type && selectedMeta.business_type !== detectedVertical.businessType) {
+      return;
+    }
+    const selectedBusinessType = selectedMeta?.business_type ?? fallbackBusinessType(org);
+    setActiveBusinessType(selectedBusinessType);
+    setActiveOrgName(safeOrgName(org, selectedBusinessType, selectedMeta?.name ?? clinicForOrg.name ?? null));
+    try {
+      if (selectedMeta?.business_type) {
+        localStorage.setItem(SELECTED_BUSINESS_TYPE_STORAGE_KEY, selectedMeta.business_type);
+      }
+      window.dispatchEvent(new Event("active-org-changed"));
+      window.dispatchEvent(new Event("dev-org-changed"));
+    } catch {
+      // ignore
+    }
 
     if (user?.id) {
       await supabase.from("clinic_users").upsert(
@@ -118,6 +195,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       if (!user) {
         if (!mounted) return;
         setClinic(null);
+        setActiveBusinessType(null);
+        setActiveOrgName(null);
         setIsAdmin(false);
         setAvailableOrgs([]);
         setLoading(false);
@@ -138,7 +217,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       ]);
 
       const profile = (profileRes.data as any) ?? null;
-      const isAdminUser = Boolean(profile?.is_admin);
+      const normalizedEmail = String(user.email ?? "").trim().toLowerCase();
+      const isPlatformAdmin = Boolean(profile?.is_admin) && PLATFORM_ADMIN_EMAILS.has(normalizedEmail);
       const defaultOrgId = String(profile?.default_org_id ?? "").trim();
       const memberRows = Array.isArray(membersRes.data) ? (membersRes.data as any[]) : [];
       const memberOnlyOrgIds = memberRows
@@ -155,37 +235,93 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       let storedOrgId = "";
       try {
-        storedOrgId = localStorage.getItem(ACTIVE_ORG_STORAGE_KEY) ?? "";
+        storedOrgId =
+          localStorage.getItem(SELECTED_ORG_STORAGE_KEY) ??
+          localStorage.getItem(ACTIVE_ORG_STORAGE_KEY) ??
+          "";
       } catch {
         storedOrgId = "";
       }
 
       const orgCandidates: string[] = [];
-      if (isAdminUser && defaultOrgId) orgCandidates.push(defaultOrgId);
+      if (defaultOrgId) orgCandidates.push(defaultOrgId);
       for (const id of memberOrgIds) orgCandidates.push(id);
       if (relOrgId) orgCandidates.push(relOrgId);
+      if (isPlatformAdmin) {
+        orgCandidates.push(
+          "barber-demo-wimaeil",
+          "barber-demo",
+          "clinic-demo",
+          "creatyv-product",
+          "testing-mxp0snq",
+          "testing-mnxp0snq",
+          "org-359ba3c4",
+          "irvin-mazariegos-clinic",
+        );
+      }
 
       const uniqOrgIds = Array.from(new Set(orgCandidates.filter(Boolean)));
+      const [orgRowsRes, orgSettingsRes, organizationSettingsRes] = uniqOrgIds.length
+        ? await Promise.all([
+            supabase.from("organizations").select("id, name").in("id", uniqOrgIds),
+            supabase.from("org_settings").select("organization_id, business_type, name").in("organization_id", uniqOrgIds),
+            supabase
+              .from("organization_settings")
+              .select("organization_id, business_type, name, brand_name, display_name")
+              .in("organization_id", uniqOrgIds),
+          ])
+        : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
+
+      const orgRows = Array.isArray((orgRowsRes as any).data) ? ((orgRowsRes as any).data as any[]) : [];
+      const orgSettingsRows = Array.isArray((orgSettingsRes as any).data) ? ((orgSettingsRes as any).data as any[]) : [];
+      const organizationSettingsRows = Array.isArray((organizationSettingsRes as any).data)
+        ? ((organizationSettingsRes as any).data as any[])
+        : [];
+      const orgNameById = new Map(
+        orgRows.map((row) => [String(row?.id ?? "").trim(), String(row?.name ?? "").trim() || null]),
+      );
+      const orgMetaById = new Map(
+        [...orgSettingsRows, ...organizationSettingsRows].map((row) => {
+          const id = String(row?.organization_id ?? "").trim();
+          const rowBusinessType = String(row?.business_type ?? "").trim().toLowerCase() === "barbershop" ? "barbershop" : fallbackBusinessType(id);
+          const rawName =
+            String(row?.display_name ?? row?.brand_name ?? row?.name ?? "").trim() ||
+            orgNameById.get(id) ||
+            null;
+          return [id, { business_type: rowBusinessType as "dental" | "barbershop", name: safeOrgName(id, rowBusinessType, rawName) }];
+        }),
+      );
+      const allOrgOptions = uniqOrgIds.map((organization_id) => ({
+        organization_id,
+        role: memberRows.find((row) => String(row?.organization_id ?? "") === organization_id)?.role ?? null,
+        business_type: orgMetaById.get(organization_id)?.business_type ?? fallbackBusinessType(organization_id),
+        name: orgMetaById.get(organization_id)?.name ?? safeOrgName(organization_id, fallbackBusinessType(organization_id), orgNameById.get(organization_id)),
+      }));
+      const visibleOrgOptions = detectedVertical.businessType
+        ? allOrgOptions.filter((org) => org.business_type === detectedVertical.businessType)
+        : allOrgOptions;
+      const visibleOrgIds = visibleOrgOptions.map((org) => org.organization_id);
       const resolvedOrgId =
-        (isAdminUser && defaultOrgId) ||
-        (storedOrgId && uniqOrgIds.includes(storedOrgId) ? storedOrgId : "") ||
-        memberOnlyOrgIds[0] ||
-        memberOrgIds[0] ||
-        relOrgId ||
+        (storedOrgId && visibleOrgIds.includes(storedOrgId) ? storedOrgId : "") ||
+        (defaultOrgId && visibleOrgIds.includes(defaultOrgId) ? defaultOrgId : "") ||
+        memberOnlyOrgIds.find((id) => visibleOrgIds.includes(id)) ||
+        memberOrgIds.find((id) => visibleOrgIds.includes(id)) ||
+        (relOrgId && visibleOrgIds.includes(relOrgId) ? relOrgId : "") ||
+        visibleOrgIds[0] ||
         "";
 
       const clinicForOrg = resolvedOrgId ? await resolveClinicByOrg(resolvedOrgId) : null;
 
       if (!mounted) return;
 
-      setIsAdmin(isAdminUser);
-      setAvailableOrgs(
-        uniqOrgIds.map((organization_id) => ({
-          organization_id,
-          role: memberRows.find((row) => String(row?.organization_id ?? "") === organization_id)?.role ?? null,
-        }))
-      );
+      setIsAdmin(isPlatformAdmin);
+      setAvailableOrgs(visibleOrgOptions);
       setClinic(clinicForOrg);
+      setActiveBusinessType(orgMetaById.get(resolvedOrgId)?.business_type ?? detectedVertical.businessType ?? fallbackBusinessType(resolvedOrgId));
+      setActiveOrgName(
+        orgMetaById.get(resolvedOrgId)?.name ??
+          safeOrgName(resolvedOrgId, fallbackBusinessType(resolvedOrgId), orgNameById.get(resolvedOrgId) ?? clinicForOrg?.name ?? null)
+      );
       setLoading(false);
 
       if (!clinicForOrg) return;
@@ -208,13 +344,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [user]);
+  }, [user, detectedVertical.businessType]);
 
   const value = useMemo(
     () => ({
       clinic,
       clinicId,
       activeOrgId,
+      activeBusinessType,
+      activeOrgName,
       isAdmin,
       availableOrgs,
       loading,
@@ -222,7 +360,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setClinicId,
       setActiveOrgId,
     }),
-    [clinic, clinicId, activeOrgId, isAdmin, availableOrgs, loading]
+    [clinic, clinicId, activeOrgId, activeBusinessType, activeOrgName, isAdmin, availableOrgs, loading]
   );
 
   return <ClinicContext.Provider value={value}>{children}</ClinicContext.Provider>;

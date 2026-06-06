@@ -2,10 +2,12 @@ import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
+import { getDetectedVerticalConfig } from "../config/verticalConfig";
 
 export default function Login() {
   const navigate = useNavigate();
   const { session, loading: authLoading } = useAuth();
+  const vertical = getDetectedVerticalConfig();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -50,10 +52,10 @@ export default function Login() {
             className="w-full rounded-3xl border border-white/10 bg-black/35 px-6 py-8 shadow-2xl shadow-black/45 backdrop-blur-xl md:px-8 md:py-10"
           >
             <h1 className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
-              DentalConnect
+              {vertical.brandName}
             </h1>
             <div className="mt-3 h-1 w-20 rounded-full bg-gradient-to-r from-[#0894C1] via-[#3CBDB9] to-[#59E0B8]" />
-            <p className="mt-4 text-sm text-white/75">Entrá al panel de tu clínica.</p>
+            <p className="mt-4 text-sm text-white/75">{vertical.tagline}</p>
 
             <label htmlFor="email" className="mt-7 block text-sm font-medium text-white/85">
               Correo
@@ -85,7 +87,7 @@ export default function Login() {
               disabled={loading}
               className="mt-6 h-12 w-full rounded-2xl bg-gradient-to-r from-[#0894C1] via-[#3CBDB9] to-[#59E0B8] text-sm font-semibold text-[#041015] transition hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? "Entrando..." : "Entrar"}
+              {loading ? "Entrando..." : vertical.primaryCTA}
             </button>
 
             {error && (

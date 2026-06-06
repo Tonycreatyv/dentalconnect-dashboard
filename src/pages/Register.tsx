@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Stethoscope } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { getDetectedVerticalConfig } from "../config/verticalConfig";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -11,11 +12,12 @@ type PrimaryGoal = "citas" | "preguntas" | "seguimiento";
 export default function Register() {
   const { signUp, signIn } = useAuth();
   const navigate = useNavigate();
+  const vertical = getDetectedVerticalConfig();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [brandName, setBrandName] = useState("");
-  const [businessType, setBusinessType] = useState("dental");
+  const [businessType, setBusinessType] = useState<string>(vertical.businessType ?? "dental");
   const [primaryGoal, setPrimaryGoal] = useState<PrimaryGoal>("citas");
   const [branches, setBranches] = useState("");
   const [busy, setBusy] = useState(false);
@@ -113,13 +115,13 @@ export default function Register() {
                 <Stethoscope className="h-5 w-5 text-teal-300" />
               </div>
               <div className="leading-tight">
-                <p className="text-sm font-semibold tracking-[0.26em] uppercase">DentalConnect</p>
+                <p className="text-sm font-semibold tracking-[0.26em] uppercase">{vertical.brandName}</p>
                 <p className="text-[11px] tracking-[0.18em] uppercase text-white/55">by Creatyv</p>
               </div>
             </div>
 
             <h1 className="mt-10 text-4xl font-semibold leading-tight">
-              Tu clínica se ve <span className="text-white/70">premium</span>.
+              Tu {vertical.organizationLabel.toLowerCase()} se ve <span className="text-white/70">premium</span>.
             </h1>
             <p className="mt-4 max-w-md text-white/65 leading-relaxed">
               Crea tu cuenta para configurar horarios, servicios y automatizar conversaciones.
@@ -135,17 +137,17 @@ export default function Register() {
         <div className="flex items-center justify-center px-5 py-10 lg:px-10">
           <div className="w-full max-w-md">
             <div className="lg:hidden mb-8">
-              <p className="text-[11px] tracking-[0.26em] uppercase text-white/60">DentalConnect</p>
+              <p className="text-[11px] tracking-[0.26em] uppercase text-white/60">{vertical.brandName}</p>
               <p className="text-2xl font-semibold mt-2">Crear cuenta</p>
               <p className="text-sm text-white/60 mt-2">
-                Empieza tu workspace para la clínica.
+                Empieza tu workspace para {vertical.organizationLabel.toLowerCase()}.
               </p>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 shadow-card">
               <div className="hidden lg:block mb-6">
                 <p className="text-[11px] tracking-[0.26em] uppercase text-white/60">Crear cuenta</p>
-                <p className="text-2xl font-semibold mt-2">DentalConnect</p>
+                <p className="text-2xl font-semibold mt-2">{vertical.brandName}</p>
                 <p className="text-sm text-white/60 mt-2">
                   Crea acceso para administrar inbox, citas y automatizaciones.
                 </p>

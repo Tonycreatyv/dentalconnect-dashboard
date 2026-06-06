@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { useClinic } from "../context/ClinicContext";
 import { Toggle } from "../components/Toggle";
 import { startMetaOAuth } from "../components/integrations/ConnectMessengerButton";
+import { getDetectedVerticalConfig } from "../config/verticalConfig";
 
 const ONBOARDING_FLAG = "dc_onboarding_in_progress";
 const META_REDIRECT_FLAG = "dc_post_meta_redirect";
@@ -79,6 +80,17 @@ export default function Onboarding() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { clinic, activeOrgId, setActiveOrgId } = useClinic();
+  const vertical = useMemo(() => getDetectedVerticalConfig(), []);
+  const verticalDefaultServices = useMemo<ServiceItem[]>(
+    () =>
+      vertical.defaultServices.map((service) => ({
+        name: service.name,
+        duration_min: service.duration_min ?? 30,
+        price: service.price_from ? String(service.price_from) : "",
+        active: true,
+      })),
+    [vertical],
+  );
 
   const [step, setStep] = useState(1);
   const totalSteps = 4;
@@ -93,7 +105,7 @@ export default function Onboarding() {
   const [city, setCity] = useState("");
   const [timezone, setTimezone] = useState("America/New_York");
   const [hours, setHours] = useState<HoursMap>(DEFAULT_HOURS);
-  const [services, setServices] = useState<ServiceItem[]>(DEFAULT_SERVICES);
+  const [services, setServices] = useState<ServiceItem[]>(verticalDefaultServices.length ? verticalDefaultServices : DEFAULT_SERVICES);
 
   useEffect(() => {
     try { localStorage.setItem(ONBOARDING_FLAG, "1"); } catch { }
@@ -150,7 +162,7 @@ export default function Onboarding() {
 
     const orgSettingsInsert = await supabase.from("org_settings").insert({
       organization_id: orgId,
-      business_type: "dental",
+      business_type: vertical.businessType ?? "dental",
       brand_name: clinicName.trim(),
       messenger_enabled: false,
       llm_brain_enabled: false,
@@ -394,7 +406,7 @@ export default function Onboarding() {
                             placeholder="Precio" />
                         </>
                       )}
-                      {index >= DEFAULT_SERVICES.length && (
+                      {index >= (verticalDefaultServices.length || DEFAULT_SERVICES.length) && (
                         <button type="button" onClick={() => removeService(index)}
                           className="rounded-lg border border-rose-400/20 bg-rose-500/10 p-2 text-rose-300 hover:bg-rose-500/20">
                           <Trash2 className="h-4 w-4" />

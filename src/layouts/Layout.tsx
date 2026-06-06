@@ -7,13 +7,16 @@ import { supabase } from "../lib/supabaseClient";
 import { Toast, type ToastKind } from "../components/ui/Toast";
 import { useClinic } from "../context/ClinicContext";
 import BottomNav from "../components/BottomNav";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
+import { AppShell } from "../components/AppShell";
 
 const PAGE_TITLES: Record<string, string> = {
   "/hoy": "Hoy",
   "/tomorrow": "Mañana",
   "/overview": "Hoy",
   "/inbox": "Inbox",
-  "/leads": "Leads",
+  "/leads": "Clientes",
   "/agenda": "Agenda",
   "/calendar": "Agenda",
   "/marketing": "Marketing",
@@ -27,15 +30,19 @@ export default function Layout() {
   const location = useLocation();
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
-  const { clinic, setClinic, setClinicId } = useClinic();
+  const { setClinic, setClinicId } = useClinic();
+  const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
   const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null);
   const [trialExpired, setTrialExpired] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const pageTitle = useMemo(() => {
     const key = Object.keys(PAGE_TITLES).find((path) => location.pathname.startsWith(path));
+    if (key === "/patients" || key === "/leads") return vertical.customersLabel;
+    if (key === "/agenda" || key === "/calendar") return vertical.agendaTitle;
     return key ? PAGE_TITLES[key] : "Panel";
-  }, [location.pathname]);
+  }, [location.pathname, vertical]);
 
   function clearLocalCache() {
     try {
@@ -77,7 +84,7 @@ export default function Layout() {
 
   useEffect(() => {
     let mounted = true;
-    const orgId = clinic?.organization_id ?? "clinic-demo";
+    const orgId = resolvedOrgId;
 
     async function checkTrial() {
       const sub = await supabase
@@ -147,19 +154,17 @@ export default function Layout() {
     return () => {
       mounted = false;
     };
-  }, [clinic?.organization_id, navigate]);
+  }, [resolvedOrgId, navigate]);
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden dc-bg text-white">
-      <div className="pointer-events-none absolute inset-0 dc-bg-overlay" />
-      <div className="relative mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-6 lg:px-8">
-        <div className="flex gap-6">
+    <AppShell>
+        <div className="flex min-w-0 gap-4 lg:gap-6">
           <div className="hidden shrink-0 lg:block lg:w-[272px]">
             <Sidebar />
           </div>
 
-          <div className="min-w-0 flex-1 overflow-x-hidden pb-24 lg:pb-0">
-            <div className="mb-4">
+          <div className="min-w-0 flex-1 overflow-x-hidden pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
+            <div className="-mx-2 mb-2 lg:mx-0 lg:mb-4">
               <Topbar
                 onLogout={logout}
                 onMenu={() => setMobileMenuOpen(true)}
@@ -185,14 +190,14 @@ export default function Layout() {
 
             <Outlet />
 
-            <div className="mt-10 flex justify-center">
+            <div className="mt-10 hidden justify-center lg:flex">
               <div className="text-[11px] text-white/50">
                 Powered by <span className="font-semibold text-[#59E0B8]">CREATYV</span>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      
 
       {mobileMenuOpen ? (
         <div className="fixed inset-0 z-[70] lg:hidden">
@@ -202,7 +207,7 @@ export default function Layout() {
             onClick={() => setMobileMenuOpen(false)}
             aria-label="Cerrar menú"
           />
-          <div className="absolute left-0 top-0 h-full w-[88vw] max-w-[320px] p-3 pt-[max(env(safe-area-inset-top),12px)]">
+          <div className="absolute left-0 top-0 h-full w-[82vw] max-w-[286px] pt-[max(env(safe-area-inset-top),12px)]">
             <Sidebar onNavigate={() => setMobileMenuOpen(false)} />
           </div>
         </div>
@@ -216,6 +221,6 @@ export default function Layout() {
         message={toast?.message ?? ""}
         onClose={() => setToast(null)}
       />
-    </div>
+    </AppShell>
   );
 }
