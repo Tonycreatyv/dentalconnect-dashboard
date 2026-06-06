@@ -18,7 +18,7 @@ const ORG_TYPE_FALLBACK: Record<string, "dental" | "barbershop"> = {
   "irvin-mazariegos-clinic": "dental",
 };
 const ORG_NAME_FALLBACK: Record<string, string> = {
-  "barber-demo": "Barbería Premium 504",
+  "barber-demo": "BarberLine",
   "barber-demo-wimaeil": "Barbería WIMAEIL",
   "clinic-demo": "Dental Demo",
   "creatyv-product": "Creatyv Product",

@@ -10,7 +10,7 @@ const SELECTED_BUSINESS_TYPE_STORAGE_KEY = "selected_business_type";
 
 const DEV_ORG_OPTIONS = [
   { label: "Barbería WIMAEIL", organizationId: "barber-demo-wimaeil", businessType: "barbershop" },
-  { label: "Barbería Premium 504", organizationId: "barber-demo", businessType: "barbershop" },
+  { label: "BarberLine", organizationId: "barber-demo", businessType: "barbershop" },
   { label: "Dental Demo", organizationId: "clinic-demo", businessType: "dental" },
   { label: "Creatyv Product", organizationId: "creatyv-product", businessType: "dental" },
   { label: "Testing Barber Demo", organizationId: "testing-mxp0snq", businessType: "barbershop" },
@@ -20,7 +20,7 @@ const DEV_ORG_OPTIONS = [
 ] as const;
 
 function fallbackOrgLabel(organizationId: string): string {
-  if (organizationId === "barber-demo") return "Barbería Premium 504";
+  if (organizationId === "barber-demo") return "BarberLine";
   if (organizationId === "barber-demo-wimaeil") return "Barbería WIMAEIL";
   if (organizationId === "clinic-demo") return "Dental Demo";
   if (organizationId === "creatyv-product") return "Creatyv Product";

@@ -39,7 +39,14 @@ import {
   extractBarbershopInfoContext,
 } from "./domain/barbershopState.ts";
 import { composeBarbershopNaturalFallback } from "./domain/barbershopResponseComposer.ts";
-import type { BarbershopInterpretedTurn } from "./domain/barbershopInterpreter.ts";
+import {
+  getBarbershopInterpreterRuntimeStatus,
+  type BarbershopInterpretedTurn,
+} from "./domain/barbershopInterpreter.ts";
+import {
+  mergeConversationContext,
+  normalizeInboundRuntime,
+} from "./domain/conversationRuntime.ts";
 
 export type Stage =
   | "INITIAL"
@@ -233,9 +240,16 @@ function normalizeTextForIntent(input: string): string {
     .replace(/\brevicion\b/g, "revision")
     .replace(/\bbraket?s?\b/g, "brackets")
     .replace(/\b(meanana|menana|maniana|mañan)\b/g, "manana")
+    .replace(/\b(manaan|manaana|manana|mañana)\b/g, "manana")
     .replace(/\bmanan?a?\b/g, "manana")
-    .replace(/\bcanselar\b/g, "cancelar")
+    .replace(/\bcore\b/g, "corte")
+    .replace(/\bccorte\b/g, "corte")
+    .replace(/\bcort\s+d\s+pelo\b/g, "corte de pelo")
+    .replace(/\bcorte\s+d\s+pelo\b/g, "corte de pelo")
+    .replace(/\b(ncelar|ncelarlo|ncelarla|cncelar|cncelarla|canselar|canselarla|cancalar|cancelr)\b/g, "cancelar")
     .replace(/\bcambair\b/g, "cambiar")
+    .replace(/\bhpy\b/g, "hoy")
+    .replace(/\bpar\b/g, "para")
     .replace(/\bvierrnes\b/g, "viernes")
     .replace(/\bvierness\b/g, "viernes")
     .replace(/\bsabdo\b/g, "sabado")
@@ -245,6 +259,7 @@ function normalizeTextForIntent(input: string): string {
     .replace(/\btenes\b/g, "tienes")
     .replace(/\bdispnible\b/g, "disponible")
     .replace(/\bdisponivle\b/g, "disponible")
+    .replace(/\bestsa\b/g, "esta")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -298,9 +313,34 @@ function isSameBarberReferenceText(input: string): boolean {
   return /\b(con el mismo|con el de antes|igual que la anterior)\b/.test(text);
 }
 
+function isFreshPendingConfirmation(args: {
+  inboundMessageId: string;
+  inboundMessageCreatedAt: string;
+  pendingCreatedFromInboundMessageId: string;
+  pendingPreconfirmSentAt: string;
+}): { fresh: boolean; blocked: boolean; reason: string } {
+  const inboundId = safeStr(args.inboundMessageId, "").trim();
+  const inboundAt = safeStr(args.inboundMessageCreatedAt, "").trim();
+  const pendingInboundId = safeStr(args.pendingCreatedFromInboundMessageId, "").trim();
+  const pendingAt = safeStr(args.pendingPreconfirmSentAt, "").trim();
+
+  if (inboundId && pendingInboundId && inboundId === pendingInboundId) {
+    return { fresh: false, blocked: true, reason: "same_inbound_id_as_preconfirm" };
+  }
+  if (inboundAt && pendingAt) {
+    const inboundTs = Date.parse(inboundAt);
+    const pendingTs = Date.parse(pendingAt);
+    if (Number.isFinite(inboundTs) && Number.isFinite(pendingTs) && inboundTs <= pendingTs) {
+      return { fresh: false, blocked: true, reason: "inbound_not_newer_than_preconfirm" };
+    }
+    return { fresh: true, blocked: false, reason: "newer_than_preconfirm" };
+  }
+  return { fresh: true, blocked: false, reason: "no_temporal_metadata" };
+}
+
 function isBarbershopGenericBookingRequestText(input: string): boolean {
   const text = normalizeTextForIntent(input).trim();
-  return /\b(una cita|quiero una cita|ocupo cita)\b/.test(text);
+  return /\b(una cita|quiero una cita|quiero agendar|agendar cita|agendar una cita|necesito cita|ocupo cita|quiero reservar|reservar cita|reservar una cita)\b/.test(text);
 }
 
 function isBarbershopProductQuestionText(input: string): boolean {
@@ -327,45 +367,148 @@ function extractBarbershopProductTopic(input: string): string | null {
 function resolveBarbershopServiceFromSettings(
   input: string,
   clinicSettings?: Record<string, unknown>,
-): { name: string; durationMin: number; price?: number; preferredBarber: string | null } | null {
+): { key: string; name: string; durationMin: number; price?: number; preferredBarber: string | null } | null {
   const detected = detectBarbershopService(input);
-  const configured = Array.isArray((clinicSettings ?? {}).barber_services)
+  const configuredServices = Array.isArray((clinicSettings ?? {}).services)
+    ? ((clinicSettings ?? {}).services as Array<Record<string, unknown>>)
+    : [];
+  const legacyConfigured = Array.isArray((clinicSettings ?? {}).barber_services)
     ? ((clinicSettings ?? {}).barber_services as Array<Record<string, unknown>>)
     : [];
+  const configured = configuredServices.length > 0 ? configuredServices : legacyConfigured;
   if (configured.length === 0 && !detected.matchedService) return null;
   const normalizedInput = normalizeTextForIntent(input);
   const preferredBarber = detected.preferredBarber;
-  const candidates = configured.filter((row) => row?.is_active !== false);
+  const candidates = configured.filter((row) => row?.is_active !== false && row?.active !== false);
+  const toServiceKey = (row: Record<string, unknown>, fallbackName: string) =>
+    safeStr(row?.key, safeStr(row?.service_key, safeStr(row?.id, fallbackName))).trim();
+  const toServiceResult = (row: Record<string, unknown>, name: string) => {
+    const durationMin = Number(row?.duration_min ?? row?.durationMinutes);
+    const price = Number(row?.price_from ?? row?.price ?? row?.amount ?? row?.price_hnl ?? row?.base_price_hnl);
+    return {
+      key: toServiceKey(row, name) || name,
+      name,
+      durationMin: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : 45,
+      price: Number.isFinite(price) ? price : undefined,
+      preferredBarber,
+    };
+  };
   if (candidates.length > 0) {
     for (const row of candidates) {
       const name = safeStr(row?.name, "").trim();
       if (!name) continue;
+      const key = normalizeTextForIntent(toServiceKey(row, name)).replace(/_/g, " ");
       const aliases = Array.isArray(row?.aliases)
         ? (row.aliases as unknown[]).map((a) => normalizeTextForIntent(safeStr(a, "")))
         : [];
       const normalizedName = normalizeTextForIntent(name);
       if (
         normalizedInput.includes(normalizedName) ||
+        (key && normalizedInput.includes(key)) ||
         aliases.some((a) => a && normalizedInput.includes(a))
       ) {
-        const durationMin = Number(row?.duration_min);
-        const price = Number(row?.price);
-        return {
-          name,
-          durationMin: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : 45,
-          price: Number.isFinite(price) ? price : undefined,
-          preferredBarber,
-        };
+        return toServiceResult(row, name);
       }
+    }
+    const wantsCorteBarba = /\b(corte y barba|corte con barba|corte \+ barba|barba y corte)\b/.test(normalizedInput);
+    const wantsCorteLimpieza = /\b(corte y limpieza|corte con limpieza|corte \+ limpieza)\b/.test(normalizedInput);
+    const wantsLimpieza = /\b(limpieza facial|facial|limpieza)\b/.test(normalizedInput);
+    const wantsCorte = /\b(corte|pelo|cabello|cortarme)\b/.test(normalizedInput);
+    const score = (row: Record<string, unknown>) => {
+      const name = normalizeTextForIntent(safeStr(row?.name, ""));
+      const key = normalizeTextForIntent(toServiceKey(row, name)).replace(/_/g, " ");
+      const haystack = `${name} ${key}`;
+      if (wantsCorteBarba && haystack.includes("corte") && haystack.includes("barba")) return 100;
+      if (wantsCorteLimpieza && haystack.includes("corte") && haystack.includes("limpieza")) return 95;
+      if (wantsLimpieza && haystack.includes("limpieza")) return haystack.includes("corte") ? 60 : 90;
+      if (wantsCorte && haystack.includes("corte")) {
+        if (!haystack.includes("barba") && !haystack.includes("limpieza")) return 85;
+        return 50;
+      }
+      if (/\bbarba\b/.test(normalizedInput) && haystack.includes("barba")) return 80;
+      return 0;
+    };
+    const scored = candidates
+      .map((row) => ({ row, score: score(row) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (scored[0]) {
+      const name = safeStr(scored[0].row?.name, "").trim();
+      if (name) return toServiceResult(scored[0].row, name);
     }
   }
   if (!detected.matchedService) return null;
   return {
+    key: detected.matchedService.id,
     name: detected.matchedService.name,
     durationMin: detected.matchedService.durationMinutes,
     price: detected.matchedService.basePriceHnl,
     preferredBarber,
   };
+}
+
+function getBarbershopServicesFromSettings(
+  clinicSettings?: Record<string, unknown>,
+): Array<{ id: string; key: string; name: string; durationMin: number; price?: number }> {
+  const raw = Array.isArray((clinicSettings ?? {}).services)
+    ? ((clinicSettings ?? {}).services as Array<Record<string, unknown>>)
+    : [];
+  if (!raw.length) return [];
+  return raw
+    .filter((row) => row?.is_active !== false && row?.active !== false)
+    .map((row) => {
+      const name = safeStr(row?.name, "").trim();
+      const id = safeStr(row?.id, safeStr(row?.key, name)).trim();
+      const key = safeStr(row?.key, safeStr(row?.service_key, id || name)).trim();
+      const durationMin = Number(row?.duration_min ?? row?.durationMinutes);
+      const priceNum = Number(row?.price_from ?? row?.price ?? row?.amount ?? row?.price_hnl ?? row?.base_price_hnl);
+      return {
+        id: id || key || name,
+        key: key || id || name,
+        name,
+        durationMin: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : 45,
+        price: Number.isFinite(priceNum) ? priceNum : undefined,
+      };
+    })
+    .filter((row) => row.name);
+}
+
+function findBarbershopFaqAnswer(
+  inboundText: string,
+  clinicSettings?: Record<string, unknown>,
+): string | null {
+  const normalized = normalizeTextForIntent(inboundText);
+  const faqs = Array.isArray((clinicSettings ?? {}).faqs)
+    ? ((clinicSettings ?? {}).faqs as Array<Record<string, unknown>>)
+    : [];
+  if (!faqs.length) return null;
+  const walkInSignal = /\b(sin cita|walk ?ins?|walkins?|por llegada|por orden de llegada|atienden sin cita)\b/.test(normalized);
+  if (walkInSignal) {
+    const walkFaq = faqs.find((faq) => {
+      const q = normalizeTextForIntent(safeStr(faq?.q, safeStr(faq?.question, "")));
+      return /\b(sin cita|walk ?ins?|walkins?|por llegada|por cita o llegada)\b/.test(q);
+    });
+    const answer = safeStr(walkFaq?.a, safeStr(walkFaq?.answer, "")).trim();
+    if (answer) return answer;
+  }
+  const generalFaq = faqs.find((faq) => {
+    const q = normalizeTextForIntent(safeStr(faq?.q, safeStr(faq?.question, "")));
+    return q && (normalized.includes(q) || q.includes(normalized));
+  });
+  const answer = safeStr(generalFaq?.a, safeStr(generalFaq?.answer, "")).trim();
+  return answer || null;
+}
+
+function isBarbershopServicesQuestion(input: string): boolean {
+  const t = normalizeTextForIntent(input);
+  return /\b(que servicios|qué servicios|que ofrecen|qué ofrecen|servicios tienen|menu de servicios)\b/.test(t);
+}
+
+function isBarbershopChooseBarberQuestion(input: string): boolean {
+  const t = normalizeTextForIntent(input);
+  const asksChoice = /\b(puedo escoger barbero|puedo elegir barbero|se puede escoger barbero|puedo elegir con quien|esta bryan|esta alex|esta carlos|esta luis)\b/.test(t);
+  const hasDateOrTime = /\b(hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|a las \d{1,2}|\d{1,2}:\d{2})\b/.test(t);
+  return asksChoice && !hasDateOrTime;
 }
 
 function buildBarbershopProductsReply(
@@ -405,7 +548,7 @@ function isBarbershopHaircutIntentText(input: string): boolean {
     .replace(/\bquiro\b/g, "quiero")
     .replace(/\bcotarme\b/g, "cortarme")
     .trim();
-  return /\b(quiero cortarme el pelo|me quiero cortar|corte de cabello|quiero corte|cortarme el pelo|core de pelo|cote de pelo)\b/.test(text);
+  return /\b(quiero cortarme el pelo|me quiero cortar|corte de cabello|quiero corte|cortarme el pelo|core de pelo|cote de pelo|el pelo nada mas|el pelo nada más|pelo nada mas|pelo nada más)\b/.test(text);
 }
 
 function isGenericGroomingExpression(input: string): boolean {
@@ -461,6 +604,33 @@ function isWithinClinicHours(
   return slotMin >= openMin && slotMin < closeMin;
 }
 
+function validateRequestedDateTimeBookability(args: {
+  requestedDate: string;
+  requestedTime: string;
+  timezone: string;
+  clinicSettings?: Record<string, unknown>;
+}): {
+  canBookRequestedDateTime: boolean;
+  reason: "requested_day_closed" | "requested_time_outside_hours" | "requested_time_in_past" | null;
+} {
+  if (isBarbershopSlotInPast(args.requestedDate, args.requestedTime, args.timezone)) {
+    return { canBookRequestedDateTime: false, reason: "requested_time_in_past" };
+  }
+  if (!isWithinClinicHours(args.requestedDate, args.requestedTime, args.clinicSettings)) {
+    const d = new Date(`${args.requestedDate}T12:00:00`);
+    const hours = (args.clinicSettings?.hours ?? null) as Record<string, unknown> | null;
+    if (hours && !Number.isNaN(d.valueOf())) {
+      const keyMap = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      const cfg = (hours[keyMap[d.getDay()]] ?? null) as Record<string, unknown> | null;
+      if (cfg?.closed === true) {
+        return { canBookRequestedDateTime: false, reason: "requested_day_closed" };
+      }
+    }
+    return { canBookRequestedDateTime: false, reason: "requested_time_outside_hours" };
+  }
+  return { canBookRequestedDateTime: true, reason: null };
+}
+
 function isCleanConfirmationText(input: string): boolean {
   const text = normalizeTextForIntent(input).trim();
   if (!/^(si|s[ií]|ok|dale|me funciona|esta bien|confirmar|claro|correcto)$/.test(text)) return false;
@@ -471,6 +641,57 @@ function isCleanConfirmationText(input: string): boolean {
     return false;
   }
   return true;
+}
+
+function mergeBookingContext(args: {
+  currentEntities: {
+    serviceName: string;
+    providerName: string;
+    providerPreference: "any" | "specific" | null;
+    hasAnyProviderPreference: boolean;
+  };
+  leadState: ConversationState;
+  bookingCollected: Record<string, unknown>;
+  lastBotQuestion: string;
+}): {
+  serviceName: string;
+  providerName: string;
+  providerPreference: "any" | "specific" | null;
+  proposedDate: string;
+  proposedTime: string;
+  reusedPreviousDateTime: boolean;
+} {
+  const serviceName = safeStr(
+    args.currentEntities.serviceName,
+    safeStr(args.bookingCollected.service, ""),
+  ).trim();
+  const providerName = safeStr(
+    args.currentEntities.providerName,
+    safeStr(args.bookingCollected.preferred_barber, ""),
+  ).trim();
+  const providerPreference = args.currentEntities.hasAnyProviderPreference
+    ? "any"
+    : (providerName ? "specific" : args.currentEntities.providerPreference);
+
+  const proposed = ((args.bookingCollected.proposed_slot ?? {}) as Record<string, unknown>);
+  const proposedDate = safeStr(
+    proposed.date,
+    safeStr(args.bookingCollected.preferred_date, ""),
+  ).trim();
+  const proposedTime = safeStr(
+    proposed.time,
+    safeStr(args.bookingCollected.preferred_time, ""),
+  ).trim();
+  const reusedPreviousDateTime = Boolean(proposedDate && proposedTime);
+
+  return {
+    serviceName,
+    providerName,
+    providerPreference,
+    proposedDate,
+    proposedTime,
+    reusedPreviousDateTime,
+  };
 }
 
 type PendingInterruptionType =
@@ -520,6 +741,77 @@ function isStateCorrectionText(input: string): boolean {
   const text = normalizeTextForIntent(input);
   return /\b(no te he dado fecha ni hora|no te di fecha|yo no pedi ese dia|nadie pidio viernes|yo pedi lunes|no te pedi eso)\b/
     .test(text);
+}
+
+type PendingBookingRequest = {
+  service: string | null;
+  preferred_date: string | null;
+  preferred_time: string | null;
+  provider_name: string | null;
+  provider_preference: "any" | "specific" | null;
+  patient_name: string | null;
+  booking_for_other: boolean;
+  missing_fields: string[];
+  source: "llm_interpreter" | "deterministic" | "context_merge";
+};
+
+function normalizePendingBookingRequest(raw: unknown): PendingBookingRequest {
+  const value = (raw && typeof raw === "object") ? (raw as Record<string, unknown>) : {};
+  const providerPrefRaw = safeStr(value.provider_preference, "").trim().toLowerCase();
+  const provider_preference = providerPrefRaw === "any" || providerPrefRaw === "specific"
+    ? (providerPrefRaw as "any" | "specific")
+    : null;
+  const missing_fields = Array.isArray(value.missing_fields)
+    ? value.missing_fields.map((f) => safeStr(f, "").trim()).filter(Boolean)
+    : [];
+  const sourceRaw = safeStr(value.source, "").trim();
+  const source = sourceRaw === "llm_interpreter" || sourceRaw === "context_merge" || sourceRaw === "deterministic"
+    ? sourceRaw
+    : "deterministic";
+  return {
+    service: safeStr(value.service, "").trim() || null,
+    preferred_date: safeStr(value.preferred_date, "").trim() || null,
+    preferred_time: safeStr(value.preferred_time, "").trim() || null,
+    provider_name: safeStr(value.provider_name, "").trim() || null,
+    provider_preference: provider_preference,
+    patient_name: safeStr(value.patient_name, "").trim() || null,
+    booking_for_other: Boolean(value.booking_for_other),
+    missing_fields,
+    source,
+  };
+}
+
+function computeBookingMissingFields(req: PendingBookingRequest): string[] {
+  const missing: string[] = [];
+  if (!safeStr(req.service, "").trim()) missing.push("service");
+  if (!safeStr(req.preferred_date, "").trim()) missing.push("date");
+  if (!safeStr(req.preferred_time, "").trim()) missing.push("time");
+  return missing;
+}
+
+function mergePendingBookingRequest(args: {
+  bookingCollected: Record<string, unknown>;
+  detectedServiceName: string;
+  parsedDate: string | null;
+  parsedTime: string | null;
+  providerName: string | null;
+  providerPreference: "any" | "specific" | null;
+  source: PendingBookingRequest["source"];
+}): PendingBookingRequest {
+  const existing = normalizePendingBookingRequest((args.bookingCollected as any).pending_booking_request);
+  const merged: PendingBookingRequest = {
+    service: safeStr(args.detectedServiceName, "").trim() || existing.service || safeStr(args.bookingCollected.service, "").trim() || null,
+    preferred_date: args.parsedDate || existing.preferred_date || safeStr(args.bookingCollected.preferred_date, "").trim() || null,
+    preferred_time: args.parsedTime || existing.preferred_time || safeStr(args.bookingCollected.preferred_time, "").trim() || null,
+    provider_name: args.providerName || existing.provider_name || safeStr(args.bookingCollected.provider_name, safeStr(args.bookingCollected.preferred_barber, "")).trim() || null,
+    provider_preference: args.providerPreference || existing.provider_preference || null,
+    patient_name: existing.patient_name || safeStr(args.bookingCollected.patient_name, "").trim() || null,
+    booking_for_other: existing.booking_for_other || Boolean((args.bookingCollected as any).booking_for_other),
+    missing_fields: [],
+    source: args.source,
+  };
+  merged.missing_fields = computeBookingMissingFields(merged);
+  return merged;
 }
 
 function hasIncompleteTimePhrase(input: string): boolean {
@@ -706,10 +998,217 @@ function isAvailabilityInquiryText(input: string): boolean {
   return hasAvailabilitySubject && hasAvailabilitySignal;
 }
 
+function isAvailabilityDiscoveryIntentText(input: string): boolean {
+  const text = normalizeTextForIntent(input);
+  const asksOpenQuestion = /\b(que|cual|cuando|para cuando)\b/.test(text);
+  const availabilityCoreSignal = /\b(disponible|disponibilidad|cupo|espacio|horario|horarios|hora|horas|atienden|atiende)\b/
+    .test(text);
+  const dayQuestionSignal = /\b(dia|dias|semana)\b/.test(text);
+  const bookingAskSignal = /\b(puedo llegar|hay|tienen|tienes|tenes|esta|estan)\b/.test(text);
+  if (isAvailabilityInquiryText(input)) return true;
+  return asksOpenQuestion && availabilityCoreSignal && (dayQuestionSignal || bookingAskSignal);
+}
+
 function isBusinessHoursQuestionText(input: string): boolean {
   const text = normalizeTextForIntent(input);
-  return /\b(cual es el horario de la clinica|horario de atencion|a que hora abren|a que hora cierran|atienden sabado|atienden domingo)\b/i
+  if (/\b(que horas tenes disponible|horarios disponibles|hay cupo|hay espacio|tenes espacio|tienes espacio)\b/.test(text)) {
+    return false;
+  }
+  return /\b(horario|horarios|horario de atencion|a que hora abren|a que hora cierran|cuando abren|cuando cierran|abren|cierran)\b/i
     .test(text);
+}
+
+function formatBarbershopPrice(price: unknown): string {
+  const num = Number(price);
+  if (Number.isFinite(num) && num > 0) return `HNL ${Math.round(num)}`;
+  return "precio por confirmar";
+}
+
+function formatBarbershopDurationLabel(minutesRaw: unknown): string {
+  const minutes = Number(minutesRaw);
+  if (!Number.isFinite(minutes) || minutes <= 0) return "duración por confirmar";
+  if (minutes === 60) return "1 hora";
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = Math.round(minutes % 60);
+  return remainder > 0 ? `${hours} h ${remainder} min` : `${hours} horas`;
+}
+
+function getBarbershopServiceBenefitLine(serviceNameRaw: string): string {
+  const name = normalizeTextForIntent(serviceNameRaw);
+  if (name.includes("barba") && name.includes("corte")) return "El combo completo: corte, barba y detalle.";
+  if (name.includes("limpieza") && name.includes("corte")) return "Corte completo con limpieza facial incluida.";
+  if (name.includes("limpieza")) return "Para refrescar la piel y salir más fino.";
+  if (name.includes("corte")) return "Limpio, fresco y bien perfilado.";
+  return "Para salir listo.";
+}
+
+function getBarbershopServiceEmoji(serviceNameRaw: string): string {
+  const name = normalizeTextForIntent(serviceNameRaw);
+  if (name.includes("barba")) return "🧔";
+  if (name.includes("limpieza")) return name.includes("corte") ? "💈" : "✨";
+  if (name.includes("corte")) return "✂️";
+  return "💈";
+}
+
+function getBarbershopCopyBrandName(clinicSettings?: Record<string, unknown>): string {
+  const location = clinicSettings?.location && typeof clinicSettings.location === "object"
+    ? (clinicSettings.location as Record<string, unknown>)
+    : {};
+  const configured = safeStr(
+    location.name,
+    safeStr(
+      clinicSettings?.brand_name,
+      safeStr(clinicSettings?.display_name, safeStr(clinicSettings?.business_name, "")),
+    ),
+  ).trim();
+  if (configured) return configured;
+  return "BarberLine";
+}
+
+function getBarbershopServiceActionKey(service: { id?: string; key?: string; name?: string } | null | undefined): string {
+  const key = safeStr(service?.key, safeStr(service?.id, safeStr(service?.name, ""))).trim();
+  if (key) return key;
+  return safeStr(service?.name, "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function formatBarbershopServiceMenuFromSettings(
+  services: Array<{ name: string }>,
+  fallback = "Corte clásico\n• Corte + barba\n• Barba",
+): string {
+  const visible = services.slice(0, 4).map((service) => safeStr(service.name, "").trim()).filter(Boolean);
+  if (!visible.length) return fallback;
+  return visible.map((name) => `• ${name}`).join("\n");
+}
+
+function buildBarbershopPricingCollected(
+  bookingCollected: Record<string, unknown>,
+  service?: { id?: string; key?: string; name?: string; durationMin?: number; price?: number } | null,
+  preservePendingBooking = false,
+): Record<string, unknown> {
+  const base = preservePendingBooking
+    ? { ...bookingCollected, last_info_topic: "pricing", lastTopic: "pricing" }
+    : buildInfoContextCollected(bookingCollected, "pricing");
+  if (!service) {
+    return preservePendingBooking ? base : {
+      ...base,
+      pending_booking: null,
+      pending_booking_stale: true,
+    };
+  }
+  const serviceKey = getBarbershopServiceActionKey(service);
+  return {
+    ...base,
+    ...(preservePendingBooking ? {} : { pending_booking: null, pending_booking_stale: true }),
+    last_service_discussed: service.name,
+    lastServiceDiscussed: service.name,
+    last_pricing_service: service.name,
+    last_pricing_service_key: serviceKey,
+  };
+}
+
+function formatBarbershopPricingAnswer(
+  service: { name: string; durationMin: number; price?: number },
+): string {
+  const price = formatBarbershopPrice(service.price);
+  return `${service.name} anda en ${price} y dura aprox. ${service.durationMin} minutos.\n\n¿Querés que te busque un espacio?`;
+}
+
+function resolveBarbershopPublicLocation(clinicSettings?: Record<string, unknown>): string {
+  const locationRaw = clinicSettings?.location;
+  const locationObj = (locationRaw && typeof locationRaw === "object")
+    ? (locationRaw as Record<string, unknown>)
+    : null;
+  const integrations = (clinicSettings?.integrations && typeof clinicSettings.integrations === "object")
+    ? (clinicSettings.integrations as Record<string, unknown>)
+    : null;
+  const candidates = [
+    typeof locationRaw === "string" ? locationRaw : "",
+    safeStr(locationObj?.address, ""),
+    safeStr(locationObj?.label, ""),
+    safeStr(clinicSettings?.address, ""),
+    safeStr(integrations?.public_location, ""),
+    "Barrio Los Andes, San Pedro Sula, frente al parque principal",
+  ].map((v) => safeStr(v, "").trim());
+  return candidates.find((v) => v.length > 0) ?? "Barrio Los Andes, San Pedro Sula, frente al parque principal";
+}
+
+function getBarbershopBusinessHoursReply(
+  input: string,
+  clinicSettings?: Record<string, unknown>,
+): string {
+  const hours = (clinicSettings?.hours && typeof clinicSettings.hours === "object")
+    ? (clinicSettings.hours as Record<string, unknown>)
+    : {};
+  const normalized = normalizeTextForIntent(input);
+  const get = (key: string) => ((hours[key] ?? null) as Record<string, unknown> | null);
+  const mon = get("mon");
+  const sat = get("sat");
+  const sun = get("sun");
+  const openMon = mon && mon.closed !== true ? formatHourForReply(safeStr(mon.open, "08:00")) : "8:00 AM";
+  const closeMon = mon && mon.closed !== true ? formatHourForReply(safeStr(mon.close, "17:00")) : "5:00 PM";
+  const openSat = sat && sat.closed !== true ? formatHourForReply(safeStr(sat.open, "09:00")) : "9:00 AM";
+  const closeSat = sat && sat.closed !== true ? formatHourForReply(safeStr(sat.close, "17:00")) : "5:00 PM";
+  const sunClosed = !sun || sun.closed === true;
+  if (/\b(abren|apertura|a que hora abren|cuando abren)\b/.test(normalized)) {
+    return `Abrimos a las ${openMon} de lunes a viernes y a las ${openSat} los sábados.`;
+  }
+  if (/\b(cierran|cierre|a que hora cierran|cuando cierran)\b/.test(normalized)) {
+    return `Cerramos a las ${closeMon}.`;
+  }
+  return `Horario:\nLunes a viernes: ${openMon} – ${closeMon}\nSábado: ${openSat} – ${closeSat}\nDomingo: ${sunClosed ? "cerrado" : `${formatHourForReply(safeStr(sun.open, "09:00"))} – ${formatHourForReply(safeStr(sun.close, "17:00"))}`}\n\n¿Querés que revise espacios disponibles?`;
+}
+
+function isBarbershopPricingFollowup(input: string): boolean {
+  const t = normalizeTextForIntent(input);
+  return /^(y\s+barba\??|y\s+la\s+barba\??|y\s+solo\s+barba\??|y\s+cejas\??|y\s+las\s+cejas\??|y\s+corte\s+y\s+barba\??|y\s+el\s+pelo\??)$/.test(t);
+}
+
+function logBarbershopDiagnostic(event: string, payload: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ event, ...payload }));
+}
+
+function intentEditDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = Array.from({ length: b.length + 1 }, () => 0);
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function isBarberlineSemanticCancelIntent(input: string): { matched: boolean; fuzzy: boolean } {
+  const t = normalizeTextForIntent(input);
+  if (/\b(cancelar|cancelala|cancelarla|cancelar cita|cancelar la cita|quiero cancelar|cancelar mi cita|anular)\b/.test(t)) {
+    return { matched: true, fuzzy: false };
+  }
+  const tokens = t.split(/\s+/).filter(Boolean);
+  const fuzzy = tokens.some((token) =>
+    token.length >= 6 && (
+      /^cancel[a-z]*$/.test(token) ||
+      intentEditDistance(token, "cancelar") <= 2 ||
+      intentEditDistance(token, "cancelarla") <= 3 ||
+      intentEditDistance(token, "cancelala") <= 3
+    )
+  );
+  return { matched: fuzzy, fuzzy };
+}
+
+function isBarbershopOutOfScopeText(input: string): boolean {
+  const t = normalizeTextForIntent(input);
+  if (!t) return false;
+  const hasBarbershopScope = /\b(cita|agendar|agenda|precio|precios|servicio|servicios|horario|horarios|ubicacion|ubicación|direccion|dirección|barbero|barba|corte|cejas|cupo|espacio|disponible)\b/
+    .test(t);
+  if (hasBarbershopScope) return false;
+  return /\b(clima|tiempo|futbol|partido|politica|noticias|bitcoin|criptomoneda|receta|tarea|escuela|universidad)\b/.test(t);
 }
 
 function formatHourForReply(value: string): string {
@@ -782,7 +1281,7 @@ function isPricingQuestion(text: string): boolean {
     .replace(/\bcy\b/g, "c y")
     .replace(/\bc\s*y\b/g, "y")
     .replace(/\s+/g, " ");
-  return /\b(precio|precios|costo|costos|cuanto cuesta|cuanto valen|cuanto vale|cuanto cobran|desde cuanto|tarifa|tarifas|valor)\b/.test(normalized) ||
+  return /\b(precio|precios|costo|costos|cuanto cuesta|cuanto valen|cuanto vale|vale|cuesta|costo|cost[oó]|cuanto cobran|desde cuanto|tarifa|tarifas|valor)\b/.test(normalized) ||
     /\bcuanto por\b/.test(normalized) ||
     /\bcuanto\s+uesta\b/.test(normalized) ||
     /^\s*y\s+el\s+corte\??\s*$/.test(normalized) ||
@@ -838,6 +1337,20 @@ function detectAdditionalBookingRelation(text: string): { relation: string; self
   return null;
 }
 
+function extractExplicitThirdPartyName(text: string): string | null {
+  const direct = safeStr(text, "").match(/\bpara\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})\b/i);
+  if (!direct) return null;
+  const raw = safeStr(direct[1], "").trim();
+  if (!raw) return null;
+  const normalized = normalizeTextForIntent(raw);
+  if (!normalized) return null;
+  if (/^(mi|otra|otro|alguien|la|el|una|un|cita|persona|hijo|hija|hermano|hermana|papa|papá|mama|mamá)$/.test(normalized)) return null;
+  if (/\b(mi|hijo|hija|hermano|hermana|papa|papá|mama|mamá|corte|barba|cejas|cita|manana|mañana|hoy|sabado|sábado|domingo|lunes|martes|miercoles|miércoles|jueves|viernes)\b/.test(normalized)) {
+    return null;
+  }
+  return toDisplayPersonName(raw);
+}
+
 function classifyActiveAppointmentChoice(text: string): "reschedule" | "cancel" | "additional" | "unknown" {
   const normalized = normalizeTextForIntent(text);
   if (
@@ -846,7 +1359,7 @@ function classifyActiveAppointmentChoice(text: string): "reschedule" | "cancel" 
   ) return "reschedule";
   if (/\b(cancelar|cancelarla|ya no voy|no voy a poder llegar|no puedo ir|anular)\b/.test(normalized)) return "cancel";
   if (
-    /\b(otra|otra cita|agendar otra|agendar otra para otra persona|para otra persona|para mi hijo|para alguien mas|para alguien más|para mi hermano|para mi mama|para mi mamá|para mi papa|para mi papá)\b/
+    /\b(otra|otra cita|agendar otra|agendar otra para otra persona|para otra persona|quiero una para otra persona|quiero una cita para otra persona|para alguien mas|para alguien más|para mi hijo|para mi hermano|para mi mama|para mi mamá|para mi papa|para mi papá)\b/
       .test(normalized)
   ) return "additional";
   return "unknown";
@@ -859,7 +1372,7 @@ function isPendingDiscardConfirmationText(text: string): boolean {
 
 function isRescheduleDateTimeExpected(nextExpected?: string): boolean {
   const value = safeStr(nextExpected, "").trim();
-  return value === "reschedule_datetime" || value === "reschedule_date_time";
+  return value === "reschedule_datetime" || value === "reschedule_date_time" || value === "reschedule_new_datetime";
 }
 
 function isServiceActiveForOrg(
@@ -979,7 +1492,19 @@ export function parseDateTimeFromMessage(
     .replace(/\ba las nueve\b/g, "a las 9")
     .replace(/\ba las diez\b/g, "a las 10")
     .replace(/\ba las once\b/g, "a las 11")
-    .replace(/\ba las doce\b/g, "a las 12");
+    .replace(/\ba las doce\b/g, "a las 12")
+    .replace(/\btipo una\b/g, "tipo 1")
+    .replace(/\btipo dos\b/g, "tipo 2")
+    .replace(/\btipo tres\b/g, "tipo 3")
+    .replace(/\btipo cuatro\b/g, "tipo 4")
+    .replace(/\btipo cinco\b/g, "tipo 5")
+    .replace(/\btipo seis\b/g, "tipo 6")
+    .replace(/\btipo siete\b/g, "tipo 7")
+    .replace(/\btipo ocho\b/g, "tipo 8")
+    .replace(/\btipo nueve\b/g, "tipo 9")
+    .replace(/\btipo diez\b/g, "tipo 10")
+    .replace(/\btipo once\b/g, "tipo 11")
+    .replace(/\btipo doce\b/g, "tipo 12");
   const baseLocal = getClinicLocalDate(timezone, now);
   const dayMap: Record<string, number> = {
     lunes: 1,
@@ -997,11 +1522,14 @@ export function parseDateTimeFromMessage(
   };
 
   let targetDateIso: string | null = null;
+  if (/\bhoy\b/.test(lower)) {
+    targetDateIso = baseLocal.isoDate;
+  }
   const weekdayDayNumber = resolveWeekdayDayNumberDate(lower, timezone, now);
   if (weekdayDayNumber.conflict) {
     return null;
   }
-  if (weekdayDayNumber.date) {
+  if (!targetDateIso && weekdayDayNumber.date) {
     targetDateIso = weekdayDayNumber.date;
   }
   for (const [dayName, dayNum] of Object.entries(dayMap)) {
@@ -1073,6 +1601,9 @@ export function parseDateOnlyFromMessage(
     manana: -2,
     "pasado manana": -3,
   };
+  if (/\bhoy\b/.test(lower)) {
+    return baseLocal.isoDate;
+  }
   const weekdayDayNumber = resolveWeekdayDayNumberDate(lower, timezone, now);
   if (weekdayDayNumber.conflict) return null;
   if (weekdayDayNumber.date) return weekdayDayNumber.date;
@@ -1239,6 +1770,60 @@ function getSlotOrdinalSelection(text: string): number | null {
   return null;
 }
 
+function isLastSlotSelectionText(text: string): boolean {
+  const normalized = normalizeTextForIntent(text);
+  return /\b(la ultima|la última|la de mas tarde|la de más tarde)\b/.test(normalized);
+}
+
+function isMoreSlotsRequestText(text: string): boolean {
+  const normalized = normalizeTextForIntent(text);
+  return /\b(mas tarde|más tarde|ver mas|ver más|otros horarios|despues|después|la tarde|en la tarde)\b/.test(normalized);
+}
+
+function isEarlierSlotsRequestText(text: string): boolean {
+  const normalized = normalizeTextForIntent(text);
+  return /\b(mas temprano|más temprano|temprano)\b/.test(normalized);
+}
+
+function isOtherHourRequestText(text: string): boolean {
+  const normalized = normalizeTextForIntent(text);
+  return /\b(otra hora|otro horario|otros horarios|ver mas|ver más)\b/.test(normalized);
+}
+
+function isMorningSlotsRequestText(text: string): boolean {
+  const normalized = normalizeTextForIntent(text);
+  return /\b(en la manana|en la mañana|por la manana|por la mañana|manana)\b/.test(normalized);
+}
+
+function isAfternoonSlotsRequestText(text: string): boolean {
+  const normalized = normalizeTextForIntent(text);
+  return /\b(en la tarde|por la tarde|tarde)\b/.test(normalized);
+}
+
+function isLikelySlotSelectionText(input: string): boolean {
+  return Boolean(
+    parseTimeOnlyFromMessage(input) ||
+      isFirstSlotSelectionText(input) ||
+      isLastSlotSelectionText(input) ||
+      getSlotOrdinalSelection(input) !== null ||
+      /\bla de las?\s+\d{1,2}(:\d{2})?\b/i.test(normalizeTextForIntent(input)),
+  );
+}
+
+function parseAfterTimeThreshold(text: string): string | null {
+  const normalized = normalizeTextForIntent(text);
+  if (!/\bdespues de las\b/.test(normalized)) return null;
+  return parseTimeOnlyFromMessage(normalized);
+}
+
+function toMinutes(time: string): number {
+  const [hRaw, mRaw] = safeStr(time, "").split(":");
+  const h = Number(hRaw);
+  const m = Number(mRaw ?? "0");
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return -1;
+  return h * 60 + m;
+}
+
 function isSevereEmergencyText(text: string): boolean {
   const lower = safeStr(text, "").toLowerCase();
   const severePatterns = [
@@ -1290,6 +1875,15 @@ function resolveActiveAppointmentSummary(activeAppointment: Record<string, unkno
     activeAppointment.reason,
     safeStr(activeAppointment.service, safeStr(activeAppointment.title, "Revisión dental")),
   ).trim() || "Revisión dental";
+  const appointmentDate = safeStr(activeAppointment.appointment_date, "").trim();
+  const appointmentTime = safeStr(activeAppointment.appointment_time, "").trim();
+  if (appointmentDate || appointmentTime) {
+    return {
+      service,
+      dateLabel: appointmentDate ? formatHumanDay(appointmentDate) : "la fecha programada",
+      timeLabel: appointmentTime ? formatHourLabel(appointmentTime) : "la hora programada",
+    };
+  }
   const startsAt = safeStr(activeAppointment.starts_at, safeStr(activeAppointment.start_at, ""));
   let dateLabel = "";
   let timeLabel = "";
@@ -1360,6 +1954,10 @@ function formatHourLabel(time24: string): string {
   const ampm = h >= 12 ? "PM" : "AM";
   const hour12 = h % 12 === 0 ? 12 : h % 12;
   return `${hour12}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+function formatAtHourLabel(timeLabel: string): string {
+  return /^1:/.test(safeStr(timeLabel, "").trim()) ? `a la ${timeLabel}` : `a las ${timeLabel}`;
 }
 
 export function extractName(message: string): string | null {
@@ -1674,9 +2272,19 @@ export function runConversationEngine(args: {
   }
 
   if (orgType === "barbershop") {
+    const normalizedInbound = normalizeInboundRuntime({
+      inboundText: args.inboundText,
+      channel: args.channel ?? "unknown",
+      payloadAction: null,
+    });
+    console.log(JSON.stringify({
+      event: "barbershop:normalized_inbound",
+      normalized_inbound: normalizedInbound,
+    }));
     const bookingCollected = { ...collected };
     const shadowEnabled = isEnabledFlag(args.clinicSettings?.barbershop_interpreter_shadow_enabled);
     const runtimeEnabled = isEnabledFlag(args.clinicSettings?.barbershop_interpreter_runtime_enabled);
+    const semanticFallbackEnabled = Boolean((args.barbershopInterpreterResult as any)?.semantic);
     const runtimeMinConfidence = 0.6;
     const protectedNextExpectedSet = new Set([
       "confirm_booking",
@@ -1689,7 +2297,7 @@ export function runConversationEngine(args: {
     const isProtectedState = protectedNextExpectedSet.has(nextExpectedValue);
     const isCleanConfirmation = isCleanConfirmationText(args.inboundText);
     const isCleanButtonPayload = /^\s*__[^_]+/.test(safeStr(args.inboundText, ""));
-    const hasOpenAiKey = Boolean(safeStr(Deno.env.get("OPENAI_API_KEY"), "").trim());
+    const llmRuntime = getBarbershopInterpreterRuntimeStatus();
     console.log(JSON.stringify({
       event: "barbershop:b4_interpreter_before",
       organization_id: args.organizationId ?? null,
@@ -1697,12 +2305,16 @@ export function runConversationEngine(args: {
       shadow_enabled: shadowEnabled,
       inbound_text: args.inboundText ?? null,
       business_type: "barbershop",
-      has_openai_key: hasOpenAiKey,
+      llm_provider: llmRuntime.provider,
+      has_groq_key: llmRuntime.has_groq_key,
+      has_openai_key: llmRuntime.has_openai_key,
+      llm_available: llmRuntime.llm_available,
+      llm_interpreter_enabled: runtimeEnabled || shadowEnabled,
     }));
     const interpreterResult = args.barbershopInterpreterResult ?? null;
-    const interpreterDebug = interpreterResult && (shadowEnabled || runtimeEnabled)
+    const interpreterDebug = interpreterResult && (shadowEnabled || runtimeEnabled || semanticFallbackEnabled)
       ? {
-        mode: (runtimeEnabled ? "runtime" : "shadow") as "shadow" | "runtime",
+        mode: (runtimeEnabled || semanticFallbackEnabled ? "runtime" : "shadow") as "shadow" | "runtime",
         intent: interpreterResult.intent,
         confidence: interpreterResult.confidence,
         entities: (interpreterResult.entities ?? {}) as Record<string, unknown>,
@@ -1749,10 +2361,22 @@ export function runConversationEngine(args: {
       ? "appointment_lookup"
       : runtimeIntentRaw === "cancel_request"
       ? "cancel_request"
+      : runtimeIntentRaw === "cancel_appointment"
+      ? "cancel_request"
       : runtimeIntentRaw === "reschedule_request"
+      ? "reschedule_request"
+      : runtimeIntentRaw === "reschedule_appointment"
       ? "reschedule_request"
       : runtimeIntentRaw === "booking_request"
       ? "booking_request"
+      : runtimeIntentRaw === "location_question"
+      ? "location_question"
+      : runtimeIntentRaw === "business_hours_question"
+      ? "business_hours_question"
+      : runtimeIntentRaw === "services_question"
+      ? "services_question"
+      : runtimeIntentRaw === "out_of_scope"
+      ? "out_of_scope"
       : runtimeIntentRaw === "appointment_lookup"
       ? "appointment_lookup"
       : "unknown";
@@ -1793,7 +2417,7 @@ export function runConversationEngine(args: {
         runtimeToolNeeded === "book_appointment",
     );
     const runtimeEligibleForPrimary = Boolean(
-      runtimeEnabled &&
+      (runtimeEnabled || semanticFallbackEnabled) &&
         interpreterResult &&
         !isCleanConfirmation &&
         !isCleanButtonPayload &&
@@ -1817,6 +2441,10 @@ export function runConversationEngine(args: {
       next_step: runtimeNextStep || null,
       tool_needed: runtimeToolNeeded || null,
       used_for_routing: shouldUseRuntimeInterpreter,
+      llm_provider: llmRuntime.provider,
+      has_groq_key: llmRuntime.has_groq_key,
+      has_openai_key: llmRuntime.has_openai_key,
+      llm_available: llmRuntime.llm_available,
     }));
     if (shouldUseRuntimeInterpreter) {
       console.log(JSON.stringify({
@@ -1827,6 +2455,14 @@ export function runConversationEngine(args: {
         next_step: runtimeNextStep || null,
         tool_needed: runtimeToolNeeded || null,
       }));
+      if (semanticFallbackEnabled) {
+        console.log(JSON.stringify({
+          event: "barbershop_semantic_interpreter_routed",
+          inbound_text: args.inboundText ?? null,
+          intent: runtimeIntentMapped || "unknown",
+          confidence: Number.isFinite(runtimeConfidence) ? runtimeConfidence : null,
+        }));
+      }
     } else {
       const fallbackReason = !runtimeEnabled
         ? "runtime_disabled"
@@ -1847,7 +2483,15 @@ export function runConversationEngine(args: {
         event: "barbershop:b4_old_parser_fallback",
         inbound_text: args.inboundText ?? null,
         reason: fallbackReason,
+        fallback_reason: fallbackReason,
       }));
+      if (semanticFallbackEnabled && (!Number.isFinite(runtimeConfidence) || runtimeConfidence < runtimeMinConfidence)) {
+        console.log(JSON.stringify({
+          event: "barbershop_semantic_interpreter_low_confidence",
+          inbound_text: args.inboundText ?? null,
+          confidence: Number.isFinite(runtimeConfidence) ? runtimeConfidence : null,
+        }));
+      }
     }
     if (
       runtimeEligibleForPrimary &&
@@ -1858,7 +2502,9 @@ export function runConversationEngine(args: {
       routedIntent === "unknown"
     ) {
       return {
-        replyText: "Te ayudo de una. ¿Querés agendar cita, ver horarios, consultar precios o revisar una cita que ya tenés?",
+        replyText: semanticFallbackEnabled
+          ? "Por ahora solo te puedo ayudar con citas, precios, horarios y ubicación de la barbería 💈\n\n¿Querés agendar o ver precios?"
+          : "Te ayudo de una. ¿Querés agendar cita, ver horarios, consultar precios o revisar una cita que ya tenés?",
         statePatch: {
           stage: safeStr(state.stage, "DISCOVERY"),
           lastIntent: "clarify",
@@ -1866,7 +2512,11 @@ export function runConversationEngine(args: {
           orgType: "barbershop",
           collected: { ...bookingCollected },
         },
-        debug: withInterpreterDebug({ intent: "unknown", phase: safeStr(state.stage, "DISCOVERY"), route: "barbershop_runtime_low_confidence_clarify" }, "runtime"),
+        debug: withInterpreterDebug({
+          intent: "unknown",
+          phase: safeStr(state.stage, "DISCOVERY"),
+          route: semanticFallbackEnabled ? "barbershop_semantic_low_confidence_out_of_scope" : "barbershop_runtime_low_confidence_clarify",
+        }, "runtime"),
       };
     }
     const runtimeIntent = shouldUseRuntimeInterpreter ? runtimeCandidateIntent : "unknown";
@@ -1887,12 +2537,13 @@ export function runConversationEngine(args: {
     const runtimeDateTime = runtimeDateText || runtimeTimeText
       ? parseDateTimeFromMessage(`${runtimeDateText} ${runtimeTimeText}`.trim(), safeStr(args.clinicSettings?.timezone, "America/Tegucigalpa"))
       : null;
+    const repairedInboundText = normalizeTextForIntent(args.inboundText);
     const bookingContext = extractBarbershopBookingContext(bookingCollected);
     const _infoContext = extractBarbershopInfoContext(bookingCollected);
-    const serviceDetection = detectBarbershopService(args.inboundText);
+    const serviceDetection = detectBarbershopService(repairedInboundText);
     const genericGrooming = isGenericGroomingExpression(args.inboundText);
     const detectedServiceFromSettings = resolveBarbershopServiceFromSettings(
-      args.inboundText,
+      repairedInboundText,
       args.clinicSettings,
     );
     const runtimeDetectedService = runtimeServiceName
@@ -1917,8 +2568,19 @@ export function runConversationEngine(args: {
       ? null
       : detectedService;
     const timezone = safeStr(args.clinicSettings?.timezone, "America/Tegucigalpa");
-    const parsedDateTime = parseDateTimeFromMessage(args.inboundText, timezone);
-    const hasBarberMention = /\bcon\s+[a-z]+\b/i.test(normalizeTextForIntent(args.inboundText));
+	    const parsedDateTime = parseDateTimeFromMessage(repairedInboundText, timezone);
+	    const parsedDateOnly = parseDateOnlyFromMessage(repairedInboundText, timezone);
+	    const parsedTimeOnly = parseTimeOnlyFromMessage(repairedInboundText);
+	    const currentServiceName = safeStr(
+	      (bookingCollected as any).current_service_name,
+	      safeStr((bookingCollected as any).service, safeStr((bookingCollected as any).current_service_key, "")),
+	    ).trim();
+	    const currentServiceKey = safeStr((bookingCollected as any).current_service_key, "").trim();
+	    const currentDate = safeStr((bookingCollected as any).current_date, safeStr((bookingCollected as any).preferred_date, "")).trim();
+	    const hasActiveBookingStateContract = Boolean((bookingCollected as any).activeBookingFlow) ||
+	      ["select_day", "select_time"].includes(safeStr((bookingCollected as any).lastBookingStep, ""));
+	    const currentServiceForTimeRequest = currentServiceName || safeStr((bookingCollected as any)?.pending_booking?.service_name, "");
+	    const hasBarberMention = /\bcon\s+[a-z]+\b/i.test(repairedInboundText);
     const runtimeAnyProvider = runtimeProviderPrefRaw === "any";
     const runtimeSpecificProvider = runtimeProviderPrefRaw === "specific";
     const hasAnyBarberPreference = isAnyBarberPreferenceText(args.inboundText) || runtimeAnyProvider;
@@ -1941,6 +2603,22 @@ export function runConversationEngine(args: {
       safeStr(((bookingCollected as any).pending_booking ?? {})?.appointment_time, "").trim(),
     );
     const activePendingBooking = ((bookingCollected as any).pending_booking ?? null) as Record<string, unknown> | null;
+    const inboundMessageId = safeStr((state as any).__inbound_message_id, "").trim();
+    const inboundMessageCreatedAt = safeStr((state as any).__inbound_message_created_at, "").trim();
+    const pendingCreatedFromInboundMessageId = safeStr(
+      activePendingBooking?.created_from_inbound_message_id,
+      safeStr((bookingCollected as any).pending_booking_created_from_inbound_message_id, ""),
+    ).trim();
+    const pendingPreconfirmSentAt = safeStr(
+      activePendingBooking?.preconfirm_sent_at,
+      safeStr((bookingCollected as any).pending_booking_preconfirm_sent_at, ""),
+    ).trim();
+    const pendingConfirmationFreshness = isFreshPendingConfirmation({
+      inboundMessageId,
+      inboundMessageCreatedAt,
+      pendingCreatedFromInboundMessageId,
+      pendingPreconfirmSentAt,
+    });
     const activePendingDate = safeStr(
       activePendingBooking?.appointment_date,
       safeStr((bookingCollected as any).preferred_date, ""),
@@ -1981,6 +2659,317 @@ export function runConversationEngine(args: {
         activePendingTime
       ),
     );
+    const detectedServiceName = safeStr(
+      effectiveDetectedService?.name,
+      isBarbershopHaircutIntentText(args.inboundText) ? "Corte clásico" : "",
+    ).trim();
+    const normalizedBarbershopInbound = normalizeTextForIntent(args.inboundText);
+    const hasBarbershopGreetingToken = /\b(hola|hey|buenas|buen dia|buenos dias|que tal)\b/.test(normalizedBarbershopInbound);
+    const shouldResolveMixedGreeting = intent.intent === "greeting" || hasBarbershopGreetingToken;
+    const barbershopLocationQuestion = /\b(donde estan|donde están|donde quedan|donde quedan ubicados|donde estan ubicados|donde están ubicados|ubicacion|ubicación|direccion|dirección)\b/
+      .test(normalizedBarbershopInbound);
+    const barbershopServicesQuestion = /\b(que servicios tienen|qué servicios tienen|que ofrecen|qué ofrecen|lista de precios|que precios tienen|qué precios tienen)\b/
+      .test(normalizedBarbershopInbound);
+    const greetingDemotedIntent = shouldResolveMixedGreeting
+      ? (
+        isCleanConfirmationText(args.inboundText) ? "confirm_booking"
+          : routedIntent === "booking_cancel" ? "cancel"
+          : routedIntent === "booking_reschedule" ? "reschedule"
+          : isPricingQuestion(args.inboundText) || isBarbershopPricingFollowup(args.inboundText) || routedIntent === "pricing_question" ? "pricing_question"
+          : barbershopLocationQuestion ? "location_question"
+          : isBusinessHoursQuestionText(args.inboundText) ? "business_hours_question"
+          : barbershopServicesQuestion ? "services_question"
+          : isAvailabilityDiscoveryIntentText(args.inboundText) || isAvailabilityInquiryText(args.inboundText) ? "availability_question"
+          : parsedDateTime || parsedDateOnly || parsedTimeOnly || routedIntent === "booking_request" || detectedServiceName ? "booking_request"
+          : isBarbershopOutOfScopeText(args.inboundText) ? "out_of_scope"
+          : ""
+      )
+      : "";
+    if (greetingDemotedIntent) {
+      logBarbershopDiagnostic("greeting_demoted_due_to_stronger_intent", {
+        inbound_text: args.inboundText,
+        resolved_intent: greetingDemotedIntent,
+      });
+      logBarbershopDiagnostic("mixed_greeting_intent_resolved", {
+        inbound_text: args.inboundText,
+        resolved_intent: greetingDemotedIntent,
+      });
+    }
+    const mergedPendingBookingRequest = mergePendingBookingRequest({
+      bookingCollected,
+      detectedServiceName,
+      parsedDate: (parsedDateTime?.date ?? parsedDateOnly ?? null),
+      parsedTime: (parsedDateTime?.time ?? parsedTimeOnly ?? null),
+      providerName: safeStr(serviceDetection.preferredBarber, "").trim() || (runtimeSpecificProvider ? runtimeProviderNameRaw : null),
+      providerPreference: hasAnyBarberPreference ? "any" : (runtimeSpecificProvider ? "specific" : null),
+      source: shouldUseRuntimeInterpreter ? "llm_interpreter" : "deterministic",
+    });
+    console.log(JSON.stringify({
+      event: "barbershop:pending_booking_request_before",
+      pending_booking_request_before: normalizePendingBookingRequest((bookingCollected as any).pending_booking_request),
+    }));
+    console.log(JSON.stringify({
+      event: "barbershop:interpreter_entities",
+      interpreter_entities: {
+        service: runtimeFieldService || null,
+        date: runtimeFieldDate || null,
+        time: runtimeFieldTime || null,
+        provider_name: runtimeProviderNameRaw || null,
+        provider_preference: runtimeFieldProviderPref || null,
+      },
+    }));
+    console.log(JSON.stringify({
+      event: "barbershop:merged_booking_request_after",
+      merged_booking_request_after: mergedPendingBookingRequest,
+      missing_fields_after: mergedPendingBookingRequest.missing_fields,
+    }));
+    const runtimeContext = mergeConversationContext({
+      normalizedInbound,
+      interpreterResult: interpreterResult as unknown as Record<string, unknown> | null,
+      leadState: state as unknown as Record<string, unknown>,
+      lastBotText: safeStr((bookingCollected as any).last_bot_text, ""),
+    });
+    const universalIntent = (() => {
+      if (isCleanConfirmationText(args.inboundText)) return "confirm_booking";
+      if (runtimeContext.route_recommendation === "select_slot" && isLikelySlotSelectionText(args.inboundText)) return "slot_selection";
+      if (isAvailabilityDiscoveryIntentText(args.inboundText) || isAvailabilityInquiryText(args.inboundText)) return "availability_discovery";
+      if (routedIntent === "booking_request" || runtimeIntent === "booking_request") return "booking_request";
+      if (runtimeIntent === "pricing_question" || intent.intent === "pricing") return "pricing_question";
+      if (runtimeIntent === "appointment_lookup") return "booking_request";
+      if (intent.intent === "greeting") return "greeting";
+      if (runtimeContext.has_active_context) return "unknown_inside_active_flow";
+      return "unknown_outside_active_flow";
+    })();
+    const routeDecision = {
+      resolved_intent: universalIntent,
+      active_flow: runtimeContext.active_flow,
+      booking_request: runtimeContext.booking_request,
+      missing_fields: runtimeContext.booking_request?.missing_fields ?? [],
+      selected_slot: runtimeContext.selected_slot,
+      tool_to_call:
+        runtimeContext.route_recommendation === "check_availability" || runtimeContext.route_recommendation === "show_availability"
+          ? "check_availability"
+          : runtimeContext.route_recommendation === "confirm_booking"
+          ? "book_appointment"
+          : "none",
+      response_type: runtimeContext.route_recommendation,
+      fallback_mode: runtimeContext.has_active_context ? "unknown_inside_active_flow" : "unknown_outside_active_flow",
+      legacy_branch_bypassed: shouldUseRuntimeInterpreter,
+    };
+    console.log(JSON.stringify({
+      event: "barbershop:runtime_path_entered",
+      resolved_intent: routeDecision.resolved_intent,
+      active_flow: routeDecision.active_flow,
+      route_decision: routeDecision,
+      tool_to_call: routeDecision.tool_to_call,
+      fallback_mode: routeDecision.fallback_mode,
+      legacy_branch_bypassed: routeDecision.legacy_branch_bypassed,
+    }));
+    console.log(JSON.stringify({
+      event: "barbershop:context_merge_before",
+      nextExpected_before: safeStr(state.nextExpected, ""),
+      stage_before: safeStr(state.stage, ""),
+      pending_booking_request_before: normalizePendingBookingRequest((bookingCollected as any).pending_booking_request),
+    }));
+    console.log(JSON.stringify({
+      event: "barbershop:context_merge_after",
+      context_merge_after: runtimeContext,
+    }));
+
+    const hasKnownBarbershopService = Boolean(
+      detectedServiceName ||
+        safeStr(bookingCollected.service, "").trim() ||
+        currentServiceName ||
+        safeStr((bookingCollected as any)?.pending_booking?.service_name, "").trim() ||
+        safeStr((bookingCollected as any)?.pending_booking_request?.service, "").trim(),
+    );
+    const plainAppointmentRequest = isBarbershopGenericBookingRequestText(args.inboundText) ||
+      /\b(agendar cita|agendar una cita|reservar cita|reservar una cita)\b/.test(normalizedBarbershopInbound);
+    const thirdPartySignalBeforeRouting = /\b(para mi hijo|para mi hija|para mi hermano|para mi hermana|para mi mama|para mi mamá|para mi papa|para mi papá|para otra persona|para alguien mas|para alguien más)\b/
+      .test(normalizedBarbershopInbound);
+    const rescheduleSignalBeforeRouting = isRescheduleDateTimeExpected(nextExpectedValue) ||
+      routedIntent === "booking_reschedule" || runtimeIntent === "reschedule_request" ||
+      /\b(reagendar|cambiar|mover|moverla|cambiarla)\b/.test(normalizedBarbershopInbound);
+    const hasProviderSignalBeforeRouting = hasBarberMention || hasAnyBarberPreference || runtimeSpecificProvider || runtimeAnyProvider;
+    const genericBookingMissingService = (
+      (plainAppointmentRequest && !parsedDateTime && !parsedDateOnly && !parsedTimeOnly && !hasProviderSignalBeforeRouting) ||
+      (
+        !isPricingQuestion(args.inboundText) &&
+        !barbershopLocationQuestion &&
+        !isBusinessHoursQuestionText(args.inboundText) &&
+        !genericGrooming &&
+        !thirdPartySignalBeforeRouting &&
+        !rescheduleSignalBeforeRouting &&
+        !hasProviderSignalBeforeRouting &&
+        (parsedDateTime || (parsedDateOnly && parsedTimeOnly)) &&
+        (isAvailabilityDiscoveryIntentText(args.inboundText) || isAvailabilityInquiryText(args.inboundText) || routedIntent === "booking_request")
+      )
+    ) && !hasKnownBarbershopService;
+    if (genericBookingMissingService) {
+      const serviceMenu = formatBarbershopServiceMenuFromSettings(
+        getBarbershopServicesFromSettings(args.clinicSettings),
+      );
+      if (hasBarbershopGreetingToken || intent.intent === "greeting") {
+        logBarbershopDiagnostic("booking_intent_skipped_main_menu", {
+          inbound_text: args.inboundText,
+          reason: "booking_intent_with_greeting",
+        });
+      }
+      logBarbershopDiagnostic("booking_missing_service_asks_service_first", {
+        inbound_text: args.inboundText,
+        has_datetime: Boolean(parsedDateTime || parsedDateOnly || parsedTimeOnly),
+      });
+      return {
+        replyText: `Perfecto 💈 ¿Qué servicio querés?\n\n${serviceMenu}`,
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "book_appointment",
+          nextExpected: "service",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            activeBookingFlow: true,
+            lastBookingStep: "select_service",
+            ...(parsedDateTime?.date || parsedDateOnly ? { preferred_date: parsedDateTime?.date ?? parsedDateOnly } : {}),
+            ...(parsedDateTime?.time || parsedTimeOnly ? { preferred_time: parsedDateTime?.time ?? parsedTimeOnly } : {}),
+            pending_booking_request: {
+              ...mergedPendingBookingRequest,
+              preferred_date: parsedDateTime?.date ?? parsedDateOnly ?? mergedPendingBookingRequest.preferred_date,
+              preferred_time: parsedDateTime?.time ?? parsedTimeOnly ?? mergedPendingBookingRequest.preferred_time,
+              missing_fields: ["service"],
+              source: "deterministic",
+            },
+          },
+        },
+        debug: withInterpreterDebug(
+          { intent: "book_appointment", phase: "BOOKING", route: "barbershop_missing_service_first" },
+          runtimeIntent === "booking_request" || runtimeIntent === "availability_question" ? "runtime" : "shadow",
+        ),
+      };
+    }
+
+    if (
+      hasActiveBookingStateContract &&
+      currentServiceForTimeRequest &&
+      parsedDateOnly &&
+      !parsedTimeOnly &&
+      !isPricingQuestion(args.inboundText)
+    ) {
+      return {
+        replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "availability",
+          nextExpected: "availability_slot_selection",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            service: currentServiceForTimeRequest,
+            preferred_date: parsedDateOnly,
+            current_date: parsedDateOnly,
+            activeBookingFlow: true,
+            lastBookingStep: "select_time",
+            pending_booking_request: {
+              ...mergedPendingBookingRequest,
+              service: currentServiceForTimeRequest,
+              preferred_date: parsedDateOnly,
+              missing_fields: ["time"],
+              source: "deterministic",
+            },
+          },
+        },
+        debug: withInterpreterDebug(
+          { intent: "availability", phase: "BOOKING", route: "barbershop_active_booking_date_followup" },
+          "shadow",
+        ),
+      };
+    }
+
+    if (safeStr(state.nextExpected, "").trim() === "booking_date") {
+      if (mergedPendingBookingRequest.preferred_date) {
+        if (mergedPendingBookingRequest.service && mergedPendingBookingRequest.preferred_time) {
+          return {
+            replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "book_appointment",
+              nextExpected: "confirm_booking",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                service: mergedPendingBookingRequest.service,
+                preferred_date: mergedPendingBookingRequest.preferred_date,
+                preferred_time: mergedPendingBookingRequest.preferred_time,
+                provider_preference: mergedPendingBookingRequest.provider_preference,
+                provider_name: mergedPendingBookingRequest.provider_name,
+                preferred_barber: mergedPendingBookingRequest.provider_preference === "any" ? null : mergedPendingBookingRequest.provider_name,
+                pending_booking_request: { ...mergedPendingBookingRequest, source: "context_merge" },
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: withInterpreterDebug(
+              { intent: "book_appointment", phase: "BOOKING", route: "barbershop_pending_booking_request_date_merged_check" },
+              runtimeIntent === "booking_request" ? "runtime" : "shadow",
+            ),
+          };
+        }
+      }
+      return {
+        replyText: "Claro 🔥 ¿Para qué día querés que te revise horarios?",
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "book_appointment",
+          nextExpected: "booking_date",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            pending_booking_request: { ...mergedPendingBookingRequest, source: "context_merge" },
+          },
+        },
+        debug: withInterpreterDebug(
+          { intent: "book_appointment", phase: "BOOKING", route: "barbershop_pending_booking_request_date_reask" },
+          runtimeIntent === "booking_request" ? "runtime" : "shadow",
+        ),
+      };
+    }
+    const thirdPartyRelation = detectAdditionalBookingRelation(repairedInboundText);
+    const explicitThirdPartyName = extractExplicitThirdPartyName(repairedInboundText);
+    const likelySelfBookingPhrase = /\b(cortarme|hacerme|para mi|para mí|yo)\b/.test(repairedInboundText);
+    if (((thirdPartyRelation && !thirdPartyRelation.self) || explicitThirdPartyName) && !likelySelfBookingPhrase) {
+      (bookingCollected as any).booking_for_other = true;
+      (bookingCollected as any).appointment_for_relation = thirdPartyRelation?.relation ?? "other";
+      if (explicitThirdPartyName) {
+        (bookingCollected as any).patient_name = explicitThirdPartyName;
+      }
+    }
+    const thirdPartyPatientName = safeStr((bookingCollected as any).patient_name, "").trim();
+    if (thirdPartyRelation && !thirdPartyRelation.self && parsedDateTime && !thirdPartyPatientName) {
+      const inferredService = safeStr(
+        (bookingCollected as any).service,
+        safeStr(effectiveDetectedService?.name, "Cita barbería"),
+      );
+      return {
+        replyText: `Perfecto. ${formatHumanDay(parsedDateTime.date)} a las ${formatHourLabel(parsedDateTime.time)} está disponible para ${inferredService}. ¿A nombre de quién la agendamos?`,
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "book_appointment",
+          nextExpected: "third_party_patient_name",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            service: inferredService,
+            preferred_date: parsedDateTime.date,
+            preferred_time: parsedDateTime.time,
+            booking_for_other: true,
+            appointment_for_relation: thirdPartyRelation.relation,
+            pending_booking: null,
+            pending_booking_stale: true,
+          },
+        },
+        debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_third_party_missing_name_after_datetime" },
+      };
+    }
 
     if (safeStr(state.nextExpected, "") === "confirm_discard_pending_booking") {
       if (isPendingDiscardConfirmationText(args.inboundText)) {
@@ -2053,13 +3042,25 @@ export function runConversationEngine(args: {
 
     const isInActiveChoiceFlow = safeStr(state.nextExpected, "") === "active_appointment_intent_choice";
     const isInAdditionalDetailsFlow = safeStr(state.nextExpected, "") === "additional_booking_details";
+    const rawCancelTypoDetected = /\b(cncelar|canselar|cancalar|cancelr|canselarla|cncelarla)\b/i.test(args.inboundText);
+    const semanticCancelDetection = isBarberlineSemanticCancelIntent(args.inboundText);
+    const normalizedCancelIntentDetected = semanticCancelDetection.matched ||
+      /\b(ya no voy|no voy a poder llegar|no puedo ir)\b/.test(normalizeTextForIntent(args.inboundText));
 
     if (
       !isInActiveChoiceFlow &&
       !isInAdditionalDetailsFlow &&
       hasDiscardablePendingContext &&
-      /\b(cancelar|cancelarla|ya no voy|no voy a poder llegar|no puedo ir|anular)\b/.test(normalizeTextForIntent(args.inboundText))
+      normalizedCancelIntentDetected
     ) {
+      logBarbershopDiagnostic("cancel_intent_detected", { inbound_text: args.inboundText });
+      logBarbershopDiagnostic("barberline_cancel_semantic_detected", {
+        inbound_text: args.inboundText,
+        fuzzy: semanticCancelDetection.fuzzy,
+      });
+      if (rawCancelTypoDetected || semanticCancelDetection.fuzzy) {
+        logBarbershopDiagnostic("cancel_intent_typo_detected", { inbound_text: args.inboundText });
+      }
       const pendingDateLabel = activePendingDate ? formatHumanDay(activePendingDate) : "la fecha pendiente";
       const pendingTimeLabel = activePendingTime ? formatHourLabel(activePendingTime) : "la hora pendiente";
       return {
@@ -2096,8 +3097,51 @@ export function runConversationEngine(args: {
     if (
       !isInActiveChoiceFlow &&
       !isInAdditionalDetailsFlow &&
-      /\b(cancelar|cancelarla|ya no voy|no voy a poder llegar|no puedo ir|anular)\b/.test(normalizeTextForIntent(args.inboundText))
+      normalizedCancelIntentDetected
     ) {
+      logBarbershopDiagnostic("cancel_intent_detected", { inbound_text: args.inboundText });
+      logBarbershopDiagnostic("barberline_cancel_semantic_detected", {
+        inbound_text: args.inboundText,
+        fuzzy: semanticCancelDetection.fuzzy,
+      });
+      if (rawCancelTypoDetected || semanticCancelDetection.fuzzy) {
+        logBarbershopDiagnostic("cancel_intent_typo_detected", { inbound_text: args.inboundText });
+      }
+      if (activeAppointment && safeStr(activeAppointment.id, safeStr(activeAppointment.appointment_id, "")).trim()) {
+        const activeSummary = resolveActiveAppointmentSummary(activeAppointment);
+        const providerName = safeStr(activeAppointment.provider_name, "").trim();
+        const pendingCancel = {
+          appointment_id: safeStr(activeAppointment.id, safeStr(activeAppointment.appointment_id, "")),
+          service: activeSummary.service,
+          appointment_date: safeStr(activeAppointment.appointment_date, ""),
+          appointment_time: safeStr(activeAppointment.appointment_time, ""),
+          starts_at: safeStr(activeAppointment.starts_at, safeStr(activeAppointment.start_at, "")),
+          status: "pending_confirmation",
+          provider_id: safeStr(activeAppointment.provider_id, "") || null,
+          provider_name: safeStr(activeAppointment.provider_name, "") || null,
+        };
+        logBarbershopDiagnostic("cancel_confirmation_requested", {
+          appointment_id: pendingCancel.appointment_id || null,
+        });
+        return {
+          replyText: `¿Confirmás que querés cancelar tu cita del ${activeSummary.dateLabel} ${formatAtHourLabel(activeSummary.timeLabel)}?`,
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "cancel_appointment",
+            nextExpected: "confirm_cancel_appointment",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              active_appointment: activeAppointment,
+              pending_cancel: pendingCancel,
+              pending_cancel_appointment: pendingCancel,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug({ intent: "cancel_appointment", phase: "BOOKING", route: "barbershop_direct_cancel_active_context" }),
+        };
+      }
       return {
         replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_CANCEL__",
         statePatch: {
@@ -2114,9 +3158,129 @@ export function runConversationEngine(args: {
     if (
       !isInActiveChoiceFlow &&
       !isInAdditionalDetailsFlow &&
+      (runtimeIntent === "reschedule_request" || runtimeNextStep === "start_reschedule")
+    ) {
+      return {
+        replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__",
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "reschedule_appointment",
+          nextExpected: runtimeDateText || runtimeTimeText ? "confirm_reschedule_appointment" : "reschedule_new_datetime",
+          orgType: "barbershop",
+          active_flow: "reschedule",
+          collected: {
+            ...bookingCollected,
+            ...(runtimeDateTime ? {
+              reschedule_date: runtimeDateTime.date,
+              reschedule_time: runtimeDateTime.time,
+            } : {}),
+          },
+        },
+        debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "BOOKING", route: "barbershop_runtime_reschedule_lookup" }, "runtime"),
+      };
+    }
+
+    if (
+      !isInActiveChoiceFlow &&
+      !isInAdditionalDetailsFlow &&
+      intent.intent === "reschedule_appointment"
+    ) {
+      if (activeAppointment && safeStr(activeAppointment.id, safeStr(activeAppointment.appointment_id, "")).trim()) {
+        const activeSummary = resolveActiveAppointmentSummary(activeAppointment);
+        const pendingReschedule = {
+          appointment_id: safeStr(activeAppointment.id, safeStr(activeAppointment.appointment_id, "")),
+          service: activeSummary.service,
+          current_date: safeStr(activeAppointment.appointment_date, ""),
+          current_time: safeStr(activeAppointment.appointment_time, ""),
+          current_starts_at: safeStr(activeAppointment.starts_at, ""),
+          provider_id: safeStr(activeAppointment.provider_id, "") || null,
+          provider_name: safeStr(activeAppointment.provider_name, "") || null,
+          status: "awaiting_new_datetime",
+        };
+        logBarbershopDiagnostic("reschedule_requested", {
+          appointment_id: pendingReschedule.appointment_id || null,
+        });
+        if (parsedDateTime) {
+          logBarbershopDiagnostic("reschedule_new_datetime_requested", {
+            appointment_id: pendingReschedule.appointment_id || null,
+            requested_date: parsedDateTime.date,
+            requested_time: parsedDateTime.time,
+          });
+          return {
+            replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__",
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "reschedule_appointment",
+              nextExpected: "confirm_reschedule_appointment",
+              orgType: "barbershop",
+              active_flow: "reschedule",
+              collected: {
+                ...bookingCollected,
+                active_appointment: activeAppointment,
+                service: activeSummary.service,
+                reschedule_date: parsedDateTime.date,
+                reschedule_time: parsedDateTime.time,
+                reschedule_from_message: true,
+                pending_reschedule: {
+                  ...pendingReschedule,
+                  requested_date: parsedDateTime.date,
+                  requested_time: parsedDateTime.time,
+                  status: "pending_availability_check",
+                },
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "BOOKING", route: "barbershop_direct_reschedule_active_context_with_datetime" }),
+          };
+        }
+        return {
+          replyText: `Claro, te ayudo a reagendar tu cita de ${activeSummary.service} del ${activeSummary.dateLabel} a las ${activeSummary.timeLabel}.\n\n¿Qué nuevo día y hora te interesa?`,
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "reschedule_appointment",
+            nextExpected: "reschedule_new_datetime",
+            orgType: "barbershop",
+            active_flow: "reschedule",
+            collected: {
+              ...bookingCollected,
+              active_appointment: activeAppointment,
+              service: activeSummary.service,
+              pending_reschedule: pendingReschedule,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "BOOKING", route: "barbershop_direct_reschedule_active_context" }),
+        };
+      }
+      return {
+        replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__",
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "reschedule_appointment",
+          nextExpected: parsedDateTime ? "confirm_reschedule_appointment" : "reschedule_new_datetime",
+          orgType: "barbershop",
+          active_flow: "reschedule",
+          collected: {
+            ...bookingCollected,
+            ...(parsedDateTime ? {
+              reschedule_date: parsedDateTime.date,
+              reschedule_time: parsedDateTime.time,
+              reschedule_from_message: true,
+            } : {}),
+          },
+        },
+        debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "BOOKING", route: "barbershop_direct_reschedule_lookup" }),
+      };
+    }
+
+    if (
+      !isInActiveChoiceFlow &&
+      !isInAdditionalDetailsFlow &&
       (runtimeIntent === "appointment_lookup" ||
         runtimeNextStep === "lookup_active_appointment" ||
-        runtimeToolNeeded === "get_active_appointment" && runtimeIntent !== "cancel_request")
+        runtimeToolNeeded === "get_active_appointment" && !["cancel_request", "reschedule_request"].includes(runtimeIntent))
     ) {
       return {
         replyText: "__CHECK_ACTIVE_APPOINTMENT__",
@@ -2154,16 +3318,66 @@ export function runConversationEngine(args: {
       const activeAppt = ((bookingCollected as any).active_appointment ?? {}) as Record<string, unknown>;
       const activeSummary = resolveActiveAppointmentSummary(activeAppt);
       if (choice === "reschedule") {
+        const pendingReschedule = {
+          appointment_id: safeStr(activeAppt.id, safeStr(activeAppt.appointment_id, "")),
+          service: activeSummary.service,
+          current_date: safeStr(activeAppt.appointment_date, ""),
+          current_time: safeStr(activeAppt.appointment_time, ""),
+          current_starts_at: safeStr(activeAppt.starts_at, ""),
+          provider_id: safeStr(activeAppt.provider_id, "") || null,
+          provider_name: safeStr(activeAppt.provider_name, "") || null,
+          status: "awaiting_new_datetime",
+        };
+        logBarbershopDiagnostic("reschedule_requested", {
+          appointment_id: pendingReschedule.appointment_id || null,
+        });
+        if (parsedDateTime) {
+          logBarbershopDiagnostic("reschedule_new_datetime_requested", {
+            appointment_id: pendingReschedule.appointment_id || null,
+            requested_date: parsedDateTime.date,
+            requested_time: parsedDateTime.time,
+          });
+          return {
+            replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__",
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "reschedule_appointment",
+              nextExpected: "confirm_reschedule_appointment",
+              orgType: "barbershop",
+              active_flow: "reschedule",
+              collected: {
+                ...bookingCollected,
+                active_appointment: activeAppt,
+                service: activeSummary.service,
+                reschedule_date: parsedDateTime.date,
+                reschedule_time: parsedDateTime.time,
+                reschedule_from_message: true,
+                pending_reschedule: {
+                  ...pendingReschedule,
+                  requested_date: parsedDateTime.date,
+                  requested_time: parsedDateTime.time,
+                  status: "pending_availability_check",
+                },
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "BOOKING", route: "barbershop_active_choice_reschedule_with_datetime" }),
+          };
+        }
         return {
-          replyText: "Claro. ¿Para qué día y hora querés moverla?",
+          replyText: `Claro, te ayudo a reagendar tu cita de ${activeSummary.service} del ${activeSummary.dateLabel} a las ${activeSummary.timeLabel}.\n\n¿Qué nuevo día y hora te interesa?`,
           statePatch: {
             stage: "BOOKING",
             lastIntent: "reschedule_appointment",
-            nextExpected: "reschedule_date_time",
+            nextExpected: "reschedule_new_datetime",
             orgType: "barbershop",
+            active_flow: "reschedule",
             collected: {
               ...bookingCollected,
               active_appointment: activeAppt,
+              service: activeSummary.service,
+              pending_reschedule: pendingReschedule,
               pending_booking: null,
               pending_booking_stale: true,
             },
@@ -2172,8 +3386,21 @@ export function runConversationEngine(args: {
         };
       }
       if (choice === "cancel") {
+        const pendingCancel = {
+          appointment_id: safeStr(activeAppt.id, ""),
+          service: activeSummary.service,
+          appointment_date: safeStr(activeAppt.appointment_date, ""),
+          appointment_time: safeStr(activeAppt.appointment_time, ""),
+          starts_at: safeStr(activeAppt.starts_at, safeStr(activeAppt.start_at, "")),
+          status: "pending_confirmation",
+          provider_id: safeStr(activeAppt.provider_id, "") || null,
+          provider_name: safeStr(activeAppt.provider_name, "") || null,
+        };
+        logBarbershopDiagnostic("cancel_confirmation_requested", {
+          appointment_id: pendingCancel.appointment_id || null,
+        });
         return {
-          replyText: `Tenés una cita para ${activeSummary.service} el ${activeSummary.dateLabel} a las ${activeSummary.timeLabel}. ¿Querés cancelarla?`,
+          replyText: `¿Confirmás que querés cancelar tu cita del ${activeSummary.dateLabel} ${formatAtHourLabel(activeSummary.timeLabel)}?`,
           statePatch: {
             stage: "BOOKING",
             lastIntent: "cancel_appointment",
@@ -2182,13 +3409,8 @@ export function runConversationEngine(args: {
             collected: {
               ...bookingCollected,
               active_appointment: activeAppt,
-              pending_cancel_appointment: {
-                appointment_id: safeStr(activeAppt.id, ""),
-                service: activeSummary.service,
-                appointment_date: safeStr(activeAppt.appointment_date, ""),
-                appointment_time: safeStr(activeAppt.appointment_time, ""),
-                status: "pending_confirmation",
-              },
+              pending_cancel: pendingCancel,
+              pending_cancel_appointment: pendingCancel,
               pending_booking: null,
               pending_booking_stale: true,
             },
@@ -2200,6 +3422,28 @@ export function runConversationEngine(args: {
         const relation = detectAdditionalBookingRelation(args.inboundText);
         const detectedExtraService = resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings);
         const relationLabel = relation?.relation ?? "other";
+        const isOtherPersonWithoutRelation = !relation || relation.relation === "other";
+        if (isOtherPersonWithoutRelation) {
+          return {
+            replyText: "Claro. ¿A nombre de quién agendamos la cita?",
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "book_appointment",
+              nextExpected: "third_party_patient_name",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                allow_additional_booking: true,
+                booking_for_other: true,
+                appointment_for_relation: "other",
+                patient_name: null,
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: withInterpreterDebug({ intent: "book_appointment", phase: "BOOKING", route: "barbershop_active_choice_additional_ask_name" }),
+          };
+        }
         if (relation && relation.relation !== "other" && !detectedExtraService) {
           return {
             replyText: "Claro. ¿Qué servicio necesita esa persona: corte, barba o corte + barba?",
@@ -2211,7 +3455,9 @@ export function runConversationEngine(args: {
               collected: {
                 ...bookingCollected,
                 allow_additional_booking: true,
+                booking_for_other: true,
                 appointment_for_relation: relationLabel,
+                patient_name: null,
                 pending_booking: null,
                 pending_booking_stale: true,
               },
@@ -2229,7 +3475,9 @@ export function runConversationEngine(args: {
             collected: {
               ...bookingCollected,
               allow_additional_booking: true,
+              booking_for_other: true,
               appointment_for_relation: relationLabel,
+              patient_name: null,
               pending_booking: null,
               pending_booking_stale: true,
             },
@@ -2259,24 +3507,25 @@ export function runConversationEngine(args: {
       const additionalService = resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings);
       const additionalDateTime = parseDateTimeFromMessage(args.inboundText, timezone);
       const currentPatientName = safeStr((bookingCollected as any).patient_name, "").trim();
-      const relationOnlyNeedsName = Boolean(
+      const relationNeedsName = Boolean(
         relation &&
           !relation.self &&
-          relation.relation !== "other" &&
           !currentPatientName,
       );
 
       const updatedCollected = {
         ...bookingCollected,
         allow_additional_booking: true,
+        booking_for_other: true,
         appointment_for_relation: relation?.relation ?? safeStr((bookingCollected as any).appointment_for_relation, "other"),
         ...(additionalService ? { service: additionalService.name } : {}),
         ...(additionalDateTime
           ? { preferred_date: additionalDateTime.date, preferred_time: additionalDateTime.time }
           : {}),
       } as Record<string, unknown>;
+      const existingService = safeStr((bookingCollected as any).service, "").trim();
 
-      if (!additionalService) {
+      if (!additionalService && !existingService) {
         return {
           replyText: "Claro. ¿Qué servicio necesita esa persona: corte, barba o corte + barba?",
           statePatch: {
@@ -2304,13 +3553,17 @@ export function runConversationEngine(args: {
         };
       }
 
-      if (relationOnlyNeedsName) {
+      if (relationNeedsName) {
+        const relationValue = safeStr((relation as any)?.relation, "").trim();
+        const askNameReply = relationValue && relationValue !== "other"
+          ? `¿Cómo se llama tu ${relationValue}?`
+          : `Perfecto. ${formatHumanDay(additionalDateTime.date)} a las ${formatHourLabel(additionalDateTime.time)} está disponible para ${safeStr(additionalService?.name, existingService || "Cita barbería")}. ¿A nombre de quién la agendamos?`;
         return {
-          replyText: `¿Cómo se llama tu ${relation!.relation}?`,
+          replyText: askNameReply,
           statePatch: {
             stage: "BOOKING",
             lastIntent: "book_appointment",
-            nextExpected: "patient_name_for",
+            nextExpected: "third_party_patient_name",
             orgType: "barbershop",
             collected: updatedCollected,
           },
@@ -2328,6 +3581,294 @@ export function runConversationEngine(args: {
           collected: updatedCollected,
         },
         debug: withInterpreterDebug({ intent: "book_appointment", phase: "BOOKING", route: "barbershop_additional_check_availability" }),
+      };
+    }
+
+    if (isRescheduleDateTimeExpected(nextExpectedValue) && (parsedDateTime || (parsedDateOnly && parsedTimeOnly))) {
+      const nextRescheduleDate = parsedDateTime?.date ?? parsedDateOnly ?? "";
+      const nextRescheduleTime = parsedDateTime?.time ?? parsedTimeOnly ?? "";
+      const activeAppt = (((bookingCollected as any).active_appointment ?? {}) as Record<string, unknown>);
+      const activeService = safeStr(
+        activeAppt.reason,
+        safeStr(activeAppt.title, safeStr(bookingCollected.service, "Corte clásico")),
+      ).trim();
+      const pendingReschedule = (((bookingCollected as any).pending_reschedule ?? {}) as Record<string, unknown>);
+      logBarbershopDiagnostic("reschedule_new_datetime_requested", {
+        appointment_id: safeStr(activeAppt.id, safeStr(pendingReschedule.appointment_id, "")) || null,
+        requested_date: nextRescheduleDate,
+        requested_time: nextRescheduleTime,
+      });
+      return {
+        replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__",
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "reschedule_appointment",
+          nextExpected: "confirm_reschedule_appointment",
+          orgType: "barbershop",
+          active_flow: "reschedule",
+          collected: {
+            ...bookingCollected,
+            active_appointment: activeAppt,
+            service: activeService || "Corte clásico",
+            reschedule_date: nextRescheduleDate,
+            reschedule_time: nextRescheduleTime,
+            reschedule_from_message: true,
+            pending_reschedule: {
+              ...pendingReschedule,
+              appointment_id: safeStr(activeAppt.id, safeStr(pendingReschedule.appointment_id, "")),
+              service: activeService || safeStr(pendingReschedule.service, "Corte clásico"),
+              current_date: safeStr(activeAppt.appointment_date, safeStr(pendingReschedule.current_date, "")),
+              current_time: safeStr(activeAppt.appointment_time, safeStr(pendingReschedule.current_time, "")),
+              current_starts_at: safeStr(activeAppt.starts_at, safeStr(pendingReschedule.current_starts_at, "")),
+              requested_date: nextRescheduleDate,
+              requested_time: nextRescheduleTime,
+              status: "pending_availability_check",
+            },
+            pending_booking: null,
+            pending_booking_stale: true,
+          },
+        },
+        debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "BOOKING", route: "barbershop_reschedule_datetime_from_context" }),
+      };
+    }
+
+    if (nextExpectedValue === "confirm_reschedule_appointment") {
+      const pendingInterruption = classifyPendingFlowInterruption(args.inboundText);
+      const activeAppt = (((bookingCollected as any).active_appointment ?? {}) as Record<string, unknown>);
+      const pendingReschedule = (((bookingCollected as any).pending_reschedule ?? {}) as Record<string, unknown>);
+      const appointmentId = safeStr(activeAppt.id, safeStr(pendingReschedule.appointment_id, ""));
+      const requestedDate = safeStr(bookingCollected.reschedule_date, safeStr(pendingReschedule.requested_date, ""));
+      const requestedTime = safeStr(bookingCollected.reschedule_time, safeStr(pendingReschedule.requested_time, ""));
+
+      if (pendingInterruption.type === "clean_confirmation") {
+        logBarbershopDiagnostic("reschedule_confirmed", {
+          appointment_id: appointmentId || null,
+          requested_date: requestedDate || null,
+          requested_time: requestedTime || null,
+        });
+        return {
+          replyText: "Perfecto, estoy actualizando tu cita ahora mismo.",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "reschedule_appointment",
+            nextExpected: undefined,
+            orgType: "barbershop",
+            active_flow: "reschedule",
+            collected: {
+              ...bookingCollected,
+              pending_reschedule: null,
+              pending_booking: null,
+              selected_slot: null,
+            },
+          },
+          toolAction: {
+            name: "reschedule_appointment",
+            payload: {
+              appointment_id: appointmentId,
+              appointment_date: requestedDate,
+              appointment_time: requestedTime,
+              reason: safeStr(bookingCollected.service, safeStr(activeAppt.reason, "Corte clásico")),
+              business_type: "barbershop",
+              provider_id: safeStr(pendingReschedule.provider_id, ""),
+              provider_name: safeStr(pendingReschedule.provider_name, ""),
+              duration_min: Number(pendingReschedule.duration_min ?? 60) || 60,
+              brand_name: safeStr(args.clinicSettings?.brand_name, safeStr(args.clinicSettings?.business_name, "la barbería")),
+            },
+          },
+          debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "BOOKING", route: "barbershop_reschedule_confirmed" }),
+        };
+      }
+
+      if (pendingInterruption.type === "clean_rejection" || /^(no|mejor\s+no|no\s+cambiar)\b/i.test(args.inboundText.trim())) {
+        logBarbershopDiagnostic("reschedule_declined", {
+          appointment_id: appointmentId || null,
+        });
+        return {
+          replyText: "Perfecto, mantenemos tu cita original.",
+          statePatch: {
+            stage: "DISCOVERY",
+            lastIntent: "reschedule_declined",
+            nextExpected: undefined,
+            orgType: "barbershop",
+            active_flow: undefined,
+            collected: {
+              ...bookingCollected,
+              pending_reschedule: null,
+              reschedule_date: null,
+              reschedule_time: null,
+            },
+          },
+          debug: withInterpreterDebug({ intent: "reschedule_appointment", phase: "DISCOVERY", route: "barbershop_reschedule_declined" }),
+        };
+      }
+    }
+
+    const pendingCancelForConfirmation = ((bookingCollected as any).pending_cancel ??
+      (bookingCollected as any).pending_cancel_appointment ??
+      null) as Record<string, unknown> | null;
+    if (nextExpectedValue === "confirm_cancel_appointment" || pendingCancelForConfirmation) {
+      const pendingCancel = (((bookingCollected as any).pending_cancel ??
+        (bookingCollected as any).pending_cancel_appointment ??
+        (bookingCollected as any).active_appointment ??
+        {}) as Record<string, unknown>);
+      const activeAppt = (((bookingCollected as any).active_appointment ?? {}) as Record<string, unknown>);
+      const appointmentId = safeStr(
+        pendingCancel.appointment_id,
+        safeStr(pendingCancel.id, safeStr(activeAppt.id, "")),
+      );
+
+      if (isCleanConfirmationText(args.inboundText)) {
+        if (!appointmentId) {
+          logBarbershopDiagnostic("cancel_confirmation_missing_pending_cancel", {
+            next_expected: nextExpectedValue,
+          });
+          return {
+            replyText: "No tengo una cita pendiente para cancelar. Si querés, puedo revisar tu cita confirmada.",
+            statePatch: {
+              stage: "DISCOVERY",
+              lastIntent: "cancel_appointment",
+              nextExpected: undefined,
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                pending_cancel: null,
+                pending_cancel_appointment: null,
+              },
+            },
+            debug: withInterpreterDebug({ intent: "cancel_appointment", phase: "DISCOVERY", route: "barbershop_cancel_missing_pending" }),
+          };
+        }
+        logBarbershopDiagnostic("cancel_confirmation_confirmed", {
+          appointment_id: appointmentId,
+        });
+        return {
+          replyText: "✅ Tu cita fue cancelada.\n\nSi querés, puedo ayudarte a buscar otro horario.",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "cancel_appointment",
+            nextExpected: undefined,
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_cancel: null,
+              pending_cancel_appointment: null,
+              pending_booking: null,
+              selected_slot: null,
+            },
+          },
+          toolAction: {
+            name: "cancel_appointment",
+            payload: {
+              appointment_id: appointmentId,
+              business_type: "barbershop",
+            },
+          },
+          debug: withInterpreterDebug({ intent: "cancel_appointment", phase: "BOOKING", route: "barbershop_cancel_confirmed" }),
+        };
+      }
+
+      if (classifyPendingFlowInterruption(args.inboundText).type === "clean_rejection" || /^(no\s+cancelar|mejor\s+no)\b/i.test(args.inboundText.trim())) {
+        logBarbershopDiagnostic("cancel_confirmation_declined", {
+          appointment_id: appointmentId || null,
+        });
+        return {
+          replyText: "Perfecto, mantenemos tu cita.",
+          statePatch: {
+            stage: "DISCOVERY",
+            lastIntent: "cancel_appointment_denied",
+            nextExpected: undefined,
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_cancel: null,
+              pending_cancel_appointment: null,
+            },
+          },
+          debug: withInterpreterDebug({ intent: "cancel_appointment", phase: "DISCOVERY", route: "barbershop_cancel_declined" }),
+        };
+      }
+
+      return {
+        replyText: "¿Confirmás que querés cancelarla? Respondé Sí o No.",
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "cancel_appointment",
+          nextExpected: "confirm_cancel_appointment",
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug({ intent: "cancel_appointment", phase: "BOOKING", route: "barbershop_cancel_retry_confirm" }),
+      };
+    }
+
+    const confirmsPricingBookingCta = isCleanConfirmationText(args.inboundText) &&
+      !hasValidPendingForConfirm &&
+      (
+        safeStr(state.nextExpected, "") === "pricing_booking_followup" ||
+        safeStr(state.nextExpected, "") === "pricing_followup" ||
+        safeStr(bookingCollected.last_info_topic, "") === "pricing" ||
+        safeStr(bookingCollected.lastTopic, "") === "pricing" ||
+        safeStr(state.lastIntent, "") === "pricing"
+      );
+    if (confirmsPricingBookingCta) {
+      const pricingServiceName = safeStr(
+        (bookingCollected as any).current_service_name,
+        safeStr((bookingCollected as any).last_pricing_service, safeStr((bookingCollected as any).last_service_discussed, "")),
+      ).trim();
+      const pricingService = pricingServiceName
+        ? resolveBarbershopServiceFromSettings(pricingServiceName, args.clinicSettings)
+        : null;
+      const configured = getBarbershopServicesFromSettings(args.clinicSettings);
+      const selectedPricingService = pricingService ?? configured[0] ?? null;
+      if (selectedPricingService) {
+        const serviceKey = getBarbershopServiceActionKey(selectedPricingService);
+        return {
+          replyText: "Buenísimo. ¿Qué día te queda mejor?",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "booking_date_preference",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: selectedPricingService.name,
+              activeBookingFlow: true,
+              lastBookingStep: "select_day",
+              current_service_key: serviceKey,
+              current_service_name: selectedPricingService.name,
+              pending_booking: {
+                ...(((bookingCollected as any).pending_booking ?? {}) as Record<string, unknown>),
+                service_key: serviceKey,
+                service_name: selectedPricingService.name,
+                service: selectedPricingService.name,
+                provider_preference: "any",
+              },
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_pricing_yes_continue_booking" },
+            "shadow",
+          ),
+        };
+      }
+      const serviceMenu = formatBarbershopServiceMenuFromSettings(configured);
+      return {
+        replyText: `Perfecto 💈 ¿Qué servicio querés?\n\n${serviceMenu}`,
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "book_appointment",
+          nextExpected: "service",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            activeBookingFlow: true,
+            lastBookingStep: "select_service",
+          },
+        },
+        debug: withInterpreterDebug(
+          { intent: "book_appointment", phase: "BOOKING", route: "barbershop_pricing_yes_ask_service" },
+          "shadow",
+        ),
       };
     }
 
@@ -2350,8 +3891,130 @@ export function runConversationEngine(args: {
       };
     }
 
-    if (intent.intent === "greeting") {
-      const brandName = safeStr(args.clinicSettings?.brand_name, "BarberLine").trim();
+    if (isCleanConfirmationText(args.inboundText) && hasValidPendingForConfirm && safeStr(state.nextExpected, "") !== "confirm_booking") {
+      if (pendingConfirmationFreshness.blocked) {
+        console.log(JSON.stringify({
+          event: "barbershop:stale_confirmation_blocked",
+          confirm_inbound_message_id: inboundMessageId || null,
+          pending_booking_created_from_inbound_message_id: pendingCreatedFromInboundMessageId || null,
+          pending_booking_preconfirm_sent_at: pendingPreconfirmSentAt || null,
+          confirm_inbound_message_created_at: inboundMessageCreatedAt || null,
+          confirmation_is_fresh: pendingConfirmationFreshness.fresh,
+          reason: pendingConfirmationFreshness.reason,
+        }));
+        return {
+          replyText: "Perfecto. Para confirmar, respondé de nuevo \"Confirmar\" sobre la última propuesta de horario.",
+          statePatch: {
+            stage: "CONFIRMING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_booking_stale: false,
+            },
+          },
+          debug: withInterpreterDebug({ intent: "book_appointment", phase: "CONFIRMING", route: "barbershop_legacy_pending_stale_confirmation_blocked" }),
+        };
+      }
+      const pending = ((bookingCollected as any).pending_booking ?? {}) as Record<string, unknown>;
+      const normalizedCollected = {
+        ...bookingCollected,
+        service: safeStr((bookingCollected as any).service, safeStr(pending.service, "Corte clásico")),
+        preferred_date: safeStr((bookingCollected as any).preferred_date, safeStr(pending.appointment_date, "")),
+        preferred_time: safeStr((bookingCollected as any).preferred_time, safeStr(pending.appointment_time, "")),
+      } as Record<string, unknown>;
+      const selectedServiceName = safeStr(normalizedCollected.service, "Corte clásico");
+      const isGenericBarberBooking = selectedServiceName === "Cita barbería";
+      const selectedServiceFromSettings = isGenericBarberBooking
+        ? null
+        : resolveBarbershopServiceFromSettings(selectedServiceName, args.clinicSettings);
+      const selectedServiceDetection = isGenericBarberBooking
+        ? null
+        : detectBarbershopService(selectedServiceName).matchedService;
+      const selectedService = selectedServiceDetection ?? getBarbershopServiceById("haircut");
+      const durationMin = isGenericBarberBooking
+        ? 45
+        : (selectedServiceFromSettings?.durationMin ?? selectedService?.durationMinutes ?? 30);
+      const preferredBarber = safeStr(normalizedCollected.preferred_barber, "").trim();
+      const pendingProviderName = safeStr(pending.provider_name, safeStr(pending.preferred_barber, preferredBarber)).trim();
+      const pendingProviderId = safeStr(pending.provider_id, safeStr(normalizedCollected.provider_id, "")).trim();
+      if (!pendingProviderName || !pendingProviderId) {
+        return {
+          replyText: "Ese horario ya no tiene un barbero asignado. Te muestro opciones disponibles para elegir una nueva hora.",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "availability_slot_selection",
+            orgType: "barbershop",
+            collected: {
+              ...normalizedCollected,
+              pending_booking: null,
+              pending_booking_stale: true,
+              last_bot_step: "barbershop_pending_missing_provider",
+            },
+          },
+          debug: withInterpreterDebug({ intent: "book_appointment", phase: "BOOKING", route: "barbershop_pending_missing_provider_recover" }),
+        };
+      }
+      const reasonAndTitle = isGenericBarberBooking
+        ? "Cita barbería"
+        : safeStr(normalizedCollected.service, "Corte clásico");
+      const patientName = resolveAppointmentPatientName(normalizedCollected, state);
+      if (!safeStr(patientName, "").trim()) {
+        return {
+          replyText: "Perfecto. ¿A nombre de quién dejamos la cita?",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "customer_name",
+            orgType: "barbershop",
+            collected: {
+              ...normalizedCollected,
+              pending_booking_stale: false,
+              last_bot_step: "barbershop_ask_customer_name",
+            },
+          },
+          debug: withInterpreterDebug({ intent: "book_appointment", phase: "BOOKING", route: "barbershop_legacy_pending_require_name" }),
+        };
+      }
+      return {
+        replyText: "Perfecto, estoy procesando tu reserva ahora mismo.",
+        statePatch: {
+          stage: "BOOKING",
+          lastIntent: "booking_confirmed",
+          nextExpected: undefined,
+          orgType: "barbershop",
+          collected: {
+            ...normalizedCollected,
+            confirmed: true,
+            pending_booking_stale: false,
+            last_bot_step: "barbershop_booking_confirmed",
+          },
+        },
+        toolAction: {
+          name: "book_appointment",
+	          payload: {
+	            business_type: "barbershop",
+	            selected_slot: (pending as any).selected_slot ?? (normalizedCollected as any).selected_slot ?? null,
+	            patient_name: patientName,
+            service: reasonAndTitle,
+            reason: reasonAndTitle,
+            title: reasonAndTitle,
+            appointment_date: safeStr(normalizedCollected.preferred_date, ""),
+            appointment_time: safeStr(normalizedCollected.preferred_time, ""),
+            duration_min: durationMin,
+            preferred_barber: pendingProviderName || preferredBarber || null,
+            provider_name: pendingProviderName || preferredBarber || null,
+            provider_id: pendingProviderId || null,
+          },
+        },
+        debug: withInterpreterDebug({ intent: "book_appointment", phase: "CONFIRMING", route: "barbershop_legacy_pending_confirm" }),
+      };
+    }
+
+    if (intent.intent === "greeting" && !greetingDemotedIntent) {
+      const brandName = getBarbershopCopyBrandName(args.clinicSettings);
       return {
         replyText: `👋 Hola, bienvenido a ${brandName}. ¿Qué querés hacer hoy: agendar una cita, consultar precios o ver horarios?`,
         statePatch: {
@@ -2447,11 +4110,36 @@ export function runConversationEngine(args: {
       };
     }
 
+    if (greetingDemotedIntent === "business_hours_question") {
+      logBarbershopDiagnostic("business_hours_detected", { inbound_text: args.inboundText });
+      return {
+        replyText: getBarbershopBusinessHoursReply(args.inboundText, args.clinicSettings),
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "hours",
+          nextExpected: undefined,
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug({ intent: "hours", phase: "DISCOVERY", route: "barbershop_mixed_greeting_hours_answer" }, "shadow"),
+      };
+    }
+
     if (
-      (isAvailabilityInquiryText(args.inboundText) || runtimeIntent === "availability_question") &&
+      (isAvailabilityInquiryText(args.inboundText) ||
+        isAvailabilityDiscoveryIntentText(args.inboundText) ||
+        runtimeIntent === "availability_question") &&
       state.nextExpected !== "confirm_booking"
     ) {
+      console.log(JSON.stringify({
+        event: "barbershop:availability_discovery_entered",
+        inbound_text: args.inboundText ?? null,
+        route_selected: "barbershop_availability_discovery",
+        nextExpected_before: safeStr(state.nextExpected, ""),
+      }));
+      const availabilityDateTime = parseDateTimeFromMessage(args.inboundText, timezone);
       const availabilityDate = parseDateOnlyFromMessage(args.inboundText, timezone);
+      const availabilityTimeOnly = parseTimeOnlyFromMessage(args.inboundText);
       const normalizedAvailability = normalizeTextForIntent(args.inboundText);
       const availabilityTimePreference =
         /\b(en la tarde|tarde|mas tarde)\b/.test(normalizedAvailability)
@@ -2462,14 +4150,57 @@ export function runConversationEngine(args: {
           ? "evening"
           : undefined;
       if (availabilityDate) {
-        const serviceFromState = safeStr(bookingCollected.service, "").trim();
+	        const serviceFromState = safeStr(bookingCollected.service, currentServiceForTimeRequest).trim();
         const resolvedInlineService = resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings);
         const detectedInlineService = detectBarbershopService(normalizeTextForIntent(args.inboundText)).matchedService;
         const serviceForAvailability = serviceFromState ||
           safeStr(resolvedInlineService?.name, safeStr(detectedInlineService?.name, "")).trim();
         const providerAnyInAvailability = isAnyBarberPreferenceText(args.inboundText);
-        if (serviceForAvailability) {
-          return {
+	        if (serviceForAvailability) {
+	          if (availabilityDateTime?.time) {
+	            if (hasActiveBookingStateContract) {
+	              console.log(JSON.stringify({
+	                event: "current_service_reused_for_time_request",
+	                organization_id: args.organizationId ?? null,
+	                service_key: currentServiceKey || null,
+	                service_name: serviceForAvailability,
+	                requested_date: availabilityDate,
+	                requested_time: availabilityDateTime.time,
+	              }));
+	            } else {
+	              logBarbershopDiagnostic("initial_message_exact_availability_detected", {
+	                inbound_text: args.inboundText,
+	                service: serviceForAvailability,
+	                requested_date: availabilityDate,
+	                requested_time: availabilityDateTime.time,
+	              });
+	            }
+	            return {
+	              replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+	              statePatch: {
+	                stage: "BOOKING",
+	                lastIntent: "book_appointment",
+	                nextExpected: "confirm_booking",
+	                orgType: "barbershop",
+	                collected: {
+	                  ...bookingCollected,
+	                  service: serviceForAvailability,
+	                  current_service_key: currentServiceKey || safeStr((bookingCollected as any).current_service_key, ""),
+	                  current_service_name: serviceForAvailability,
+	                  current_date: availabilityDate,
+	                  activeBookingFlow: true,
+	                  lastBookingStep: "select_time",
+	                  availability_request: true,
+	                  preferred_date: availabilityDate,
+	                  preferred_time: availabilityDateTime.time,
+	                  pending_booking: null,
+	                  pending_booking_stale: true,
+	                },
+	              },
+	              debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_current_service_availability_datetime" },
+	            };
+	          }
+	          return {
             replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
             statePatch: {
               stage: "BOOKING",
@@ -2481,6 +4212,7 @@ export function runConversationEngine(args: {
                 service: serviceForAvailability,
                 availability_request: true,
                 preferred_date: availabilityDate,
+                ...(availabilityDateTime?.time ? { preferred_time: availabilityDateTime.time } : {}),
                 ...(availabilityTimePreference ? { time_preference: availabilityTimePreference } : {}),
                 ...(providerAnyInAvailability
                   ? { provider_preference: "any", provider_name: null, preferred_barber: null }
@@ -2503,6 +4235,7 @@ export function runConversationEngine(args: {
               ...bookingCollected,
               availability_request: true,
               preferred_date: availabilityDate,
+              ...(availabilityDateTime?.time ? { preferred_time: availabilityDateTime.time } : {}),
               ...(availabilityTimePreference ? { time_preference: availabilityTimePreference } : {}),
               pending_booking: null,
               pending_booking_stale: true,
@@ -2511,25 +4244,147 @@ export function runConversationEngine(args: {
           debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_day_known_ask_service" },
         };
       }
+      const serviceFromStateOrPending = safeStr(
+        bookingCollected.service,
+        safeStr((bookingCollected as any).pending_booking_request?.service, ""),
+      ).trim();
+      const inferredServiceNoDate = safeStr(
+        resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings)?.name,
+        safeStr(detectBarbershopService(normalizeTextForIntent(args.inboundText)).matchedService?.name, isBarbershopHaircutIntentText(args.inboundText) ? "Corte clásico" : ""),
+      ).trim();
+      const inferredTimeNoDate = safeStr(availabilityDateTime?.time, safeStr(availabilityTimeOnly, "")).trim();
+      if (inferredServiceNoDate && inferredTimeNoDate) {
+        const pending = mergePendingBookingRequest({
+          bookingCollected,
+          detectedServiceName: inferredServiceNoDate,
+          parsedDate: null,
+          parsedTime: inferredTimeNoDate,
+          providerName: null,
+          providerPreference: isAnyBarberPreferenceText(args.inboundText) ? "any" : null,
+          source: shouldUseRuntimeInterpreter ? "llm_interpreter" : "deterministic",
+        });
+        return {
+          replyText: "Claro 🔥 ¿Para qué día querés que te revise horarios?",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "booking_date",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_booking_request: pending,
+              service: inferredServiceNoDate,
+              preferred_time: inferredTimeNoDate,
+              availability_request: true,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_missing_date_with_time" },
+        };
+      }
+      const serviceFromInputOnly = safeStr(
+        resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings)?.name,
+        safeStr(detectBarbershopService(normalizeTextForIntent(args.inboundText)).matchedService?.name, ""),
+      ).trim();
+      const serviceForDiscovery = serviceFromStateOrPending || serviceFromInputOnly;
+      if (serviceForDiscovery) {
+        const discoveryDate = safeStr(
+          bookingCollected.preferred_date,
+          getNowInTimezone(timezone).toISOString().slice(0, 10),
+        );
+        console.log(JSON.stringify({
+          event: "barbershop:availability_discovery_service_context",
+          service: serviceForDiscovery,
+          discovery_date: discoveryDate,
+        }));
+        return {
+          replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "availability_slot_selection",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: serviceForDiscovery,
+              availability_request: true,
+              preferred_date: discoveryDate,
+              ...(availabilityTimePreference ? { time_preference: availabilityTimePreference } : {}),
+              pending_booking: null,
+              pending_booking_stale: true,
+              pending_booking_request: {
+                service: serviceForDiscovery,
+                preferred_date: discoveryDate,
+                preferred_time: null,
+                provider_name: safeStr((bookingCollected as any).provider_name, "") || null,
+                provider_preference: safeStr((bookingCollected as any).provider_preference, "") === "any" ? "any" : null,
+                patient_name: safeStr((bookingCollected as any).patient_name, "") || null,
+                booking_for_other: Boolean((bookingCollected as any).booking_for_other),
+                missing_fields: ["time"],
+                source: "context_merge",
+              },
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_discovery_show_next" },
+        };
+      }
+      console.log(JSON.stringify({
+        event: "barbershop:availability_discovery_blocked_reason",
+        reason: "missing_service",
+      }));
+      const hasDateContext = Boolean(
+        safeStr(bookingCollected.preferred_date, "").trim() ||
+          safeStr((bookingCollected as any).pending_booking_request?.preferred_date, "").trim(),
+      );
+      if (!hasDateContext) {
+        return {
+          replyText: "Claro 🔥 ¿Para qué día querés que te revise horarios?",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "availability_day",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              availability_request: true,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_discovery_ask_day_first" },
+        };
+      }
       return {
-        replyText: "Claro 🔥 ¿Para qué día querés que te revise horarios?",
+        replyText: "Te reviso. ¿Qué servicio querés: corte, barba o corte + barba?",
         statePatch: {
           stage: "BOOKING",
           lastIntent: "book_appointment",
-          nextExpected: "availability_day",
+          nextExpected: "availability_service",
           orgType: "barbershop",
           collected: {
             ...bookingCollected,
             availability_request: true,
             pending_booking: null,
             pending_booking_stale: true,
+            pending_booking_request: {
+              service: null,
+              preferred_date: safeStr(bookingCollected.preferred_date, getNowInTimezone(timezone).toISOString().slice(0, 10)),
+              preferred_time: null,
+              provider_name: null,
+              provider_preference: null,
+              patient_name: safeStr((bookingCollected as any).patient_name, "") || null,
+              booking_for_other: Boolean((bookingCollected as any).booking_for_other),
+              missing_fields: ["service"],
+              source: "context_merge",
+            },
           },
         },
-        debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_ask_day" },
+        debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_discovery_ask_service" },
       };
     }
 
-    if (safeStr(state.nextExpected, "") === "availability_day") {
+	    if (safeStr(state.nextExpected, "") === "availability_day") {
       const parsedDate = parseDateOnlyFromMessage(args.inboundText, timezone);
       if (!parsedDate) {
         return {
@@ -2563,20 +4418,208 @@ export function runConversationEngine(args: {
           },
         },
         debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_day_to_service" },
-      };
-    }
+	      };
+	    }
 
-    if (safeStr(state.nextExpected, "") === "availability_slot_selection") {
-      const context = (((bookingCollected as any).last_availability_context ?? {}) as Record<string, unknown>);
-      const contextService = safeStr(context.service, safeStr(bookingCollected.service, "")).trim();
-      const contextDate = safeStr(context.date, safeStr(bookingCollected.preferred_date, "")).trim();
-      const contextSlots = Array.isArray(context.slots) ? (context.slots as Array<Record<string, unknown>>) : [];
-      const selectedOrdinal = getSlotOrdinalSelection(args.inboundText);
-      const selectedByOrdinal = selectedOrdinal != null ? (contextSlots[selectedOrdinal] ?? null) : null;
-      const selectedByTime = parseTimeOnlyFromMessage(args.inboundText);
-      const selectedSlot = selectedByOrdinal ?? (selectedByTime
-        ? contextSlots.find((slot) => safeStr(slot.time, "").trim() === selectedByTime)
-        : null);
+	    const currentDateTimeRequest = parsedDateTime ??
+	      (parsedTimeOnly && (parsedDateOnly || currentDate)
+	        ? { date: parsedDateOnly || currentDate, time: parsedTimeOnly }
+	        : null);
+	    const hasLastOfferedSlotsForState = Array.isArray((bookingCollected as any).last_offered_slots) &&
+	      ((bookingCollected as any).last_offered_slots as unknown[]).length > 0;
+	    if (
+	      hasActiveBookingStateContract &&
+	      currentServiceForTimeRequest &&
+	      currentDateTimeRequest &&
+	      (Boolean(parsedDateTime) || !hasLastOfferedSlotsForState)
+	    ) {
+	      console.log(JSON.stringify({
+	        event: "current_service_reused_for_time_request",
+	        organization_id: args.organizationId ?? null,
+	        service_key: currentServiceKey || null,
+	        service_name: currentServiceForTimeRequest,
+	        requested_date: currentDateTimeRequest.date,
+	        requested_time: currentDateTimeRequest.time,
+	      }));
+	      return {
+	        replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+	        statePatch: {
+	          stage: "BOOKING",
+	          lastIntent: "book_appointment",
+	          nextExpected: "confirm_booking",
+	          orgType: "barbershop",
+	          collected: {
+	            ...bookingCollected,
+	            service: currentServiceForTimeRequest,
+	            current_service_key: currentServiceKey || safeStr((bookingCollected as any).current_service_key, ""),
+	            current_service_name: currentServiceForTimeRequest,
+	            current_date: currentDateTimeRequest.date,
+	            preferred_date: currentDateTimeRequest.date,
+	            preferred_time: currentDateTimeRequest.time,
+	            activeBookingFlow: true,
+	            lastBookingStep: "select_time",
+	            pending_booking: null,
+	            pending_booking_stale: true,
+	          },
+	        },
+	        debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_current_service_time_request" },
+	      };
+	    }
+
+	    if (
+	      safeStr(state.nextExpected, "") === "availability_slot_selection" ||
+      (Boolean((bookingCollected as any).last_availability_context) && isLikelySlotSelectionText(args.inboundText))
+    ) {
+	      const context = (((bookingCollected as any).last_availability_context ?? {}) as Record<string, unknown>);
+	      const contextService = safeStr(context.service, currentServiceForTimeRequest || safeStr(bookingCollected.service, "")).trim();
+	      const contextDate = safeStr(context.date, currentDate || safeStr(bookingCollected.preferred_date, "")).trim();
+	      const lastOfferedSlots = Array.isArray((bookingCollected as any).last_offered_slots)
+	        ? ((bookingCollected as any).last_offered_slots as Array<Record<string, unknown>>)
+	        : [];
+	      const contextSlots = Array.isArray(context.slots) ? (context.slots as Array<Record<string, unknown>>) : [];
+      const shownOffset = Math.max(
+        0,
+        Number((context as any).shown_offset ?? (bookingCollected as any).availability_shown_offset ?? 0) || 0,
+      );
+      const pageSize = Math.max(
+        1,
+        Math.min(10, Number((context as any).page_size ?? (bookingCollected as any).availability_page_size ?? 3) || 3),
+      );
+      const moreRequest = isMoreSlotsRequestText(args.inboundText);
+      const earlierRequest = isEarlierSlotsRequestText(args.inboundText);
+      const otherHourRequest = isOtherHourRequestText(args.inboundText);
+      const morningRequest = isMorningSlotsRequestText(args.inboundText);
+      const afternoonRequest = isAfternoonSlotsRequestText(args.inboundText);
+      const afterThreshold = parseAfterTimeThreshold(args.inboundText);
+      const contextTimes = contextSlots
+        .map((slot) => safeStr(slot.time, "").trim())
+        .filter(Boolean)
+        .filter((time, idx, arr) => arr.indexOf(time) === idx)
+        .sort();
+      const contextSlotByTime = new Map<string, Record<string, unknown>>();
+      for (const slot of contextSlots) {
+        const time = safeStr(slot.time, "").trim();
+        if (!time || contextSlotByTime.has(time)) continue;
+        contextSlotByTime.set(time, slot);
+      }
+      const formatSelectionReply = (times: string[]) => {
+        const line = times.slice(0, 3).map((time) => formatHourLabel(time)).join(" · ");
+        return `Para ${formatHumanDay(contextDate)} tengo estos espacios disponibles:\n\n${line}\n\nSi querés otra hora, decímela y reviso.`;
+      };
+      const hourOf = (time: string): number => Number((time.split(":")[0] ?? "-1"));
+      if (
+        contextService &&
+        contextDate &&
+        contextTimes.length > 0 &&
+        (moreRequest || earlierRequest || otherHourRequest || morningRequest || afternoonRequest || Boolean(afterThreshold))
+      ) {
+        let filteredTimes = [...contextTimes];
+        if (afterThreshold) {
+          filteredTimes = filteredTimes.filter((time) => time >= afterThreshold);
+        } else if (morningRequest) {
+          filteredTimes = filteredTimes.filter((time) => {
+            const hour = hourOf(time);
+            return hour >= 0 && hour < 12;
+          });
+        } else if (afternoonRequest) {
+          filteredTimes = filteredTimes.filter((time) => {
+            const hour = hourOf(time);
+            return hour >= 12;
+          });
+        } else {
+          const start = earlierRequest
+            ? Math.max(0, shownOffset - pageSize)
+            : Math.min(Math.max(0, contextTimes.length - 1), shownOffset + pageSize);
+          filteredTimes = contextTimes.slice(start, start + pageSize);
+        }
+        if (filteredTimes.length === 0) {
+          return {
+            replyText: "No encontré una opción en ese rango. Si querés, decime una hora exacta y la reviso.",
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "availability",
+              nextExpected: "availability_slot_selection",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                service: contextService,
+                preferred_date: contextDate,
+                availability_request: true,
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_slot_selection_context_empty_range" },
+          };
+        }
+        const selectedPreviewTimes = filteredTimes.slice(0, 3);
+        const nextOffset = contextTimes.findIndex((time) => time === selectedPreviewTimes[0]);
+        return {
+          replyText: formatSelectionReply(selectedPreviewTimes),
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "availability",
+            nextExpected: "availability_slot_selection",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: contextService,
+              preferred_date: contextDate,
+              availability_request: true,
+              availability_shown_offset: nextOffset >= 0 ? nextOffset : shownOffset,
+              last_availability_slots: selectedPreviewTimes.map((time) => ({
+                date: contextDate,
+                time,
+                provider_id: safeStr(contextSlotByTime.get(time)?.provider_id, "") || null,
+                provider_name: safeStr(contextSlotByTime.get(time)?.provider_name, "") || null,
+              })),
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_slot_selection_context_filter" },
+        };
+      }
+      if (moreRequest && contextService && contextDate && contextSlots.length > 0) {
+        const nextOffset = Math.min(contextSlots.length, shownOffset + pageSize);
+        return {
+          replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "availability",
+            nextExpected: "availability_slot_selection",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: contextService,
+              preferred_date: contextDate,
+              availability_request: true,
+              availability_shown_offset: nextOffset,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_slot_selection_more_slots" },
+        };
+      }
+	      const selectedOrdinal = getSlotOrdinalSelection(args.inboundText);
+	      const selectedByOfferedOrdinal = selectedOrdinal != null ? (lastOfferedSlots[selectedOrdinal] ?? null) : null;
+	      const selectedByOrdinal = selectedOrdinal != null ? (contextSlots[selectedOrdinal] ?? null) : null;
+	      const selectedByOfferedLast = isLastSlotSelectionText(args.inboundText) && lastOfferedSlots.length > 0
+	        ? lastOfferedSlots[lastOfferedSlots.length - 1]
+	        : null;
+	      const selectedByLast = isLastSlotSelectionText(args.inboundText) && contextSlots.length > 0
+	        ? contextSlots[Math.max(0, Math.min(contextSlots.length - 1, shownOffset + pageSize - 1))]
+	        : null;
+	      const selectedByTime = parseTimeOnlyFromMessage(args.inboundText);
+	      const selectedByOfferedTime = selectedByTime
+	        ? lastOfferedSlots.find((slot) => safeStr(slot.time, "").trim() === selectedByTime)
+	        : null;
+	      const selectedSlot = selectedByOfferedOrdinal ?? selectedByOfferedLast ?? selectedByOfferedTime ??
+	        selectedByOrdinal ?? selectedByLast ?? (selectedByTime
+	        ? contextSlots.find((slot) => safeStr(slot.time, "").trim() === selectedByTime)
+	        : null);
+	      const selectedFromLastOffered = Boolean(selectedByOfferedOrdinal ?? selectedByOfferedLast ?? selectedByOfferedTime);
 
       const requestedNewDate = parseDateOnlyFromMessage(args.inboundText, timezone);
       if (requestedNewDate && contextService) {
@@ -2600,16 +4643,38 @@ export function runConversationEngine(args: {
         };
       }
 
-      if (selectedSlot && contextService && contextDate) {
-        const selectedTime = safeStr(selectedSlot.time, "").trim();
-        console.log(JSON.stringify({
-          event: "barbershop:slot_selection_context_used",
-          inbound_text: args.inboundText ?? null,
+	      if (selectedSlot && contextService && contextDate) {
+	        const selectedTime = safeStr(selectedSlot.time, "").trim();
+	        const selectedDateFromSlot = safeStr(selectedSlot.date, "").trim();
+	        const resolvedSelectedDate = selectedDateFromSlot || contextDate;
+	        const selectedProviderName = safeStr(selectedSlot.provider_name, "").trim();
+	        const selectedProviderId = safeStr(selectedSlot.provider_id, "").trim();
+	        const selectedSlotContract = {
+	          service_key: safeStr(selectedSlot.service_key, currentServiceKey),
+	          service_name: safeStr(selectedSlot.service_name, contextService),
+	          date: resolvedSelectedDate,
+	          time: selectedTime,
+	          starts_at: safeStr(selectedSlot.starts_at, ""),
+	          provider_id: selectedProviderId,
+	          provider_name: selectedProviderName,
+	          duration_min: Number((selectedSlot as any).duration_min ?? 30) || 30,
+	          source: safeStr((selectedSlot as any).source, selectedFromLastOffered ? "last_offered_slots" : "availability_context"),
+	        };
+	        console.log(JSON.stringify({
+	          event: "barbershop:slot_selection_context_used",
+	          inbound_text: args.inboundText ?? null,
           selected_time: selectedTime || null,
-          service: contextService,
-          date: contextDate,
-        }));
-        return {
+	          service: contextService,
+	          date: resolvedSelectedDate,
+	        }));
+	        if (selectedFromLastOffered) {
+	          console.log(JSON.stringify({
+	            event: "selected_slot_matched_from_last_offered_slots",
+	            organization_id: args.organizationId ?? null,
+	            selected_slot: selectedSlotContract,
+	          }));
+	        }
+	        return {
           replyText: "__CHECK_REQUESTED_AVAILABILITY__",
           statePatch: {
             stage: "BOOKING",
@@ -2619,9 +4684,18 @@ export function runConversationEngine(args: {
             collected: {
               ...bookingCollected,
               service: contextService,
-              preferred_date: contextDate,
-              preferred_time: selectedTime,
-              availability_request: true,
+              preferred_date: resolvedSelectedDate,
+	              preferred_time: selectedTime,
+	              provider_name: selectedProviderName || null,
+	              provider_id: selectedProviderId || null,
+	              preferred_barber: selectedProviderName || null,
+	              current_service_key: safeStr(selectedSlotContract.service_key, currentServiceKey),
+	              current_service_name: safeStr(selectedSlotContract.service_name, contextService),
+	              current_date: resolvedSelectedDate,
+	              activeBookingFlow: true,
+	              lastBookingStep: "select_time",
+	              selected_slot: selectedSlotContract,
+	              availability_request: true,
               pending_booking: null,
               pending_booking_stale: true,
               ...(isAnyBarberPreferenceText(args.inboundText) ? { provider_preference: "any", provider_name: null, preferred_barber: null } : {}),
@@ -2631,13 +4705,49 @@ export function runConversationEngine(args: {
         };
       }
 
+      if (contextService && contextDate && selectedByTime && !contextTimes.includes(selectedByTime)) {
+        const requestedMin = toMinutes(selectedByTime);
+        const nearest = contextTimes
+          .map((time) => ({ time, distance: Math.abs(toMinutes(time) - requestedMin) }))
+          .filter((entry) => Number.isFinite(entry.distance))
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 3)
+          .map((entry) => formatHourLabel(entry.time))
+          .join(" · ");
+        return {
+          replyText: nearest
+            ? `Esa hora no está libre, pero tengo estas opciones cercanas:\n${nearest}\n¿Cuál te queda mejor?`
+            : "Esa hora no está libre. Si querés, te paso opciones cercanas.",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "availability",
+            nextExpected: "availability_slot_selection",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: contextService,
+              preferred_date: contextDate,
+              availability_request: true,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_slot_selection_unavailable_nearest" },
+        };
+      }
+
       if (contextService && contextDate && selectedByTime) {
+        const matchedSlotByTime = contextSlots.find((slot) => safeStr(slot.time, "").trim() === selectedByTime);
+        const selectedDateFromTimeMatch = safeStr(matchedSlotByTime?.date, "").trim();
+        const resolvedSelectedDate = selectedDateFromTimeMatch || contextDate;
+        const selectedProviderName = safeStr(matchedSlotByTime?.provider_name, "").trim();
+        const selectedProviderId = safeStr(matchedSlotByTime?.provider_id, "").trim();
         console.log(JSON.stringify({
           event: "barbershop:slot_selection_context_used",
           inbound_text: args.inboundText ?? null,
           selected_time: selectedByTime,
           service: contextService,
-          date: contextDate,
+          date: resolvedSelectedDate,
         }));
         return {
           replyText: "__CHECK_REQUESTED_AVAILABILITY__",
@@ -2649,8 +4759,11 @@ export function runConversationEngine(args: {
             collected: {
               ...bookingCollected,
               service: contextService,
-              preferred_date: contextDate,
+              preferred_date: resolvedSelectedDate,
               preferred_time: selectedByTime,
+              provider_name: selectedProviderName || null,
+              provider_id: selectedProviderId || null,
+              preferred_barber: selectedProviderName || null,
               availability_request: true,
               pending_booking: null,
               pending_booking_stale: true,
@@ -2662,9 +4775,11 @@ export function runConversationEngine(args: {
     }
 
     if (safeStr(state.nextExpected, "") === "availability_service") {
-      const selectedService = resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings)?.name ??
+      const detectedServiceName =
+        resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings)?.name ??
         detectBarbershopService(args.inboundText).matchedService?.name ??
-        "";
+        (isBarbershopHaircutIntentText(args.inboundText) ? "Corte clásico" : "");
+      const selectedService = detectedServiceName || safeStr((mergedPendingBookingRequest as any).service, "");
       const preferredDate = safeStr(bookingCollected.preferred_date, "");
       const selectedTimeFromText = parseTimeOnlyFromMessage(args.inboundText);
       const selectedFirstOption = isFirstSlotSelectionText(args.inboundText);
@@ -2767,6 +4882,7 @@ export function runConversationEngine(args: {
             collected: {
               ...bookingCollected,
               availability_request: true,
+              pending_booking_request: { ...mergedPendingBookingRequest, source: "context_merge" },
             },
           },
           debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_service_reask" },
@@ -2780,13 +4896,36 @@ export function runConversationEngine(args: {
             lastIntent: "book_appointment",
             nextExpected: "availability_day",
             orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            service: selectedService,
+            availability_request: true,
+            pending_booking_request: { ...mergedPendingBookingRequest, service: selectedService, source: "context_merge" },
+          },
+        },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_missing_day" },
+        };
+      }
+      const preferredTime = safeStr((bookingCollected as any).preferred_time, "").trim();
+      if (selectedService && preferredDate && preferredTime) {
+        return {
+          replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
             collected: {
               ...bookingCollected,
-              service: selectedService,
               availability_request: true,
+              service: selectedService,
+              preferred_date: preferredDate,
+              preferred_time: preferredTime,
+              pending_booking: null,
+              pending_booking_stale: true,
             },
           },
-          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_missing_day" },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_service_reuse_date_time" },
         };
       }
       return {
@@ -2807,6 +4946,79 @@ export function runConversationEngine(args: {
         },
         debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_availability_service_show_slots" },
       };
+    }
+
+    if (safeStr(state.nextExpected, "").trim() === "service") {
+      const selectedService = resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings)?.name ??
+        detectBarbershopService(args.inboundText).matchedService?.name ??
+        (isBarbershopHaircutIntentText(args.inboundText) ? "Corte clásico" : "");
+      const merged = {
+        ...mergedPendingBookingRequest,
+        service: selectedService || mergedPendingBookingRequest.service,
+        source: "context_merge" as const,
+      };
+      merged.missing_fields = computeBookingMissingFields(merged);
+      if (merged.service && merged.preferred_date && merged.preferred_time) {
+        return {
+          replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: merged.service,
+              preferred_date: merged.preferred_date,
+              preferred_time: merged.preferred_time,
+              provider_name: merged.provider_name,
+              preferred_barber: merged.provider_preference === "any" ? null : merged.provider_name,
+              provider_preference: merged.provider_preference,
+              pending_booking_request: merged,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_service_reply_merged_to_check_availability" },
+        };
+      }
+      if (merged.service && merged.preferred_date && !merged.preferred_time) {
+        return {
+          replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "availability",
+            nextExpected: "availability_slot_selection",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: merged.service,
+              preferred_date: merged.preferred_date,
+              pending_booking_request: merged,
+              availability_request: true,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_service_reply_merged_to_show_availability" },
+        };
+      }
+      if (!merged.service) {
+        return {
+          replyText: "Claro. ¿Querés Corte de pelo, barba, corte + barba o cejas?",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "service",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_booking_request: merged,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_service_reply_reask_service" },
+        };
+      }
     }
 
     if (
@@ -3046,6 +5258,32 @@ export function runConversationEngine(args: {
     }
 
     if (state.nextExpected === "confirm_booking" && isCleanConfirmationText(args.inboundText)) {
+      console.log(JSON.stringify({
+        event: "barbershop:confirmation_freshness_check",
+        confirm_inbound_message_id: inboundMessageId || null,
+        pending_booking_created_from_inbound_message_id: pendingCreatedFromInboundMessageId || null,
+        pending_booking_preconfirm_sent_at: pendingPreconfirmSentAt || null,
+        confirm_inbound_message_created_at: inboundMessageCreatedAt || null,
+        confirmation_is_fresh: pendingConfirmationFreshness.fresh,
+        stale_confirmation_blocked: pendingConfirmationFreshness.blocked,
+        reason: pendingConfirmationFreshness.reason,
+      }));
+      if (pendingConfirmationFreshness.blocked) {
+        return {
+          replyText: "Perfecto. Para confirmar, respondé de nuevo \"Confirmar\" sobre la última propuesta de horario.",
+          statePatch: {
+            stage: "CONFIRMING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_booking_stale: false,
+            },
+          },
+          debug: { intent: "book_appointment", phase: "CONFIRMING", route: "barbershop_confirm_stale_confirmation_blocked" },
+        };
+      }
       if (!canExecuteBookingConfirmation({
         pendingAction,
         lastBotStep: safeStr(bookingCollected.last_bot_step, ""),
@@ -3070,6 +5308,8 @@ export function runConversationEngine(args: {
         };
       }
       const selectedServiceName = safeStr(bookingCollected.service, "Corte clásico");
+      const pending = ((bookingCollected as any).pending_booking ?? {}) as Record<string, unknown>;
+      const selectedSlot = ((pending as any).selected_slot ?? (bookingCollected as any).selected_slot ?? null) as Record<string, unknown> | null;
       const isGenericBarberBooking = selectedServiceName === "Cita barbería";
       const selectedServiceFromSettings = isGenericBarberBooking
         ? null
@@ -3080,11 +5320,15 @@ export function runConversationEngine(args: {
       const selectedService = selectedServiceDetection ?? getBarbershopServiceById("haircut");
       const durationMin = isGenericBarberBooking
         ? 45
-        : (selectedServiceFromSettings?.durationMin ?? selectedService?.durationMinutes ?? 30);
-      const preferredBarber = safeStr(bookingCollected.preferred_barber, "").trim();
+        : (Number((selectedSlot as any)?.duration_min) || selectedServiceFromSettings?.durationMin || selectedService?.durationMinutes || 30);
+      const preferredBarber = safeStr(
+        (selectedSlot as any)?.provider_name,
+        safeStr((pending as any).provider_name, safeStr(bookingCollected.preferred_barber, "")),
+      ).trim();
+      const providerId = safeStr((selectedSlot as any)?.provider_id, safeStr((pending as any).provider_id, "")).trim();
       const reasonAndTitle = isGenericBarberBooking
         ? "Cita barbería"
-        : safeStr(bookingCollected.service, "Corte clásico");
+        : safeStr((selectedSlot as any)?.service_name, safeStr(bookingCollected.service, "Corte clásico"));
       const patientName = resolveAppointmentPatientName(bookingCollected, state);
       if (!safeStr(patientName, "").trim()) {
         return {
@@ -3120,69 +5364,170 @@ export function runConversationEngine(args: {
         toolAction: {
           name: "book_appointment",
           payload: {
+            business_type: "barbershop",
+            selected_slot: selectedSlot,
             patient_name: patientName,
             service: reasonAndTitle,
             reason: reasonAndTitle,
             title: reasonAndTitle,
-            appointment_date: safeStr(bookingCollected.preferred_date, ""),
-            appointment_time: safeStr(bookingCollected.preferred_time, ""),
+            appointment_date: safeStr((selectedSlot as any)?.date, safeStr(bookingCollected.preferred_date, "")),
+            appointment_time: safeStr((selectedSlot as any)?.time, safeStr(bookingCollected.preferred_time, "")),
+            starts_at: safeStr((selectedSlot as any)?.starts_at, ""),
             duration_min: durationMin,
             preferred_barber: preferredBarber || null,
             provider_name: preferredBarber || null,
+            provider_id: providerId || null,
+            hold_id: safeStr((selectedSlot as any)?.hold_id, safeStr((pending as any).hold_id, "")) || null,
           },
         },
         debug: { intent: "book_appointment", phase: "CONFIRMING", route: "barbershop_confirm_booking" },
       };
     }
 
-    if (state.nextExpected === "service_for_pricing") {
+    const configuredServices = getBarbershopServicesFromSettings(args.clinicSettings);
+    const walkInFaqAnswer = findBarbershopFaqAnswer(args.inboundText, args.clinicSettings);
+    if (isBusinessHoursQuestionText(args.inboundText)) {
+      logBarbershopDiagnostic("business_hours_detected", { inbound_text: args.inboundText });
+      return {
+        replyText: getBarbershopBusinessHoursReply(args.inboundText, args.clinicSettings),
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "hours",
+          nextExpected: undefined,
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug({ intent: "hours", phase: "DISCOVERY", route: "barbershop_hours_answer" }, "shadow"),
+      };
+    }
+    if (
+      /\b(donde estan|donde están|donde quedan|donde quedan ubicados|donde estan ubicados|donde están ubicados|ubicacion|ubicación|direccion|dirección)\b/
+        .test(normalizeTextForIntent(args.inboundText))
+    ) {
+      const publicLocation = resolveBarbershopPublicLocation(args.clinicSettings);
+      logBarbershopDiagnostic("location_question_detected", { inbound_text: args.inboundText });
+      return {
+        replyText: `Estamos en ${publicLocation} 💈\n\n¿Querés que te busque un espacio?`,
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "location",
+          nextExpected: undefined,
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug({ intent: "location", phase: "DISCOVERY", route: "barbershop_location_public" }, "shadow"),
+      };
+    }
+    if (walkInFaqAnswer) {
+      return {
+        replyText: `${walkInFaqAnswer}\n\n¿Querés que te busque un espacio?`,
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "faq",
+          nextExpected: undefined,
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug({ intent: "faq", phase: "DISCOVERY", route: "barbershop_faq_answer" }, "shadow"),
+      };
+    }
+
+    if ((isBarbershopServicesQuestion(args.inboundText) || /\b(que precios|precios tienes|precios tenes|que precios tienen|lista de precios)\b/.test(normalizeTextForIntent(args.inboundText))) && configuredServices.length > 0) {
+      const servicesLine = configuredServices
+        .slice(0, 4)
+        .map((service) =>
+          `${getBarbershopServiceEmoji(service.name)} ${service.name} — ${formatBarbershopPrice(service.price)} · ${formatBarbershopDurationLabel(service.durationMin)}\n${getBarbershopServiceBenefitLine(service.name)}`
+        )
+        .join("\n\n");
+      const brandName = getBarbershopCopyBrandName({
+        ...(args.clinicSettings ?? {}),
+        organization_id: args.organizationId,
+      });
+      return {
+        replyText: `Estos son los servicios de ${brandName} 💈\n\n${servicesLine}\n\n¿Querés reservar un espacio?`,
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "services",
+          nextExpected: undefined,
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug({ intent: "services", phase: "DISCOVERY", route: "barbershop_services_from_settings" }, "shadow"),
+      };
+    }
+
+    if (isBarbershopChooseBarberQuestion(args.inboundText)) {
+      return {
+        replyText: "Dale, podés escoger barbero o te asigno el que esté libre. Si me decís día y hora, te reviso disponibilidad.",
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "book_appointment",
+          nextExpected: "date_time",
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug(
+          { intent: "book_appointment", phase: "DISCOVERY", route: "barbershop_choose_barber_answer" },
+          "shadow",
+        ),
+      };
+    }
+    const hasInlineBookingContext = Boolean(
+      safeStr(state.stage, "") === "BOOKING" ||
+      safeStr(state.stage, "") === "CONFIRMING" ||
+      safeStr(state.nextExpected, "").trim(),
+    );
+    if (!hasInlineBookingContext && !hasPendingBooking && isBarbershopOutOfScopeText(args.inboundText)) {
+      logBarbershopDiagnostic("out_of_scope_barbershop", { inbound_text: args.inboundText });
+      return {
+        replyText:
+          "Por ahora solo te puedo ayudar con citas, precios, horarios y ubicación de la barbería 💈\n\n¿Querés agendar o ver precios?",
+        statePatch: {
+          stage: "DISCOVERY",
+          lastIntent: "unknown",
+          nextExpected: undefined,
+          orgType: "barbershop",
+          collected: { ...bookingCollected },
+        },
+        debug: withInterpreterDebug(
+          { intent: "unknown", phase: "DISCOVERY", route: "barbershop_out_of_scope_fallback" },
+          "shadow",
+        ),
+      };
+    }
+
+    if (state.nextExpected === "service_for_pricing" || (safeStr(bookingCollected.last_info_topic, "") === "pricing" && isBarbershopPricingFollowup(args.inboundText))) {
+      logBarbershopDiagnostic("pricing_followup_detected", { inbound_text: args.inboundText });
       const normalizedServicePick = normalizeTextForIntent(args.inboundText)
         .replace(/c\\y/g, "c y")
         .replace(/\bcy\b/g, "c y")
         .replace(/\bc\s*y\b/g, "y")
         .replace(/\s+/g, " ");
-      let pickedService: string | null = null;
-      if (/\b(corte y barba|corte con barba|corte \+ barba|corte \/ barba|combo|combo completo)\b/.test(normalizedServicePick)) {
-        pickedService = "Corte + barba";
-      } else if (/\b(corte de pelo|corte de cabello|el corte|corte)\b/.test(normalizedServicePick)) {
-        pickedService = "Corte clásico";
-      } else if (/\b(la barba|barba)\b/.test(normalizedServicePick)) {
-        pickedService = "Barba";
-      } else if (/\b(cejas)\b/.test(normalizedServicePick)) {
-        pickedService = "Cejas";
-      }
-      if (pickedService) {
-        const picked = detectBarbershopService(pickedService).matchedService;
-        if (picked) {
+      const picked = resolveBarbershopServiceFromSettings(normalizedServicePick, args.clinicSettings);
+      if (picked) {
           return {
-            replyText: `🔥 Buena elección. ${picked.name === "Corte clásico" ? "El corte de pelo" : picked.name} cuesta HNL ${picked.basePriceHnl ?? "N/A"} y dura ${picked.durationMinutes} minutos. ¿Querés que te revise disponibilidad?`,
+            replyText: formatBarbershopPricingAnswer(picked),
             statePatch: {
               stage: "DISCOVERY",
               lastIntent: "pricing",
+              lastTopic: "pricing",
               nextExpected: undefined,
               orgType: "barbershop",
-              collected: {
-                ...(hasPendingBooking && !pendingIsStale
-                  ? { ...bookingCollected, last_info_topic: "pricing" }
-                  : {
-                    ...buildInfoContextCollected(bookingCollected, "pricing"),
-                    pending_booking: null,
-                    pending_booking_stale: true,
-                  }),
-              },
+              collected: buildBarbershopPricingCollected(bookingCollected, picked, hasPendingBooking && !pendingIsStale),
             },
             debug: withInterpreterDebug(
               { intent: "pricing", phase: "DISCOVERY", route: "barbershop_pricing_followup_service_pick" },
               "shadow",
             ),
           };
-        }
       }
+      const serviceMenu = formatBarbershopServiceMenuFromSettings(configuredServices, "");
       return {
-        replyText: "Claro 🔥 ¿Qué servicio querés consultar? Corte de pelo, barba, corte + barba o cejas.",
+        replyText: serviceMenu ? `Dale 💈 ¿Qué servicio querés consultar?\n\n${serviceMenu}` : "Dale 💈 ¿Qué servicio querés consultar?",
         statePatch: {
           stage: "DISCOVERY",
           lastIntent: "pricing",
+          lastTopic: "pricing",
           nextExpected: "service_for_pricing",
           orgType: "barbershop",
           collected: {
@@ -3203,40 +5548,27 @@ export function runConversationEngine(args: {
     }
 
     if (isPricingQuestion(args.inboundText) || routedIntent === "pricing_question" || runtimeIntent === "pricing_question") {
+      logBarbershopDiagnostic("intent_priority_resolved", {
+        inbound_text: args.inboundText,
+        resolved_intent: "pricing_question",
+      });
       const normalizedPriceQ = normalizeTextForIntent(args.inboundText)
         .replace(/c\\y/g, "c y")
         .replace(/\bcy\b/g, "c y")
         .replace(/\bc\s*y\b/g, "y")
         .replace(/\s+/g, " ");
-      let explicitPriceService: string | null = null;
-      if (/\b(corte y barba|corte con barba|corte \+ barba|corte \/ barba|combo|combo completo)\b/.test(normalizedPriceQ)) {
-        explicitPriceService = "Corte + barba";
-      } else if (/\b(corte de pelo|corte de cabello|el corte|corte)\b/.test(normalizedPriceQ)) {
-        explicitPriceService = "Corte clásico";
-      } else if (/\b(la barba|barba)\b/.test(normalizedPriceQ)) {
-        explicitPriceService = "Barba";
-      }
-      const serviceFromExplicitPrice = explicitPriceService
-        ? detectBarbershopService(explicitPriceService).matchedService
-        : null;
+      const serviceFromExplicitPrice = resolveBarbershopServiceFromSettings(normalizedPriceQ, args.clinicSettings);
       if (!detectedService && !safeStr(bookingCollected.service, "").trim()) {
         if (serviceFromExplicitPrice) {
           return {
-            replyText: `${serviceFromExplicitPrice.name} cuesta HNL ${serviceFromExplicitPrice.basePriceHnl ?? "N/A"} y dura aproximadamente ${serviceFromExplicitPrice.durationMinutes} minutos. ¿Querés que te revise disponibilidad para hoy?`,
+            replyText: formatBarbershopPricingAnswer(serviceFromExplicitPrice),
             statePatch: {
               stage: "DISCOVERY",
               lastIntent: "pricing",
+              lastTopic: "pricing",
               nextExpected: undefined,
               orgType: "barbershop",
-              collected: {
-                ...(hasPendingBooking && !pendingIsStale
-                  ? { ...bookingCollected, last_info_topic: "pricing" }
-                  : {
-                    ...buildInfoContextCollected(bookingCollected, "pricing"),
-                    pending_booking: null,
-                    pending_booking_stale: true,
-                  }),
-              },
+              collected: buildBarbershopPricingCollected(bookingCollected, serviceFromExplicitPrice, hasPendingBooking && !pendingIsStale),
             },
           debug: withInterpreterDebug(
             { intent: "pricing", phase: "DISCOVERY", route: "barbershop_pricing_explicit_followup" },
@@ -3244,11 +5576,13 @@ export function runConversationEngine(args: {
           ),
           };
         }
+        const serviceMenu = formatBarbershopServiceMenuFromSettings(configuredServices, "");
         return {
-          replyText: "Claro 🔥 ¿Qué servicio querés consultar? Corte de pelo, barba, corte + barba o cejas.",
+          replyText: serviceMenu ? `Dale 💈 ¿Qué servicio querés consultar?\n\n${serviceMenu}` : "Dale 💈 ¿Qué servicio querés consultar?",
           statePatch: {
             stage: "DISCOVERY",
             lastIntent: "pricing",
+            lastTopic: "pricing",
             nextExpected: "service_for_pricing",
             orgType: "barbershop",
             collected: {
@@ -3267,19 +5601,49 @@ export function runConversationEngine(args: {
           ),
         };
       }
-      const inferredPriceService = (genericGrooming && !serviceFromExplicitPrice) ? null : detectedService;
+      const inferredDetectedService = detectedService
+        ? {
+          name: detectedService.name,
+          durationMin: detectedService.durationMinutes,
+          price: detectedService.basePriceHnl,
+          preferredBarber: null,
+        }
+        : null;
+      const inferredPriceService = (genericGrooming && !serviceFromExplicitPrice)
+        ? null
+        : (resolveBarbershopServiceFromSettings(args.inboundText, args.clinicSettings) ?? inferredDetectedService);
       const serviceForPrice = serviceFromExplicitPrice ?? inferredPriceService ??
         (safeStr(bookingCollected.service, "").trim() && safeStr(state.nextExpected, "").trim() === "date_time"
-          ? detectBarbershopService(safeStr(bookingCollected.service, "")).matchedService
+          ? resolveBarbershopServiceFromSettings(safeStr(bookingCollected.service, ""), args.clinicSettings)
           : null);
       if (serviceForPrice) {
         return {
-          replyText: Number.isFinite(Number(serviceForPrice.basePriceHnl))
-            ? `${serviceForPrice.name} cuesta HNL ${serviceForPrice.basePriceHnl ?? "N/A"} y dura aproximadamente ${serviceForPrice.durationMinutes} minutos. ¿Querés que te revise disponibilidad para hoy?`
-            : `El precio de ${serviceForPrice.name} puede variar según el caso. En recepción te confirman el monto exacto.`,
+          replyText: formatBarbershopPricingAnswer(serviceForPrice),
           statePatch: {
             stage: "DISCOVERY",
             lastIntent: "pricing",
+            lastTopic: "pricing",
+            nextExpected: undefined,
+            orgType: "barbershop",
+            collected: buildBarbershopPricingCollected(bookingCollected, serviceForPrice, hasPendingBooking && !pendingIsStale),
+          },
+          debug: withInterpreterDebug(
+            { intent: "pricing", phase: "DISCOVERY", route: "barbershop_pricing_answer" },
+            runtimeIntent === "pricing_question" ? "runtime" : "shadow",
+          ),
+        };
+      }
+      if (configuredServices.length > 0) {
+        const compact = configuredServices
+          .slice(0, 4)
+          .map((service) => `${service.name} ${formatBarbershopPrice(service.price)} (${service.durationMin} min)`)
+          .join(", ");
+        return {
+          replyText: `Perfecto 💈 Tenemos ${compact}. ¿Querés que te busque un espacio?`,
+          statePatch: {
+            stage: "DISCOVERY",
+            lastIntent: "pricing",
+            lastTopic: "pricing",
             nextExpected: undefined,
             orgType: "barbershop",
             collected: {
@@ -3293,7 +5657,7 @@ export function runConversationEngine(args: {
             },
           },
           debug: withInterpreterDebug(
-            { intent: "pricing", phase: "DISCOVERY", route: "barbershop_pricing_answer" },
+            { intent: "pricing", phase: "DISCOVERY", route: "barbershop_pricing_from_services_list" },
             runtimeIntent === "pricing_question" ? "runtime" : "shadow",
           ),
         };
@@ -3304,6 +5668,7 @@ export function runConversationEngine(args: {
         statePatch: {
           stage: "DISCOVERY",
           lastIntent: "pricing",
+          lastTopic: "pricing",
           nextExpected: undefined,
           orgType: "barbershop",
           collected: {
@@ -3379,6 +5744,7 @@ export function runConversationEngine(args: {
     if (state.nextExpected === "barber_preference" && isAnyBarberPreferenceText(args.inboundText)) {
       const requestedDate = safeStr(bookingCollected.preferred_date, "");
       const requestedTime = safeStr(bookingCollected.preferred_time, "");
+      const requestedService = safeStr((bookingCollected as any).service, "Cita barbería");
       if (requestedDate && requestedTime) {
         if (isBarbershopSlotInPast(requestedDate, requestedTime, timezone)) {
           return {
@@ -3399,14 +5765,19 @@ export function runConversationEngine(args: {
         }
         if (!isWithinClinicHours(requestedDate, requestedTime, args.clinicSettings)) {
           return {
-            replyText: "A esa hora no estamos atendiendo. Decime otro horario y te ayudo a revisarlo.",
+            replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
             statePatch: {
               stage: "BOOKING",
               lastIntent: "book_appointment",
-              nextExpected: "date_time",
+              nextExpected: "availability_slot_selection",
               orgType: "barbershop",
               collected: {
                 ...bookingCollected,
+                service: requestedService,
+                preferred_date: requestedDate,
+                preferred_time: requestedTime,
+                availability_request: true,
+                provider_preference: "any",
                 pending_booking: null,
                 pending_booking_stale: true,
               },
@@ -3417,6 +5788,33 @@ export function runConversationEngine(args: {
         const bookingFirstName = hasCollectedName(state)
           ? safeStr(state.name, "").trim().split(/\s+/)[0]
           : "";
+        const isThirdPartyMissingName = Boolean(
+          Boolean((bookingCollected as any).booking_for_other) &&
+            !safeStr((bookingCollected as any).patient_name, "").trim(),
+        );
+        if (isThirdPartyMissingName) {
+          return {
+            replyText: `Perfecto. ${formatHumanDay(requestedDate)} a las ${formatHourLabel(requestedTime)} está disponible para ${requestedService}. ¿A nombre de quién la agendamos?`,
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "book_appointment",
+              nextExpected: "third_party_patient_name",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                service: requestedService,
+                preferred_date: requestedDate,
+                preferred_time: requestedTime,
+                preferred_barber: null,
+                provider_preference: "any",
+                provider_name: null,
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_any_barber_missing_patient_name" },
+          };
+        }
         return {
           replyText: bookingFirstName
             ? `Perfecto ${bookingFirstName}. ${formatHumanDay(requestedDate)} a las ${formatHourLabel(requestedTime)} está disponible. ¿Confirmamos a tu nombre?`
@@ -3428,15 +5826,19 @@ export function runConversationEngine(args: {
             orgType: "barbershop",
             collected: {
               ...bookingCollected,
-              service: "Cita barbería",
+              service: requestedService,
               preferred_barber: null,
+              provider_preference: "any",
+              provider_name: null,
               pending_booking_stale: false,
               last_bot_step: "barbershop_preconfirm",
               pending_booking: {
-                service: "Cita barbería",
+                service: requestedService,
                 appointment_date: requestedDate,
                 appointment_time: requestedTime,
                 preferred_barber: null,
+                provider_preference: "any",
+                provider_name: null,
                 status: "pending_confirmation",
               },
             },
@@ -3446,43 +5848,137 @@ export function runConversationEngine(args: {
       }
     }
 
+    if (state.nextExpected === "barber_preference") {
+      const contextResolved = mergeBookingContext({
+        currentEntities: {
+          serviceName: safeStr(effectiveDetectedService?.name, ""),
+          providerName: safeStr(
+            serviceDetection.preferredBarber,
+            runtimeSpecificProvider ? runtimeProviderNameRaw : "",
+          ),
+          providerPreference: runtimeFieldProviderPref === "any" ? "any" : (runtimeSpecificProvider ? "specific" : null),
+          hasAnyProviderPreference: hasAnyBarberPreference || isAnyBarberPreferenceText(args.inboundText),
+        },
+        leadState: state,
+        bookingCollected,
+        lastBotQuestion: safeStr((bookingCollected as any).last_bot_text, ""),
+      });
+      console.log(JSON.stringify({
+        event: "barbershop:context_resolver_input",
+        inbound_text: args.inboundText,
+        nextExpected_before: safeStr(state.nextExpected, ""),
+        current_service: safeStr(effectiveDetectedService?.name, ""),
+        current_provider: safeStr(serviceDetection.preferredBarber, ""),
+        previous_preferred_date: safeStr(bookingCollected.preferred_date, ""),
+        previous_preferred_time: safeStr(bookingCollected.preferred_time, ""),
+        proposed_slot: (bookingCollected as any).proposed_slot ?? null,
+      }));
+      console.log(JSON.stringify({
+        event: "barbershop:context_resolver_output",
+        reused_previous_date_time: contextResolved.reusedPreviousDateTime,
+        service: contextResolved.serviceName || null,
+        provider_name: contextResolved.providerName || null,
+        provider_preference: contextResolved.providerPreference,
+        proposed_date: contextResolved.proposedDate || null,
+        proposed_time: contextResolved.proposedTime || null,
+      }));
+
+      if (contextResolved.reusedPreviousDateTime && contextResolved.serviceName && (contextResolved.providerName || contextResolved.providerPreference === "any")) {
+        return {
+          replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: contextResolved.serviceName,
+              preferred_date: contextResolved.proposedDate,
+              preferred_time: contextResolved.proposedTime,
+              preferred_barber: contextResolved.providerPreference === "any" ? null : (contextResolved.providerName || null),
+              provider_preference: contextResolved.providerPreference === "any" ? "any" : "specific",
+              provider_name: contextResolved.providerPreference === "any" ? null : (contextResolved.providerName || null),
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_provider_preference_reuse_proposed_slot" },
+            runtimeDateTime && !parsedDateTime ? "runtime" : "shadow",
+          ),
+        };
+      }
+    }
+
     if (
       (parsedDateTime || runtimeDateTime) &&
       safeStr(bookingCollected.service, "").trim()
     ) {
       const preconfirmDateTime = parsedDateTime ?? runtimeDateTime!;
-      if (isBarbershopSlotInPast(preconfirmDateTime.date, preconfirmDateTime.time, timezone)) {
+      const requestedGuard = validateRequestedDateTimeBookability({
+        requestedDate: preconfirmDateTime.date,
+        requestedTime: preconfirmDateTime.time,
+        timezone,
+        clinicSettings: args.clinicSettings,
+      });
+      console.log(JSON.stringify({
+        event: "barbershop:requested_datetime_guard_entered",
+        requested_date: preconfirmDateTime.date,
+        requested_day_of_week: weekdayFromIsoDate(preconfirmDateTime.date),
+        requested_day_open: requestedGuard.reason !== "requested_day_closed",
+        requested_time: preconfirmDateTime.time,
+        requested_time_within_hours: requestedGuard.reason !== "requested_time_outside_hours",
+        blocked_reason: requestedGuard.reason,
+      }));
+      if (!requestedGuard.canBookRequestedDateTime && requestedGuard.reason === "requested_time_in_past") {
         return {
-          replyText: "Esa hora ya pasó. Te puedo revisar otro horario para hoy o mañana.",
+          replyText: "__CHECK_REQUESTED_AVAILABILITY__",
           statePatch: {
             stage: "BOOKING",
             lastIntent: "book_appointment",
-            nextExpected: "date_time",
+            nextExpected: "confirm_booking",
             orgType: "barbershop",
             collected: {
               ...bookingCollected,
+              preferred_date: preconfirmDateTime.date,
+              preferred_time: preconfirmDateTime.time,
+              availability_request: true,
               pending_booking: null,
               pending_booking_stale: true,
             },
           },
-          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_slot_in_past_guard" },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_slot_in_past_check_availability" },
         };
       }
-      if (!isWithinClinicHours(preconfirmDateTime.date, preconfirmDateTime.time, args.clinicSettings)) {
+      if (!requestedGuard.canBookRequestedDateTime) {
         return {
-          replyText: "A esa hora no estamos atendiendo. Decime otro horario y te ayudo a revisarlo.",
+          replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
           statePatch: {
             stage: "BOOKING",
             lastIntent: "book_appointment",
-            nextExpected: "date_time",
+            nextExpected: "availability_slot_selection",
             orgType: "barbershop",
             collected: {
               ...bookingCollected,
+              availability_request: true,
+              preferred_date: preconfirmDateTime.date,
+              pending_booking_request: {
+                service: safeStr(bookingCollected.service, "Corte clásico"),
+                preferred_date: preconfirmDateTime.date,
+                preferred_time: null,
+                provider_name: safeStr(bookingCollected.provider_name, "") || null,
+                provider_preference: safeStr(bookingCollected.provider_preference, "") === "any" ? "any" : null,
+                patient_name: safeStr((bookingCollected as any).patient_name, "") || null,
+                booking_for_other: Boolean((bookingCollected as any).booking_for_other),
+                missing_fields: ["time"],
+                source: "context_merge",
+              },
               pending_booking: null,
               pending_booking_stale: true,
             },
           },
-          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_outside_hours_guard" },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_outside_hours_discovery_redirect" },
         };
       }
       if (
@@ -3496,14 +5992,69 @@ export function runConversationEngine(args: {
       const cleanPreferredBarber = isAnyProviderAlias(safeStr(bookingCollected.preferred_barber, ""))
         ? ""
         : safeStr(bookingCollected.preferred_barber, "").trim();
+      if (!cleanPreferredBarber) {
+        return {
+          replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              preferred_date: preconfirmDateTime.date,
+              preferred_time: preconfirmDateTime.time,
+              provider_preference: "any",
+              preferred_barber: null,
+              provider_name: null,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_require_provider_assignment_before_preconfirm" },
+            runtimeDateTime && !parsedDateTime ? "runtime" : "shadow",
+          ),
+        };
+      }
       const withBarber = cleanPreferredBarber
         ? ` con ${cleanPreferredBarber}`
         : "";
       const bookingFirstName = hasCollectedName(state)
         ? safeStr(state.name, "").trim().split(/\s+/)[0]
         : "";
+      const thirdPartyPatientName = safeStr((bookingCollected as any).patient_name, "").trim();
+      const isThirdPartyWithName = Boolean(Boolean((bookingCollected as any).booking_for_other) && thirdPartyPatientName);
+      const isThirdPartyMissingName = Boolean(
+        Boolean((bookingCollected as any).booking_for_other) &&
+          !safeStr((bookingCollected as any).patient_name, "").trim(),
+      );
+      if (isThirdPartyMissingName) {
+        return {
+          replyText: `Perfecto. ${formatHumanDay(preconfirmDateTime.date)} a las ${formatHourLabel(preconfirmDateTime.time)} está disponible para ${safeStr(bookingCollected.service, "Corte clásico")}${withBarber}. ¿A nombre de quién la agendamos?`,
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "third_party_patient_name",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              preferred_date: preconfirmDateTime.date,
+              preferred_time: preconfirmDateTime.time,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_missing_patient_name_before_preconfirm" },
+            runtimeDateTime && !parsedDateTime ? "runtime" : "shadow",
+          ),
+        };
+      }
       return {
-        replyText: bookingFirstName
+        replyText: isThirdPartyWithName
+          ? `Perfecto. ${formatHumanDay(preconfirmDateTime.date)} a las ${formatHourLabel(preconfirmDateTime.time)} está disponible para ${safeStr(bookingCollected.service, "Corte clásico")}${withBarber} a nombre de ${thirdPartyPatientName}. ¿Confirmamos?`
+          : bookingFirstName
           ? `Perfecto ${bookingFirstName}. ${formatHumanDay(preconfirmDateTime.date)} a las ${formatHourLabel(preconfirmDateTime.time)} está disponible para ${safeStr(bookingCollected.service, "Corte clásico")}${withBarber}. ¿Confirmamos a tu nombre?`
           : `Perfecto. ${formatHumanDay(preconfirmDateTime.date)} a las ${formatHourLabel(preconfirmDateTime.time)} está disponible para ${safeStr(bookingCollected.service, "Corte clásico")}${withBarber}. ¿Confirmamos?`,
         statePatch: {
@@ -3522,6 +6073,7 @@ export function runConversationEngine(args: {
               appointment_date: preconfirmDateTime.date,
               appointment_time: preconfirmDateTime.time,
               preferred_barber: safeStr(bookingCollected.preferred_barber, "") || null,
+              patient_name: thirdPartyPatientName || null,
               status: "pending_confirmation",
             },
           },
@@ -3535,7 +6087,22 @@ export function runConversationEngine(args: {
 
     if ((parsedDateTime || runtimeDateTime) && !safeStr(bookingCollected.service, "").trim()) {
       const genericDateTime = parsedDateTime ?? runtimeDateTime!;
-      if (isBarbershopSlotInPast(genericDateTime.date, genericDateTime.time, timezone)) {
+      const requestedGuard = validateRequestedDateTimeBookability({
+        requestedDate: genericDateTime.date,
+        requestedTime: genericDateTime.time,
+        timezone,
+        clinicSettings: args.clinicSettings,
+      });
+      console.log(JSON.stringify({
+        event: "barbershop:requested_datetime_guard_entered",
+        requested_date: genericDateTime.date,
+        requested_day_of_week: weekdayFromIsoDate(genericDateTime.date),
+        requested_day_open: requestedGuard.reason !== "requested_day_closed",
+        requested_time: genericDateTime.time,
+        requested_time_within_hours: requestedGuard.reason !== "requested_time_outside_hours",
+        blocked_reason: requestedGuard.reason,
+      }));
+      if (!requestedGuard.canBookRequestedDateTime && requestedGuard.reason === "requested_time_in_past") {
         return {
           replyText: "Esa hora ya pasó. Te puedo revisar otro horario para hoy o mañana.",
           statePatch: {
@@ -3552,21 +6119,34 @@ export function runConversationEngine(args: {
           debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_generic_slot_in_past_guard" },
         };
       }
-      if (!isWithinClinicHours(genericDateTime.date, genericDateTime.time, args.clinicSettings)) {
+      if (!requestedGuard.canBookRequestedDateTime) {
         return {
-          replyText: "A esa hora no estamos atendiendo. Decime otro horario y te ayudo a revisarlo.",
+          replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
           statePatch: {
             stage: "BOOKING",
             lastIntent: "book_appointment",
-            nextExpected: "date_time",
+            nextExpected: "availability_slot_selection",
             orgType: "barbershop",
             collected: {
               ...bookingCollected,
+              availability_request: true,
+              preferred_date: genericDateTime.date,
+              pending_booking_request: {
+                service: safeStr((bookingCollected as any).service, ""),
+                preferred_date: genericDateTime.date,
+                preferred_time: null,
+                provider_name: null,
+                provider_preference: null,
+                patient_name: safeStr((bookingCollected as any).patient_name, "") || null,
+                booking_for_other: Boolean((bookingCollected as any).booking_for_other),
+                missing_fields: safeStr((bookingCollected as any).service, "").trim() ? ["time"] : ["service", "time"],
+                source: "context_merge",
+              },
               pending_booking: null,
               pending_booking_stale: true,
             },
           },
-          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_generic_outside_hours_guard" },
+          debug: { intent: "book_appointment", phase: "BOOKING", route: "barbershop_generic_outside_hours_discovery_redirect" },
         };
       }
       if (safeStr(bookingCollected.preferred_barber, "").trim() || hasBarberMention) {
@@ -3579,8 +6159,40 @@ export function runConversationEngine(args: {
         const bookingFirstName = hasCollectedName(state)
           ? safeStr(state.name, "").trim().split(/\s+/)[0]
           : "";
+        const thirdPartyPatientName = safeStr((bookingCollected as any).patient_name, "").trim();
+        const isThirdPartyWithName = Boolean(Boolean((bookingCollected as any).booking_for_other) && thirdPartyPatientName);
+        const isThirdPartyMissingName = Boolean(
+          Boolean((bookingCollected as any).booking_for_other) &&
+            !safeStr((bookingCollected as any).patient_name, "").trim(),
+        );
+        if (isThirdPartyMissingName) {
+          return {
+            replyText: `Perfecto. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible${withBarber}. ¿A nombre de quién la agendamos?`,
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "book_appointment",
+              nextExpected: "third_party_patient_name",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                service: "Cita barbería",
+                preferred_date: genericDateTime.date,
+                preferred_time: genericDateTime.time,
+                preferred_barber: cleanResolvedBarber || null,
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: withInterpreterDebug(
+              { intent: "book_appointment", phase: "BOOKING", route: "barbershop_generic_with_barber_missing_patient_name" },
+              runtimeDateTime && !parsedDateTime ? "runtime" : "shadow",
+            ),
+          };
+        }
         return {
-          replyText: bookingFirstName
+          replyText: isThirdPartyWithName
+            ? `Perfecto. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible${withBarber} a nombre de ${thirdPartyPatientName}. ¿Confirmamos?`
+            : bookingFirstName
             ? `Perfecto ${bookingFirstName}. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible${withBarber}. ¿Confirmamos a tu nombre?`
             : `Perfecto. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible${withBarber}. ¿Confirmamos?`,
           statePatch: {
@@ -3601,6 +6213,7 @@ export function runConversationEngine(args: {
                 appointment_date: genericDateTime.date,
                 appointment_time: genericDateTime.time,
                 preferred_barber: cleanResolvedBarber || null,
+                patient_name: thirdPartyPatientName || null,
                 status: "pending_confirmation",
               },
             },
@@ -3615,8 +6228,40 @@ export function runConversationEngine(args: {
         const bookingFirstName = hasCollectedName(state)
           ? safeStr(state.name, "").trim().split(/\s+/)[0]
           : "";
+        const thirdPartyPatientName = safeStr((bookingCollected as any).patient_name, "").trim();
+        const isThirdPartyWithName = Boolean(Boolean((bookingCollected as any).booking_for_other) && thirdPartyPatientName);
+        const isThirdPartyMissingName = Boolean(
+          Boolean((bookingCollected as any).booking_for_other) &&
+            !safeStr((bookingCollected as any).patient_name, "").trim(),
+        );
+        if (isThirdPartyMissingName) {
+          return {
+            replyText: `Perfecto. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible. ¿A nombre de quién la agendamos?`,
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "book_appointment",
+              nextExpected: "third_party_patient_name",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                service: "Cita barbería",
+                preferred_date: genericDateTime.date,
+                preferred_time: genericDateTime.time,
+                preferred_barber: null,
+                pending_booking: null,
+                pending_booking_stale: true,
+              },
+            },
+            debug: withInterpreterDebug(
+              { intent: "book_appointment", phase: "BOOKING", route: "barbershop_generic_any_missing_patient_name" },
+              runtimeDateTime && !parsedDateTime ? "runtime" : "shadow",
+            ),
+          };
+        }
         return {
-          replyText: bookingFirstName
+          replyText: isThirdPartyWithName
+            ? `Perfecto. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible a nombre de ${thirdPartyPatientName}. ¿Confirmamos?`
+            : bookingFirstName
             ? `Perfecto ${bookingFirstName}. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible. ¿Confirmamos a tu nombre?`
             : `Perfecto. ${formatHumanDay(genericDateTime.date)} a las ${formatHourLabel(genericDateTime.time)} está disponible. ¿Confirmamos?`,
           statePatch: {
@@ -3637,6 +6282,7 @@ export function runConversationEngine(args: {
                 appointment_date: genericDateTime.date,
                 appointment_time: genericDateTime.time,
                 preferred_barber: null,
+                patient_name: thirdPartyPatientName || null,
                 status: "pending_confirmation",
               },
             },
@@ -3660,6 +6306,12 @@ export function runConversationEngine(args: {
             service: "Cita barbería",
             preferred_date: genericDateTime.date,
             preferred_time: genericDateTime.time,
+            proposed_slot: {
+              date: genericDateTime.date,
+              time: genericDateTime.time,
+              service: safeStr(bookingCollected.service, "Cita barbería"),
+              provider_preference: null,
+            },
           },
         },
         debug: withInterpreterDebug(
@@ -3725,6 +6377,10 @@ export function runConversationEngine(args: {
       }
       const hasService = safeStr(bookingCollected.service, "").trim().length > 0;
       if (!hasService) {
+        const pendingWithContext = {
+          ...mergedPendingBookingRequest,
+          source: "context_merge" as const,
+        };
         return {
           replyText: "Claro. ¿Querés Corte de pelo, barba, corte + barba o cejas?",
           statePatch: {
@@ -3732,7 +6388,10 @@ export function runConversationEngine(args: {
             lastIntent: "book_appointment",
             nextExpected: "service",
             orgType: "barbershop",
-            collected: { ...bookingCollected },
+            collected: {
+              ...bookingCollected,
+              pending_booking_request: pendingWithContext,
+            },
           },
           debug: withInterpreterDebug(
             { intent: "book_appointment", phase: "BOOKING", route: "barbershop_ask_service" },
@@ -3793,9 +6452,128 @@ export function runConversationEngine(args: {
         };
       }
       const bookingService = safeStr(bookingCollected.service, "").trim();
+      const parsedDateOnly = parseDateOnlyFromMessage(args.inboundText, timezone);
+      if (bookingService && parsedDateOnly && !(parsedDateTime || runtimeDateTime)) {
+        return {
+          replyText: "__SHOW_AVAILABILITY_FOR_DATE__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "availability",
+            nextExpected: "availability_slot_selection",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              preferred_date: parsedDateOnly,
+              availability_request: true,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_service_date_show_availability" },
+            runtimeIntent === "booking_request" ? "runtime" : "shadow",
+          ),
+        };
+      }
+      if (bookingService && (parsedDateTime || runtimeDateTime)) {
+        return {
+          replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              preferred_date: (parsedDateTime ?? runtimeDateTime)!.date,
+              preferred_time: (parsedDateTime ?? runtimeDateTime)!.time,
+              availability_request: true,
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_service_datetime_check_availability" },
+            runtimeIntent === "booking_request" ? "runtime" : "shadow",
+          ),
+        };
+      }
+      const contextDate = safeStr((bookingCollected as any).preferred_date, "").trim();
+      const contextTime = safeStr((bookingCollected as any).preferred_time, "").trim();
+      const proposed = ((bookingCollected as any).proposed_slot ?? {}) as Record<string, unknown>;
+      const proposedDate = safeStr(proposed.date, contextDate).trim();
+      const proposedTime = safeStr(proposed.time, contextTime).trim();
+      const providerFromTurn = safeStr(serviceDetection.preferredBarber, "").trim() ||
+        (runtimeSpecificProvider ? runtimeProviderNameRaw : "");
+      const providerAnyFromTurn = hasAnyBarberPreference || isAnyBarberPreferenceText(args.inboundText);
+      if (
+        bookingService &&
+        proposedDate &&
+        proposedTime &&
+        !(parsedDateTime || runtimeDateTime) &&
+        (providerAnyFromTurn || providerFromTurn || safeStr(state.nextExpected, "") === "barber_preference")
+      ) {
+        console.log(JSON.stringify({
+          event: "barbershop:context_resolver_output",
+          reused_previous_date_time: true,
+          nextExpected_before: safeStr(state.nextExpected, ""),
+          route_selected: "barbershop_reuse_proposed_datetime_check_availability",
+          proposed_date: proposedDate,
+          proposed_time: proposedTime,
+          provider_name: providerFromTurn || null,
+          provider_preference: providerAnyFromTurn ? "any" : (providerFromTurn ? "specific" : null),
+        }));
+        return {
+          replyText: "__CHECK_REQUESTED_AVAILABILITY__",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              service: bookingService,
+              preferred_date: proposedDate,
+              preferred_time: proposedTime,
+              preferred_barber: providerAnyFromTurn ? null : (providerFromTurn || null),
+              provider_preference: providerAnyFromTurn ? "any" : (providerFromTurn ? "specific" : null),
+              provider_name: providerAnyFromTurn ? null : (providerFromTurn || null),
+              pending_booking: null,
+              pending_booking_stale: true,
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_reuse_proposed_datetime_check_availability" },
+            runtimeIntent === "booking_request" ? "runtime" : "shadow",
+          ),
+        };
+      }
       const bookingServiceLabel = bookingService === "Corte clásico"
         ? "corte de pelo"
         : bookingService.toLowerCase();
+      if (mergedPendingBookingRequest.service && mergedPendingBookingRequest.preferred_time && !mergedPendingBookingRequest.preferred_date) {
+        console.log(JSON.stringify({
+          event: "barbershop:route_selected",
+          route_selected: "barbershop_pending_booking_request_ask_date_only",
+        }));
+        return {
+          replyText: "Claro 🔥 ¿Para qué día querés que te revise horarios?",
+          statePatch: {
+            stage: "BOOKING",
+            lastIntent: "book_appointment",
+            nextExpected: "booking_date",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_booking_request: { ...mergedPendingBookingRequest, source: "context_merge" },
+            },
+          },
+          debug: withInterpreterDebug(
+            { intent: "book_appointment", phase: "BOOKING", route: "barbershop_pending_booking_request_ask_date_only" },
+            runtimeIntent === "booking_request" ? "runtime" : "shadow",
+          ),
+        };
+      }
       console.log(JSON.stringify({
         event: "barbershop:old_date_time_branch_hit",
         inbound_text: args.inboundText ?? null,
@@ -3815,7 +6593,10 @@ export function runConversationEngine(args: {
           lastIntent: "book_appointment",
           nextExpected: "date_time",
           orgType: "barbershop",
-          collected: { ...bookingCollected },
+          collected: {
+            ...bookingCollected,
+            pending_booking_request: { ...mergedPendingBookingRequest, source: "context_merge" },
+          },
         },
         debug: withInterpreterDebug(
           { intent: "book_appointment", phase: "BOOKING", route: "barbershop_ask_datetime" },
@@ -3876,14 +6657,31 @@ export function runConversationEngine(args: {
     }
 
     const hasActiveBookingContext = Boolean(
+      runtimeContext.has_active_context ||
       safeStr(state.nextExpected, "").trim() ||
       safeStr(state.stage, "") === "BOOKING" ||
       bookingContext.pending_booking ||
       bookingContext.last_booking_step ||
-      pendingAction.type !== "none",
+      pendingAction.type !== "none" ||
+      (bookingCollected as any).last_availability_context ||
+      (bookingCollected as any).proposed_slot,
     );
+    if (hasActiveBookingContext && (bookingCollected as any).pending_booking_request) {
+      console.log(JSON.stringify({
+        event: "barbershop:fallback_blocked_reason",
+        fallback_blocked_reason: "pending_booking_request_context_available",
+        route_selected: "barbershop_natural_fallback_with_context",
+      }));
+    }
+    if (hasActiveBookingContext && !(bookingCollected as any).pending_booking_request) {
+      console.log(JSON.stringify({
+        event: "barbershop:fallback_blocked_reason",
+        fallback_blocked_reason: "active_booking_context_without_pending_request",
+        route_selected: "barbershop_natural_fallback_with_context",
+      }));
+    }
     const replyText = hasActiveBookingContext
-      ? composeBarbershopNaturalFallback({ nextExpected: state.nextExpected })
+      ? composeBarbershopNaturalFallback({ nextExpected: state.nextExpected, activeFlow: "booking" })
       : "No te entendí completo. Podés escribirme algo como: quiero cita mañana a las 5, cuánto cuesta corte y barba, o qué pomadas tienen. También puedo pasarte el calendario completo si querés elegir con calma.";
     return {
       replyText,
@@ -3899,7 +6697,7 @@ export function runConversationEngine(args: {
       },
       debug: {
         ...withInterpreterDebug({
-          intent: "unknown",
+          intent: hasActiveBookingContext ? "unknown_inside_active_flow" : "unknown_outside_active_flow",
           phase: safeStr(state.stage, "DISCOVERY"),
           route: hasActiveBookingContext ? "barbershop_natural_fallback_contextual" : "barbershop_unknown_clarify",
         }),
@@ -4122,7 +6920,7 @@ export function runConversationEngine(args: {
       }
       if (isNo) {
         return {
-          replyText: "Entendido. Mantengo tu cita activa.",
+          replyText: "Entendido. Mantengo tu cita confirmada.",
           statePatch: {
             stage: "DISCOVERY",
             lastIntent: "cancel_appointment_denied",
@@ -4336,6 +7134,10 @@ export function runConversationEngine(args: {
     }
 
     if (isRescheduleDateTimeExpected(state.nextExpected)) {
+      const isDentalConversation =
+        safeStr(state.orgType, determineOrgType(args.organizationId)).toLowerCase() ===
+          "dental" ||
+        args.organizationId === "clinic-demo";
       const sameDayTimeMatch = normalizeTextForIntent(args.inboundText).match(
         /\b(misma fecha|ese mismo dia|el mismo dia)\b/,
       );
@@ -4407,6 +7209,22 @@ export function runConversationEngine(args: {
         }
       }
       if (!parsedDateTime) {
+        if (isDentalConversation) {
+          return {
+            replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__",
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "reschedule_appointment",
+              nextExpected: "reschedule_datetime",
+              collected: { ...collected },
+            },
+            debug: {
+              intent: "reschedule_appointment",
+              phase: "BOOKING",
+              route: "dental_reschedule_datetime_guided_fallback",
+            },
+          };
+        }
         return {
           replyText:
             "Perfecto. Decime la nueva fecha y hora (por ejemplo: martes a las 10:00).",
@@ -5000,16 +7818,17 @@ export function runConversationEngine(args: {
         statePatch: {
           stage: "BOOKING",
           lastIntent: "book_appointment",
-          nextExpected: "patient_name_for",
+          nextExpected: "third_party_patient_name",
           collected: {
             ...bookingCollected,
+            booking_for_other: true,
             appointment_for_relation: thirdParty.relation,
           },
         },
         debug: { intent: "book_appointment", phase: "BOOKING", route: "ask_third_party_patient_name" },
       };
     }
-    if (safeStr(state.nextExpected, "") === "patient_name_for") {
+    if (["patient_name_for", "third_party_patient_name"].includes(safeStr(state.nextExpected, ""))) {
       if (thirdParty?.self) {
         bookingCollected.patient_name = toDisplayPersonName(
           safeStr(state.full_name, safeStr(state.name, "")),

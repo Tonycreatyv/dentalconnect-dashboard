@@ -370,7 +370,7 @@ export default function Hoy() {
     (orgId === "barber-demo-wimaeil"
       ? "Barbería WIMAEIL"
       : orgId === "barber-demo"
-        ? "Barbería Premium 504"
+        ? "BarberLine"
         : activeBusinessType === "barbershop"
           ? "Barbería"
           : "DentalConnect");
@@ -621,7 +621,8 @@ export default function Hoy() {
             ) : filteredAppts.length === 0 ? (
               <MobileEmptyState
                 icon={Calendar}
-                title="No hay citas para este día."
+                title="Todavía no hay citas para hoy."
+                description="Probá el flujo por WhatsApp o agregá una cita manual."
                 action={<button onClick={() => navigate("/agenda")} className="text-xs font-bold text-[#25D366]">Crear cita</button>}
               />
             ) : (
@@ -837,7 +838,8 @@ export default function Hoy() {
         ) : filteredAppts.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] py-10 text-center">
             <Calendar className="mx-auto mb-3 h-10 w-10 text-white/15" />
-            <p className="text-sm text-white/45">{docFilter !== "all" ? "No hay citas para este filtro." : "No hay citas para este día."}</p>
+            <p className="text-sm font-semibold text-white/70">{docFilter !== "all" ? "No hay citas para este filtro." : "Todavía no hay citas para hoy."}</p>
+            {docFilter === "all" ? <p className="mt-1 text-xs text-white/45">Probá el flujo por WhatsApp o agregá una cita manual.</p> : null}
             <button onClick={() => navigate("/agenda")} className="mt-3 text-sm font-bold text-[#F0C278] hover:underline">Crear nueva cita</button>
           </div>
         ) : (

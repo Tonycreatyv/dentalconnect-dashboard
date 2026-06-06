@@ -15,7 +15,7 @@ const CHANNEL_OPTIONS = ["all", "messenger", "whatsapp"] as const;
 const DEV_DEBUG_UI = false;
 
 function fallbackOrgLabel(organizationId: string): string {
-  if (organizationId === "barber-demo") return "Barbería Premium 504";
+  if (organizationId === "barber-demo") return "BarberLine";
   if (organizationId === "barber-demo-wimaeil") return "Barbería WIMAEIL";
   if (organizationId === "clinic-demo") return "Dental Demo";
   if (organizationId === "creatyv-product") return "Creatyv Product";
@@ -809,8 +809,8 @@ export default function Inbox() {
                 ) : filteredLeads.length === 0 ? (
                   <MobileEmptyState
                     icon={MessageCircle}
-                    title={leads.length > 0 ? "Sin resultados con estos filtros" : "Sin conversaciones"}
-                    description={leads.length > 0 ? "Cambiá el filtro o limpiá la búsqueda." : "No hay leads para esta organización todavía."}
+                    title={leads.length > 0 ? "Sin resultados con estos filtros" : inboxIsBarbershop ? "No hay mensajes nuevos por ahora." : "Sin conversaciones"}
+                    description={leads.length > 0 ? "Cambiá el filtro o limpiá la búsqueda." : inboxIsBarbershop ? undefined : "No hay leads para esta organización todavía."}
                   />
                 ) : filteredLeads.map((lead) => {
                   const active = lead.id === resolvedLeadId;
@@ -896,7 +896,7 @@ export default function Inbox() {
                 ) : null}
 
                 <div ref={threadScrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
-                  {loadingThread ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">Cargando mensajes…</div> : threadError ? <div className="py-12 text-center text-sm text-rose-500">{threadError}</div> : thread.length === 0 ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">No hay mensajes</div> : thread.map((m) => {
+                  {loadingThread ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">Cargando mensajes…</div> : threadError ? <div className="py-12 text-center text-sm text-rose-500">{threadError}</div> : thread.length === 0 ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">{inboxIsBarbershop ? "No hay mensajes nuevos por ahora." : "No hay mensajes"}</div> : thread.map((m) => {
                     const role = String(m.role ?? "").toLowerCase();
                     const actor = String(m.actor ?? "").toLowerCase();
                     const isInbound = role === "user" || actor === "user";
