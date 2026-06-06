@@ -126,7 +126,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="mt-4 grid gap-1.5">
         <NavItem to="/hoy" icon={LayoutDashboard} label="Hoy" onNavigate={onNavigate} />
-        <NavItem to="/agenda" icon={CalendarDays} label={vertical.agendaTitle} onNavigate={onNavigate} />
+        <NavItem to="/agenda" icon={CalendarDays} label={isBarbershop ? "Citas" : vertical.agendaTitle} onNavigate={onNavigate} />
         <NavItem to="/leads" icon={Users} label={isBarbershop ? "Clientes" : vertical.customersLabel} onNavigate={onNavigate} />
         <NavItem to="/inbox" icon={Inbox} label="Inbox" onNavigate={onNavigate} />
         {isBarbershop ? (
@@ -136,8 +136,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <NavItem to="/settings?tab=horario" icon={Clock} label={vertical.scheduleLabel} onNavigate={onNavigate} />
           </>
         ) : null}
-        <NavItem to="/settings" icon={Settings} label={vertical.settingsLabel} onNavigate={onNavigate} />
-        {isAdmin ? <NavItem to="/billing" icon={CreditCard} label="Billing" onNavigate={onNavigate} /> : null}
+        <NavItem to="/settings" icon={Settings} label={isBarbershop ? "Configuración" : vertical.settingsLabel} onNavigate={onNavigate} />
+        {isAdmin ? <NavItem to="/billing" icon={CreditCard} label={isBarbershop ? "Plan" : "Billing"} onNavigate={onNavigate} /> : null}
       </div>
 
       <div className="mt-4 hidden rounded-2xl border border-white/10 bg-white/5 p-3 lg:block">

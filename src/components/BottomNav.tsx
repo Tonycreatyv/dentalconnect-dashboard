@@ -13,12 +13,13 @@ import { getVerticalConfig } from "../config/verticalConfig";
 export default function BottomNav() {
   const { resolvedBusinessType } = useActiveOrg();
   const vertical = getVerticalConfig(resolvedBusinessType);
+  const isBarbershop = resolvedBusinessType === "barbershop";
   const items = [
     { to: "/hoy", label: "Hoy", icon: LayoutDashboard },
-    { to: "/agenda", label: vertical.agendaTitle, icon: CalendarDays },
+    { to: "/agenda", label: isBarbershop ? "Citas" : vertical.agendaTitle, icon: CalendarDays },
     { to: "/leads", label: vertical.customersLabel, icon: Users },
     { to: "/inbox", label: "Inbox", icon: MessageSquareText },
-    { to: "/settings", label: vertical.settingsLabel, icon: Settings },
+    { to: "/settings", label: isBarbershop ? "Configuración" : vertical.settingsLabel, icon: Settings },
   ];
   return <MobileBottomTabBar items={items} />;
 }
