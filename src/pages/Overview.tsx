@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Bell, Calendar, MessageCircle, Users, TrendingUp, Settings, CheckCircle2, ArrowRight, Sparkles, Clock, AlertCircle, Zap, Target, Gift } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
 import { dedupeByKey } from "../lib/dedupe";
 import { SectionCard } from "../components/SectionCard";
 
@@ -29,7 +31,10 @@ function toEndOfDay(d: Date) { const x = new Date(d); x.setHours(23,59,59,999); 
 export default function Overview() {
   const navigate = useNavigate();
   const { clinic } = useClinic();
-  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
+  const { resolvedBusinessType, resolvedOrgId } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
+  const isBarbershop = resolvedBusinessType === "barbershop";
+  const ORG = resolvedOrgId ?? clinic?.organization_id ?? DEFAULT_ORG;
 
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [appts, setAppts] = useState<ApptRow[]>([]);
@@ -73,22 +78,22 @@ export default function Overview() {
   const actions = useMemo((): ActionItem[] => {
     const items: ActionItem[] = [];
     if (!hasMessenger) items.push({ id: "connect-messenger", type: "onboarding", title: "Conecta Messenger", description: "Recibe mensajes de Facebook", icon: MessageCircle, color: "blue", action: () => navigate("/settings?tab=integraciones") });
-    if (!hasServices) items.push({ id: "add-services", type: "onboarding", title: "Agrega tus servicios", description: "El bot podrá responder precios", icon: Settings, color: "purple", action: () => navigate("/settings?tab=servicios") });
-    if (!hasHours) items.push({ id: "set-hours", type: "onboarding", title: "Configura tu horario", description: "Para que el bot sugiera disponibilidad", icon: Clock, color: "amber", action: () => navigate("/settings?tab=horario") });
+    if (!hasServices) items.push({ id: "add-services", type: "onboarding", title: "Agrega tus servicios", description: isBarbershop ? "BarberLine podrá responder precios" : "El bot podrá responder precios", icon: Settings, color: "purple", action: () => navigate("/settings?tab=servicios") });
+    if (!hasHours) items.push({ id: "set-hours", type: "onboarding", title: `Configura ${isBarbershop ? "tus horarios" : "tu horario"}`, description: isBarbershop ? "Para mostrar disponibilidad real" : "Para que el bot sugiera disponibilidad", icon: Clock, color: "amber", action: () => navigate("/settings?tab=horario") });
     if (pendingReplies > 0) items.push({ id: "pending-replies", type: "action", title: `${pendingReplies} mensajes sin responder`, description: "Hay leads esperando", icon: AlertCircle, color: "rose", action: () => navigate("/inbox") });
     if (pendingAppts > 0) items.push({ id: "pending-confirmations", type: "action", title: `${pendingAppts} citas por confirmar`, description: "Envía confirmaciones", icon: Calendar, color: "amber", action: () => navigate("/agenda") });
     if (items.length === 0) items.push({ id: "growth-tip", type: "tip", title: "Todo al día ✨", description: "Considera enviar promociones", icon: Sparkles, color: "emerald", action: () => navigate("/marketing"), completed: true });
     return items.slice(0, 3);
-  }, [hasMessenger, hasServices, hasHours, pendingReplies, pendingAppts, navigate]);
+  }, [hasMessenger, hasServices, hasHours, pendingReplies, pendingAppts, navigate, isBarbershop]);
 
   const growthOpportunities = useMemo(() => {
     const opps = [];
     const inactiveLeads = leads.filter(l => { if (!l.last_message_at) return false; const daysSince = (Date.now() - new Date(l.last_message_at).getTime()) / 86400000; return daysSince > 7 && daysSince < 30; }).length;
     if (inactiveLeads > 0) opps.push({ id: "reactivate", title: `${inactiveLeads} leads inactivos`, description: "Envía un seguimiento", icon: Target, action: () => navigate("/leads") });
     const completedToday = appts.filter(a => a.status === "completed").length;
-    if (completedToday > 0) opps.push({ id: "reviews", title: `${completedToday} pacientes atendidos`, description: "Pide reseñas", icon: Gift, action: () => navigate("/marketing") });
+    if (completedToday > 0) opps.push({ id: "reviews", title: `${completedToday} ${vertical.customersLabel.toLowerCase()} atendidos`, description: "Pide reseñas", icon: Gift, action: () => navigate("/marketing") });
     return opps;
-  }, [leads, appts, navigate]);
+  }, [leads, appts, navigate, vertical.customersLabel]);
 
   const colorClasses: Record<string, { bg: string; text: string; border: string }> = {
     blue: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-400/20" },
@@ -207,8 +212,8 @@ export default function Overview() {
                 <div key={appt.id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5">
                   <div className="text-sm font-bold text-white w-14">{time}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-white truncate">{appt.patient_name || "Paciente"}</div>
-                    <div className="text-xs text-white/50 truncate">{appt.reason || "Consulta"}</div>
+                    <div className="font-medium text-white truncate">{appt.patient_name || vertical.customerLabel}</div>
+                    <div className="text-xs text-white/50 truncate">{appt.reason || "Cita"}</div>
                   </div>
                   {isConfirmed ? <CheckCircle2 className="h-5 w-5 text-emerald-400" /> : <div className="px-2 py-1 rounded-full bg-amber-500/10 border border-amber-400/20 text-amber-300 text-[10px] font-semibold uppercase">Pendiente</div>}
                 </div>

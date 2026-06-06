@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -42,7 +44,9 @@ function hourLabel(iso: string) { return new Date(iso).toLocaleTimeString("es", 
 export default function Tomorrow() {
   const navigate = useNavigate();
   const { clinic } = useClinic();
-  const orgId = clinic?.organization_id ?? DEFAULT_ORG;
+  const { resolvedBusinessType, resolvedOrgId } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
+  const orgId = resolvedOrgId ?? clinic?.organization_id ?? DEFAULT_ORG;
 
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -300,8 +304,8 @@ export default function Tomorrow() {
                   <div key={appt.id} className="flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3">
                     <div className="w-14 text-sm font-bold text-amber-300">{time}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="truncate font-medium text-white">{appt.patient_name || "Paciente"}</div>
-                      <div className="truncate text-xs text-white/50">{appt.reason || "Consulta"}</div>
+                      <div className="truncate font-medium text-white">{appt.patient_name || vertical.customerLabel}</div>
+                      <div className="truncate text-xs text-white/50">{appt.reason || "Cita"}</div>
                     </div>
                     <button
                       onClick={() => sendConfirmation(appt)}
@@ -360,8 +364,8 @@ export default function Tomorrow() {
                   <div key={appt.id} className="flex items-center gap-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3">
                     <div className="w-14 text-sm font-bold text-emerald-300">{time}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="truncate font-medium text-white">{appt.patient_name || "Paciente"}</div>
-                      <div className="truncate text-xs text-white/50">{appt.reason || "Consulta"}</div>
+                      <div className="truncate font-medium text-white">{appt.patient_name || vertical.customerLabel}</div>
+                      <div className="truncate text-xs text-white/50">{appt.reason || "Cita"}</div>
                     </div>
                     <CheckCircle2 className="h-5 w-5 text-emerald-500" />
                   </div>
@@ -379,7 +383,7 @@ export default function Tomorrow() {
               { text: "Confirmar citas pendientes antes de las 6pm", done: unconfirmed.length === 0 },
               { text: "Ofrecer huecos a lista de espera", done: gaps.length === 0 },
               { text: "Preparar materiales para primeras citas", done: false },
-              { text: "Revisar historial de pacientes del día", done: false },
+              { text: `Revisar historial de ${vertical.customersLabel.toLowerCase()} del día`, done: false },
             ].map((item, idx) => (
               <div key={idx} className={`flex items-center gap-3 rounded-xl p-3 ${item.done ? "border border-emerald-400/20 bg-emerald-500/10" : "border border-white/10 bg-white/5"}`}>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${item.done ? "bg-emerald-500 border-emerald-500" : "border-white/10"}`}>

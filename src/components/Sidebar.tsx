@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, CreditCard, Shield } from "lucide-react";
+import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, CreditCard, Shield, Scissors, Clock } from "lucide-react";
 import { useClinic } from "../context/ClinicContext";
 import { resolveFrontendBusinessType, resolveFrontendOrgName, useActiveOrg } from "../hooks/useActiveOrg";
 import { getVerticalConfig } from "../config/verticalConfig";
@@ -126,10 +126,17 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="mt-4 grid gap-1.5">
         <NavItem to="/hoy" icon={LayoutDashboard} label="Hoy" onNavigate={onNavigate} />
-        <NavItem to="/inbox" icon={Inbox} label="Inbox" onNavigate={onNavigate} />
-        <NavItem to="/agenda" icon={CalendarDays} label="Agenda" onNavigate={onNavigate} />
+        <NavItem to="/agenda" icon={CalendarDays} label={vertical.agendaTitle} onNavigate={onNavigate} />
         <NavItem to="/leads" icon={Users} label={isBarbershop ? "Clientes" : vertical.customersLabel} onNavigate={onNavigate} />
-        <NavItem to="/settings" icon={Settings} label="Ajustes" onNavigate={onNavigate} />
+        <NavItem to="/inbox" icon={Inbox} label="Inbox" onNavigate={onNavigate} />
+        {isBarbershop ? (
+          <>
+            <NavItem to="/settings?tab=servicios" icon={Scissors} label={vertical.servicesLabel} onNavigate={onNavigate} />
+            <NavItem to="/settings?tab=equipo" icon={Users} label={vertical.providersLabel} onNavigate={onNavigate} />
+            <NavItem to="/settings?tab=horario" icon={Clock} label={vertical.scheduleLabel} onNavigate={onNavigate} />
+          </>
+        ) : null}
+        <NavItem to="/settings" icon={Settings} label={vertical.settingsLabel} onNavigate={onNavigate} />
         {isAdmin ? <NavItem to="/billing" icon={CreditCard} label="Billing" onNavigate={onNavigate} /> : null}
       </div>
 

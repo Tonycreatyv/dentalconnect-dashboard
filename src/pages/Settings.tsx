@@ -101,7 +101,7 @@ function isLikelyDentalCatalog(items: ServiceItem[]): boolean {
   return names.some((name) => dentalSignals.some((signal) => name.includes(signal)));
 }
 
-type TabKey = "integraciones" | "clinica" | "equipo" | "equipo" | "equipo" | "horario" | "servicios" | "faqs" | "cuenta";
+type TabKey = "integraciones" | "clinica" | "equipo" | "horario" | "servicios" | "faqs" | "cuenta";
 
 const INTEGRATIONS = [
   { key: "messenger" as const, name: "Messenger", description: "Centraliza mensajes de Facebook.", icon: MessagesSquare },
@@ -136,7 +136,9 @@ export default function Settings() {
   const [faqs, setFaqs] = useState<FaqItem[]>(getVerticalDefaultFaqs(resolvedBusinessType));
   const [emergency, setEmergency] = useState("Si es urgencia, cuéntanos síntomas.");
   const [policiesCancel, setPoliciesCancel] = useState("Avisa con 2 horas de anticipación.");
-  const [policiesDeposit, setPoliciesDeposit] = useState("Algunos tratamientos requieren depósito.");
+  const [policiesDeposit, setPoliciesDeposit] = useState(
+    resolvedBusinessType === "barbershop" ? "Algunos servicios requieren depósito." : "Algunos tratamientos requieren depósito.",
+  );
 
   const [doctors, setDoctors] = useState<any[]>([]);
   const [deletedProviderIds, setDeletedProviderIds] = useState<string[]>([]);
@@ -476,15 +478,22 @@ export default function Settings() {
     return { label: "No conectado", status: "disconnected" as const, disabled: false };
   }
 
-  const tabs = [
+  const tabs = useMemo(() => [
     { key: "integraciones" as const, label: "Integraciones" },
     { key: "clinica" as const, label: vertical.organizationLabel },
-    { key: "horario" as const, label: "Horario" },
+    { key: "horario" as const, label: vertical.scheduleLabel },
     { key: "servicios" as const, label: vertical.servicesLabel },
     { key: "equipo" as const, label: vertical.providersLabel },
     { key: "faqs" as const, label: "FAQs" },
     { key: "cuenta" as const, label: "Cuenta" },
-  ];
+  ], [vertical]);
+
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(location.search).get("tab") as TabKey | null;
+    if (requestedTab && tabs.some((item) => item.key === requestedTab)) {
+      setTab(requestedTab);
+    }
+  }, [location.search, tabs]);
 
   const renderIntegrations = () => (
     <div className="space-y-4">
@@ -716,7 +725,7 @@ export default function Settings() {
     <div className="space-y-4">
       <section className="space-y-3 rounded-[1.35rem] border border-[#25384A] bg-[#111F2B] p-4 lg:hidden">
         <MobileAppHeader
-          title="Ajustes"
+          title={vertical.settingsLabel}
           subtitle={resolvedBusinessType === "barbershop" ? "Configuración de la barbería" : vertical.settingsSubtitle}
           action={<MobileStatusPill tone="success">Bot activo</MobileStatusPill>}
         />
@@ -724,8 +733,8 @@ export default function Settings() {
           <MobileSettingsRow icon={MessageCircle} title="Bot" detail="Estado y pausa manual" onClick={() => openMobileSettingsTab("integraciones")} />
           <MobileSettingsRow icon={Globe} title={resolvedBusinessType === "barbershop" ? "Barbería" : "Clínica"} detail="Perfil, teléfono y ubicación" onClick={() => openMobileSettingsTab("clinica")} />
           <MobileSettingsRow icon={BadgeCheck} title="Servicios" detail="Precios y duración" onClick={() => openMobileSettingsTab("servicios")} />
-          <MobileSettingsRow icon={CalendarDays} title="Horario" detail="Días y horas de atención" onClick={() => openMobileSettingsTab("horario")} />
-          <MobileSettingsRow icon={PhoneCall} title={resolvedBusinessType === "barbershop" ? "Barberos" : "Equipo"} detail="Personal y disponibilidad" onClick={() => openMobileSettingsTab("equipo")} />
+          <MobileSettingsRow icon={CalendarDays} title={vertical.scheduleLabel} detail="Días y horas de atención" onClick={() => openMobileSettingsTab("horario")} />
+          <MobileSettingsRow icon={PhoneCall} title={vertical.providersLabel} detail="Personal y disponibilidad" onClick={() => openMobileSettingsTab("equipo")} />
           <MobileSettingsRow icon={MessagesSquare} title="Canales" detail="WhatsApp y Messenger" onClick={() => openMobileSettingsTab("integraciones")} />
           <MobileSettingsRow icon={Lock} title="Cuenta" detail="Acceso y contraseña" onClick={() => openMobileSettingsTab("cuenta")} />
         </div>

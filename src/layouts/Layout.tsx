@@ -41,6 +41,7 @@ export default function Layout() {
     const key = Object.keys(PAGE_TITLES).find((path) => location.pathname.startsWith(path));
     if (key === "/patients" || key === "/leads") return vertical.customersLabel;
     if (key === "/agenda" || key === "/calendar") return vertical.agendaTitle;
+    if (key === "/settings") return vertical.settingsLabel;
     return key ? PAGE_TITLES[key] : "Panel";
   }, [location.pathname, vertical]);
 

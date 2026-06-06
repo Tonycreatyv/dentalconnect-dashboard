@@ -8,6 +8,7 @@ export default function Login() {
   const navigate = useNavigate();
   const { session, loading: authLoading } = useAuth();
   const vertical = getDetectedVerticalConfig();
+  const isBarberLine = vertical.id === "barberline";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -46,10 +47,45 @@ export default function Login() {
       <div className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:repeating-linear-gradient(0deg,rgba(255,255,255,0.7)_0,rgba(255,255,255,0.7)_1px,transparent_1px,transparent_3px)]" />
 
       <main className="relative flex min-h-screen flex-col px-4 py-10">
-        <div className="mx-auto flex w-full max-w-md flex-1 items-center justify-center">
+        <div className={[
+          "mx-auto flex w-full flex-1 items-center justify-center",
+          isBarberLine ? "max-w-5xl" : "max-w-md",
+        ].join(" ")}>
+          {isBarberLine ? (
+            <section className="mr-8 hidden min-h-[520px] flex-1 rounded-3xl border border-[#25D366]/18 bg-[#0B1010]/80 p-8 shadow-2xl shadow-black/40 lg:flex lg:flex-col lg:justify-between">
+              <div>
+                <div className="inline-flex items-center rounded-full border border-[#25D366]/25 bg-[#25D366]/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-[#BDF8D1]">
+                  BarberLine
+                </div>
+                <h2 className="mt-8 max-w-sm text-4xl font-black leading-tight tracking-tight text-white">
+                  Citas, clientes y barberos en un panel operativo.
+                </h2>
+                <p className="mt-4 max-w-md text-sm leading-6 text-white/62">
+                  Diseñado para barberías que coordinan disponibilidad, mensajes y servicios desde WhatsApp.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  ["Hoy", "Agenda diaria"],
+                  ["Citas", "Confirmadas y pendientes"],
+                  ["Clientes", "Historial y mensajes"],
+                  ["Barberos", "Turnos y servicios"],
+                ].map(([label, detail]) => (
+                  <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                    <div className="text-lg font-black text-white">{label}</div>
+                    <div className="mt-1 text-xs text-white/52">{detail}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <form
             onSubmit={signIn}
-            className="w-full rounded-3xl border border-white/10 bg-black/35 px-6 py-8 shadow-2xl shadow-black/45 backdrop-blur-xl md:px-8 md:py-10"
+            className={[
+              "w-full rounded-3xl border border-white/10 bg-black/35 px-6 py-8 shadow-2xl shadow-black/45 backdrop-blur-xl md:px-8 md:py-10",
+              isBarberLine ? "max-w-md border-[#25D366]/20 bg-[#080D0D]/88" : "",
+            ].join(" ")}
           >
             <h1 className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
               {vertical.brandName}

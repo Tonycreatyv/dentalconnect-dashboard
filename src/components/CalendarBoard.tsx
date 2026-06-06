@@ -7,6 +7,7 @@ import { CalendarDays, ChevronDown, ChevronLeft, Clock, PencilLine, Plus, Trash2
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
 import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
 import { dedupeByKey } from "../lib/dedupe";
 import { appointmentKey, normalizedStartISO } from "../lib/appointments";
 import { addDays, buildLocalISO, startOfWeekSunday, toEndOfDay, toStartOfDay } from "../lib/time";
@@ -222,6 +223,9 @@ function AppointmentModal({
   onDelete,
   onBack,
   saving,
+  customerLabel,
+  providerLabel,
+  serviceLabel,
 }: {
   open: boolean;
   mode: ModalMode;
@@ -238,6 +242,9 @@ function AppointmentModal({
   onDelete: () => void;
   onBack: () => void;
   saving: boolean;
+  customerLabel: string;
+  providerLabel: string;
+  serviceLabel: string;
 }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const safeDate =
@@ -281,7 +288,7 @@ function AppointmentModal({
               <div className="text-lg font-semibold text-white">
                 {mode === "create" ? "Nueva cita" : "Editar cita"}
               </div>
-              <div className="text-sm text-white/60">Actualiza detalles del paciente y la cita.</div>
+              <div className="text-sm text-white/60">Actualiza detalles de {customerLabel.toLowerCase()} y la cita.</div>
             </div>
             <button
               type="button"
@@ -296,19 +303,19 @@ function AppointmentModal({
         {/* Body */}
         <div className="min-h-0 overflow-y-auto px-4 pb-28 pt-3 sm:px-6 sm:pb-24">
           <div className="grid gap-4">
-            {/* Paciente + Motivo */}
+            {/* Customer + service */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
-                <label className="text-xs font-medium text-white/80">Paciente</label>
+                <label className="text-xs font-medium text-white/80">{customerLabel}</label>
                 <input
                   value={form.patient_name}
                   onChange={(e) => onChange({ ...form, patient_name: e.target.value })}
                   className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-                  placeholder="Nombre del paciente"
+                  placeholder={`Nombre del ${customerLabel.toLowerCase()}`}
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-white/80">Motivo</label>
+                <label className="text-xs font-medium text-white/80">{serviceLabel}</label>
                 <input
                   value={form.reason}
                   onChange={(e) => onChange({ ...form, reason: e.target.value })}
@@ -318,7 +325,7 @@ function AppointmentModal({
               </div>
             </div>
 
-            {/* Título + Doctor */}
+            {/* Title + provider */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label className="text-xs font-medium text-white/80">Título</label>
@@ -331,7 +338,7 @@ function AppointmentModal({
               </div>
               <div>
                 <label className="text-xs font-medium text-white/80">
-                  Doctor / Proveedor
+                  {providerLabel} / Proveedor
                 </label>
                 <div className="relative mt-2">
                   <input
@@ -447,7 +454,7 @@ function AppointmentModal({
                 value={form.notes}
                 onChange={(e) => onChange({ ...form, notes: e.target.value })}
                 className="mt-2 min-h-[110px] w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
-                placeholder="Detalles clínicos o preferencias del paciente"
+                placeholder={`Detalles o preferencias del ${customerLabel.toLowerCase()}`}
               />
             </div>
             {error ? (
@@ -507,10 +514,12 @@ function AppointmentCard({
   a,
   onEdit,
   onQuickDelete,
+  customerLabel,
 }: {
   a: ApptRow;
   onEdit: () => void;
   onQuickDelete: () => void;
+  customerLabel: string;
 }) {
   const badge = statusBadge(a.status);
   const iso = normalizedStartISO(a);
@@ -518,10 +527,10 @@ function AppointmentCard({
   const patient = a.patient_name?.trim() ? a.patient_name : null;
   const title = a.title?.trim() ? a.title : a.reason?.trim() ? a.reason : "Cita";
   const subtitle = patient
-    ? `Paciente: ${patient}`
+    ? `${customerLabel}: ${patient}`
     : a.lead_id
     ? `Lead: ${a.lead_id}`
-    : "Sin paciente";
+    : `Sin ${customerLabel.toLowerCase()}`;
   const pColor = providerColor(a.provider_name);
 
   return (
@@ -601,7 +610,8 @@ function AppointmentCard({
 export default function CalendarBoard() {
   const navigate = useNavigate();
   const { clinic } = useClinic();
-  const { resolvedOrgId } = useActiveOrg();
+  const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
   const [searchParams] = useSearchParams();
 
   const ORG = resolvedOrgId || clinic?.organization_id || DEFAULT_ORG;
@@ -1225,13 +1235,13 @@ export default function CalendarBoard() {
                 onChange={(e) => setProviderFilter(e.target.value)}
                 className="h-10 appearance-none rounded-2xl border border-white/10 bg-white/5 pl-9 pr-8 text-sm font-medium text-white/80 outline-none hover:bg-white/10 focus:border-[#3CBDB9] focus:ring-2 focus:ring-[#3CBDB9]/20"
               >
-                <option value="all">Todos los doctores</option>
+                <option value="all">Todos los {vertical.providersLabel.toLowerCase()}</option>
                 {knownProviders.map((p) => (
                   <option key={p} value={p}>
                     {p}
                   </option>
                 ))}
-                <option value="__none__">Sin doctor asignado</option>
+                <option value="__none__">Sin {vertical.providerLabel.toLowerCase()} asignado</option>
               </select>
               <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
             </div>
@@ -1336,7 +1346,7 @@ export default function CalendarBoard() {
           <div className="flex items-center gap-2 border-b border-white/5 px-6 py-2.5">
             <span className={["inline-block h-2.5 w-2.5 rounded-full", providerColor(providerFilter === "__none__" ? null : providerFilter).dot].join(" ")} />
             <span className="text-xs font-medium text-white/70">
-              {providerFilter === "__none__" ? "Sin doctor asignado" : providerFilter}
+              {providerFilter === "__none__" ? `Sin ${vertical.providerLabel.toLowerCase()} asignado` : providerFilter}
             </span>
             <button
               type="button"
@@ -1489,6 +1499,7 @@ export default function CalendarBoard() {
                       a={a}
                       onEdit={() => openEdit(a)}
                       onQuickDelete={() => quickDeleteAppointment(a.id)}
+                      customerLabel={vertical.customerLabel}
                     />
                   ))
                 )}
@@ -1547,6 +1558,7 @@ export default function CalendarBoard() {
                     a={a}
                     onEdit={() => openEdit(a)}
                     onQuickDelete={() => quickDeleteAppointment(a.id)}
+                    customerLabel={vertical.customerLabel}
                   />
                 ))
               )}
@@ -1571,6 +1583,9 @@ export default function CalendarBoard() {
         onDelete={deleteAppointment}
         onBack={() => setModalOpen(false)}
         saving={saving || deleting}
+        customerLabel={vertical.customerLabel}
+        providerLabel={vertical.providerLabel}
+        serviceLabel={vertical.serviceLabel}
       />
 
       <Toast
