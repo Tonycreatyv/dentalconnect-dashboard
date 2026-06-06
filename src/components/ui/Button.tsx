@@ -12,7 +12,7 @@ export function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
+        "ui-button-base text-safe",
         variant === "primary" && "dc-btn-primary",
         variant === "secondary" && "dc-btn-secondary",
         variant === "ghost" && "text-white/80 hover:bg-white/[0.08]",

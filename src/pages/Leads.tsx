@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, MessageCircle, Phone, Mail, Calendar, CheckCircle2, Clock, Filter, Search } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
+import { MobileClientRow, MobileEmptyState, MobileFilterChips } from "../components/mobile/MobilePrimitives";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -22,6 +24,7 @@ type LeadRow = {
   last_channel: string | null;
   last_message_at: string | null;
   last_message_preview: string | null;
+  handoff_to_human: boolean | null;
   created_at: string | null;
 };
 
@@ -61,6 +64,10 @@ function formatRelativeTime(dateStr: string | null): string {
   return date.toLocaleDateString("es", { day: "numeric", month: "short" });
 }
 
+function effectiveLeadChannel(lead: Pick<LeadRow, "channel" | "last_channel">): string {
+  return String(lead.channel ?? lead.last_channel ?? "whatsapp").trim().toLowerCase() || "whatsapp";
+}
+
 // Status badge component
 function StatusBadge({ status }: { status: string | null }) {
   const statusConfig: Record<string, { label: string; bg: string; text: string }> = {
@@ -80,8 +87,9 @@ function StatusBadge({ status }: { status: string | null }) {
 
 export default function Leads() {
   const navigate = useNavigate();
-  const { clinic } = useClinic();
-  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
+  const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
+  const ORG = resolvedOrgId || DEFAULT_ORG;
 
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,7 +100,7 @@ export default function Leads() {
     setLoading(true);
     const { data, error } = await supabase
       .from("leads")
-      .select("id, organization_id, full_name, first_name, last_name, avatar_url, phone, email, status, channel, last_channel, channel_user_id, state, last_message_at, last_message_preview, created_at")
+      .select("id, organization_id, full_name, first_name, last_name, avatar_url, phone, email, status, channel, last_channel, channel_user_id, state, last_message_at, last_message_preview, handoff_to_human, created_at")
       .eq("organization_id", ORG)
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
@@ -100,6 +108,13 @@ export default function Leads() {
 
     if (!error && data) {
       setLeads(data as LeadRow[]);
+      if (import.meta.env.DEV) {
+        console.log("[leads:debug_load]", {
+          org: ORG,
+          searchTerm: searchQuery,
+          leadQueryResultIds: (data as LeadRow[]).map((lead) => lead.id),
+        });
+      }
     }
     setLoading(false);
   }
@@ -118,7 +133,17 @@ export default function Leads() {
       const name = getBestDisplayName(l).toLowerCase();
       const phone = (l.phone || "").toLowerCase();
       const email = (l.email || "").toLowerCase();
-      if (!name.includes(q) && !phone.includes(q) && !email.includes(q)) return false;
+      const firstName = (l.first_name || "").toLowerCase();
+      const channelUserId = (l.channel_user_id || "").toLowerCase();
+      const preview = (l.last_message_preview || "").toLowerCase();
+      if (
+        !name.includes(q) &&
+        !firstName.includes(q) &&
+        !phone.includes(q) &&
+        !email.includes(q) &&
+        !channelUserId.includes(q) &&
+        !preview.includes(q)
+      ) return false;
     }
     return true;
   });
@@ -130,69 +155,35 @@ export default function Leads() {
     contacted: leads.filter((l) => l.status === "contacted").length,
     attended: leads.filter((l) => l.status === "attended").length,
   };
-  const filterButtonBase = "shrink-0 rounded-full px-4 py-1.5 text-sm font-medium border transition-colors";
-  const filterStyles = {
-    todos: {
-      active: "bg-white/10 text-white border-white/20",
-      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-white/10 hover:text-white/70",
-    },
-    nuevos: {
-      active: "bg-blue-500/15 text-blue-300 border-blue-400/30",
-      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-blue-500/10 hover:text-blue-300",
-    },
-    contactados: {
-      active: "bg-amber-500/15 text-amber-300 border-amber-400/30",
-      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-amber-500/10 hover:text-amber-300",
-    },
-    atendidos: {
-      active: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
-      inactive: "bg-white/5 text-white/50 border-white/10 hover:bg-emerald-500/10 hover:text-emerald-300",
-    },
-  };
-
   return (
-    <div className="flex min-h-screen flex-col bg-[#0B1117]">
+    <div className="flex min-h-screen flex-col bg-[#0B1620] lg:bg-[#0B1117]">
       {/* Header */}
-      <div className="safe-area-top sticky top-0 z-20 border-b border-white/10 bg-[#0B1117]/90 backdrop-blur-lg">
+      <div className="safe-area-top sticky top-0 z-20 border-b border-[#25384A] bg-[#0B1620]/95 backdrop-blur-lg lg:border-white/10 lg:bg-[#0B1117]/90">
         <div className="flex items-center gap-3 px-4 py-3">
           <button
             onClick={() => navigate("/overview")}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 transition hover:bg-white/10 lg:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#162838] transition hover:bg-[#192B42] lg:hidden"
           >
-            <ArrowLeft className="h-5 w-5 text-white/80" />
+            <ArrowLeft className="h-5 w-5 text-[#F8FAFC]" />
           </button>
           <div className="flex-1">
-            <h1 className="text-lg font-bold text-white">Leads</h1>
-            <p className="text-xs text-white/50">{stats.total} contactos</p>
+            <h1 className="text-[22px] font-black tracking-[-0.03em] text-[#F8FAFC]">{vertical.customersLabel}</h1>
+            <p className="text-xs text-[#9CAAB8]">{stats.total} {resolvedBusinessType === "barbershop" ? "clientes" : "contactos"}</p>
           </div>
         </div>
 
         {/* Stats bar */}
-        <div className="flex gap-2 px-4 pb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-          <button
-            onClick={() => setFilterStatus("all")}
-            className={`${filterButtonBase} ${filterStatus === "all" ? filterStyles.todos.active : filterStyles.todos.inactive}`}
-          >
-            Todos ({stats.total})
-          </button>
-          <button
-            onClick={() => setFilterStatus("new")}
-            className={`${filterButtonBase} ${filterStatus === "new" ? filterStyles.nuevos.active : filterStyles.nuevos.inactive}`}
-          >
-            Nuevos ({stats.new})
-          </button>
-          <button
-            onClick={() => setFilterStatus("contacted")}
-            className={`${filterButtonBase} ${filterStatus === "contacted" ? filterStyles.contactados.active : filterStyles.contactados.inactive}`}
-          >
-            Contactados ({stats.contacted})
-          </button>
-          <button
-            onClick={() => setFilterStatus("attended")}
-            className={`${filterButtonBase} ${filterStatus === "attended" ? filterStyles.atendidos.active : filterStyles.atendidos.inactive}`}
-          >
-            Atendidos ({stats.attended})
-          </button>
+        <div className="px-4 pb-3">
+          <MobileFilterChips
+            value={filterStatus}
+            onChange={setFilterStatus}
+            items={[
+              { value: "all", label: `Todos (${stats.total})` },
+              { value: "new", label: `Nuevos (${stats.new})` },
+              { value: "contacted", label: `Contactados (${stats.contacted})` },
+              { value: "attended", label: `Atendidos (${stats.attended})` },
+            ]}
+          />
         </div>
 
         {/* Search */}
@@ -203,41 +194,37 @@ export default function Leads() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar por nombre, teléfono o email..."
-              className="h-10 w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20"
+              placeholder={resolvedBusinessType === "barbershop" ? "Buscar cliente o teléfono..." : "Buscar por nombre, teléfono o email..."}
+              className="h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] pl-10 pr-4 text-sm text-[#F8FAFC] outline-none transition placeholder:text-[#9CAAB8]/70 focus:border-[#25D366]/60 focus:ring-4 focus:ring-[#25D366]/15"
             />
           </div>
         </div>
       </div>
 
       {/* Leads list */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="text-sm text-white/50">Cargando leads...</div>
+            <div className="text-sm text-white/50">Cargando {vertical.customersLabel.toLowerCase()}...</div>
           </div>
         ) : filteredLeads.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <MessageCircle className="mb-3 h-12 w-12 text-white/30" />
-            <div className="text-sm font-medium text-white/80">
-              {searchQuery ? "Sin resultados" : "Sin leads"}
-            </div>
-            <div className="mt-1 text-xs text-white/50">
-              {searchQuery ? "Intenta con otra búsqueda" : "Los leads aparecerán aquí"}
-            </div>
-          </div>
+          <MobileEmptyState
+            icon={MessageCircle}
+            title={searchQuery ? "Sin resultados" : `Sin ${vertical.customersLabel.toLowerCase()}`}
+            description={searchQuery ? "Intenta con otra búsqueda" : `${vertical.customersLabel} aparecerán aquí`}
+          />
         ) : (
           <div className="space-y-3">
             {filteredLeads.map((lead) => {
               const displayName = getBestDisplayName(lead);
               const avatarFallback = displayName.slice(0, 1).toUpperCase();
-              const channelLabel = (lead.last_channel || lead.channel || "messenger").toUpperCase();
+              const channelLabel = effectiveLeadChannel(lead).toUpperCase();
+              const handoff = lead.handoff_to_human === true || String(lead.state?.conversation_mode ?? "").toLowerCase() === "human_active";
 
               return (
-                <button
+                <MobileClientRow
                   key={lead.id}
                   onClick={() => navigate(`/inbox/${lead.id}`)}
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 p-4 text-left transition hover:bg-white/10"
                 >
                   <div className="flex gap-3">
                     {/* Avatar */}
@@ -246,10 +233,10 @@ export default function Leads() {
                         <img
                           src={lead.avatar_url}
                           alt={displayName}
-                          className="h-12 w-12 rounded-full border border-white/10 object-cover"
+                          className="h-10 w-10 rounded-full border border-[#25384A] object-cover"
                         />
                       ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-sm font-bold text-white">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#162838] text-xs font-black text-[#25D366]">
                           {avatarFallback}
                         </div>
                       )}
@@ -259,14 +246,14 @@ export default function Leads() {
                     <div className="flex-1 min-w-0">
                       {/* Name + time row */}
                       <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="truncate font-semibold text-white">{displayName}</span>
-                        <span className="shrink-0 text-[11px] text-white/40">
+                        <span className="truncate font-bold text-[#F8FAFC]">{displayName}</span>
+                        <span className="shrink-0 text-[11px] text-[#9CAAB8]">
                           {formatRelativeTime(lead.last_message_at || lead.created_at)}
                         </span>
                       </div>
 
                       {/* Contact info */}
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/50 mb-2">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#9CAAB8] mb-2">
                         {lead.phone && (
                           <span className="flex items-center gap-1">
                             <Phone className="h-3 w-3" />
@@ -282,30 +269,41 @@ export default function Leads() {
                       </div>
 
                       {/* Preview message - NOW VISIBLE IN VERTICAL MODE */}
-                      {lead.last_message_preview && (
-                        <div
-                          className="text-xs text-white/60 leading-relaxed mb-2"
-                          style={{
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
-                            overflow: "hidden",
-                          }}
-                        >
-                          "{lead.last_message_preview}"
-                        </div>
-                      )}
+                      <div
+                        className="text-xs text-[#9CAAB8] leading-relaxed mb-2"
+                        style={{
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {lead.last_message_preview ? `"${lead.last_message_preview}"` : "Sin mensajes todavía"}
+                      </div>
 
                       {/* Tags row */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <StatusBadge status={lead.status} />
-                        <span className="inline-flex rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-white/50">
+                        <span className="inline-flex rounded-full border border-[#25384A] bg-[#162838] px-2 py-0.5 text-[10px] font-medium text-[#9CAAB8]">
                           {channelLabel}
                         </span>
+                        <span className={[
+                          "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                          handoff
+                            ? "border-amber-400/25 bg-amber-500/10 text-amber-300"
+                            : "border-emerald-400/25 bg-emerald-500/10 text-emerald-300",
+                        ].join(" ")}>
+                          {handoff ? "Humano" : "Bot"}
+                        </span>
+                        {false && (
+                          <span className="inline-flex rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-white/35">
+                            {lead.organization_id} / {lead.channel ?? "unknown"} / {lead.id.slice(-6)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
-                </button>
+                </MobileClientRow>
               );
             })}
           </div>

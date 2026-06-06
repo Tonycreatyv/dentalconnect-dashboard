@@ -6,13 +6,13 @@ import {
   Bot, Bell, BarChart3, Headphones, Star
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
 import PageHeader from "../components/PageHeader";
 
 const DEFAULT_ORG = "clinic-demo";
 type BillingStatus = "trialing" | "active" | "past_due" | "canceled";
 
-const FEATURES = [
+const DENTAL_FEATURES = [
   { icon: Bot, text: "Asistente IA 24/7 en Messenger" },
   { icon: MessageCircle, text: "Inbox centralizado — todos los mensajes en un solo lugar" },
   { icon: Calendar, text: "Agenda inteligente con vista día, semana y mes" },
@@ -23,7 +23,7 @@ const FEATURES = [
   { icon: Headphones, text: "Soporte dedicado" },
 ];
 
-const COMPARISON = [
+const DENTAL_COMPARISON = [
   { label: "Responde 24/7", creatyv: true, recep: false, agency: false },
   { label: "Agenda citas automáticamente", creatyv: true, recep: true, agency: false },
   { label: "Recordatorios automáticos", creatyv: true, recep: false, agency: true },
@@ -33,7 +33,7 @@ const COMPARISON = [
   { label: "Nunca se enferma ni falta", creatyv: true, recep: false, agency: false },
 ];
 
-const FAQ = [
+const DENTAL_FAQ = [
   { q: "¿Qué pasa si cancelo?", a: "Sin contratos ni penalidades. Cancelás cuando quieras y tu clínica sigue funcionando hasta el final del período pagado." },
   { q: "¿Qué pasa después de los 12 meses del founders price?", a: "El precio pasa al plan regular. Pero si renovás antes de que se cumpla el año, te mantenemos el precio." },
   { q: "¿Necesito WhatsApp Business?", a: "No. Podés empezar solo con Messenger o usar la app como calendario y CRM sin ningún canal de mensajería." },
@@ -44,7 +44,7 @@ const FAQ = [
 const TOTAL_SLOTS = 10;
 const CLAIMED_SLOTS = 7;
 
-const PLANS = [
+const DENTAL_PLANS = [
   {
     id: "starter", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/3d164ed5-85ac-4a42-a94c-a34ade5c4fc7",
     name: "Especialista",
@@ -76,8 +76,68 @@ const PLANS = [
 
 export default function Billing() {
   const navigate = useNavigate();
-  const { clinic } = useClinic();
-  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
+  const { activeOrgId, activeBusinessType } = useActiveOrg();
+  const ORG = activeOrgId ?? DEFAULT_ORG;
+  const BARBERSHOP_PLANS = [
+    {
+      id: "starter", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/3d164ed5-85ac-4a42-a94c-a34ade5c4fc7",
+      name: "Solo Barber",
+      price: 79,
+      doctorLimit: 1,
+      description: "1 barbero + 1 recepcionista",
+      features: ["1 barbero", "1 recepcionista", "Messenger", "Recordatorios automáticos", "CRM básico"],
+      highlight: false,
+    },
+    {
+      id: "growth", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/151e1ebc-2a05-4dc0-8ad0-c8d289ecaf9e",
+      name: "Barbería Pro",
+      price: 149,
+      doctorLimit: 5,
+      description: "Hasta 5 barberos + 1 recepcionista",
+      features: ["Hasta 5 barberos", "1 recepcionista", "Messenger", "Reminders 72h/24h/2h", "CRM completo", "Reportes"],
+      highlight: true,
+    },
+    {
+      id: "pro", checkoutUrl: "https://creatyv.lemonsqueezy.com/checkout/buy/b370f675-8b53-4bcb-b4ef-0546f4016675",
+      name: "Barbería Full",
+      price: 299,
+      doctorLimit: 15,
+      description: "Hasta 15 barberos, todo incluido",
+      features: ["Hasta 15 barberos", "Recepcionistas ilimitadas", "WhatsApp + Messenger", "Google Calendar sync", "CRM completo", "Soporte VIP 24/7"],
+      highlight: false,
+    },
+  ];
+
+  const PLANS = activeBusinessType === "barbershop" ? BARBERSHOP_PLANS : DENTAL_PLANS;
+  const FEATURES = activeBusinessType === "barbershop"
+    ? [
+        { icon: Bot, text: "Asistente IA 24/7 en Messenger y WhatsApp" },
+        { icon: MessageCircle, text: "Inbox centralizado para clientes" },
+        { icon: Calendar, text: "Agenda para barberos por día y semana" },
+        { icon: Bell, text: "Recordatorios automáticos para no-shows" },
+        { icon: Users, text: "Gestión de clientes y leads" },
+        { icon: TrendingUp, text: "Historial y recurrencia de clientes" },
+        { icon: Zap, text: "Follow-ups automáticos inteligentes" },
+        { icon: Headphones, text: "Soporte dedicado" },
+      ]
+    : DENTAL_FEATURES;
+  const COMPARISON = activeBusinessType === "barbershop"
+    ? [
+        { label: "Responde 24/7", creatyv: true, recep: false, agency: false },
+        { label: "Agenda citas automáticamente", creatyv: true, recep: true, agency: false },
+        { label: "Recordatorios automáticos", creatyv: true, recep: false, agency: true },
+        { label: "Gestión de clientes", creatyv: true, recep: false, agency: false },
+        { label: "WhatsApp + Messenger", creatyv: true, recep: false, agency: true },
+        { label: "CRM completo", creatyv: true, recep: false, agency: false },
+      ]
+    : DENTAL_COMPARISON;
+  const FAQ = activeBusinessType === "barbershop"
+    ? [
+        { q: "¿Qué pasa si cancelo?", a: "Sin contratos ni penalidades. Cancelás cuando quieras y tu espacio sigue activo hasta el final del período pagado." },
+        { q: "¿Necesito WhatsApp Business?", a: "No. Podés empezar con Messenger y activar WhatsApp cuando quieras." },
+        { q: "¿Cuánto tarda la configuración?", a: "Menos de 15 minutos. Configurás barberos, horarios y servicios." },
+      ]
+    : DENTAL_FAQ;
 
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [currentPlan, setCurrentPlan] = useState<string | null>(null);
@@ -120,7 +180,9 @@ export default function Billing() {
     <div className="space-y-6 pb-12">
       <PageHeader
         title="Plan y Facturación"
-        subtitle="Un solo sistema. Todo incluido. Sin sorpresas."
+        subtitle={activeBusinessType === "barbershop"
+          ? "Un solo sistema para citas, clientes y no-shows."
+          : "Un solo sistema. Todo incluido. Sin sorpresas."}
       />
 
       {status === "trialing" && trialDaysLeft !== null && (
@@ -145,7 +207,11 @@ export default function Billing() {
         <div className="h-2 rounded-full bg-white/10 overflow-hidden">
           <div className="h-full rounded-full bg-gradient-to-r from-[#3CBDB9] to-[#34d399] transition-all" style={{ width: `${progressPercent}%` }} />
         </div>
-        <div className="mt-2 text-xs text-white/30">2 clínicas evaluando este plan esta semana · Última registrada hace 2 días</div>
+        <div className="mt-2 text-xs text-white/30">
+          {activeBusinessType === "barbershop"
+            ? "2 barberías evaluando este plan esta semana · Última registrada hace 2 días"
+            : "2 clínicas evaluando este plan esta semana · Última registrada hace 2 días"}
+        </div>
       </div>
 
       {/* Plans grid */}

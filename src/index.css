@@ -35,14 +35,28 @@
   --text-secondary: 255 255 255;
   --text-muted: 255 255 255;
   --accent: 8 148 193;
+
+  --mobile-bg: #0B1620;
+  --mobile-surface: #111F2B;
+  --mobile-elevated: #162838;
+  --mobile-border: #25384A;
+  --mobile-text: #F8FAFC;
+  --mobile-muted: #9CAAB8;
+  --mobile-accent: #25D366;
 }
 
-* { box-sizing: border-box; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  min-width: 0;
+}
 
 html, body, #root {
   background-color: #0B1117;
   color: white;
   min-height: 100vh;
+  overflow-x: hidden;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -52,6 +66,13 @@ body {
   font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #0B1117;
   color: white;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
 }
 
 ::selection { background: rgba(var(--accent), 0.18); }
@@ -89,16 +110,16 @@ body {
     @apply rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur;
   }
   .dc-btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0894C1] via-[#3CBDB9] to-[#59E0B8] px-4 py-2 text-sm font-semibold text-[#031015] transition hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0894C1] via-[#3CBDB9] to-[#59E0B8] px-3 py-2 text-sm font-semibold text-[#031015] transition hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 sm:rounded-2xl sm:px-4;
   }
   .dc-btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-2 text-sm font-semibold text-white/90 transition hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm font-semibold text-white/90 transition hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60 sm:rounded-2xl sm:px-4;
   }
   .dc-input {
-    @apply h-11 w-full rounded-2xl border border-white/10 bg-black/25 px-4 text-sm text-white placeholder:text-white/55 outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30;
+    @apply h-10 w-full rounded-xl border border-white/10 bg-black/25 px-3 text-sm text-white placeholder:text-white/55 outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30 sm:h-11 sm:rounded-2xl sm:px-4;
   }
   .dc-select {
-    @apply h-11 w-full rounded-2xl border border-white/10 bg-black/25 px-3 text-sm text-white outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30;
+    @apply h-10 w-full rounded-xl border border-white/10 bg-black/25 px-3 text-sm text-white outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30 sm:h-11 sm:rounded-2xl;
   }
   .dc-label {
     @apply text-xs font-medium text-white/80;
@@ -108,6 +129,109 @@ body {
   }
   .dc-title {
     @apply text-white/95;
+  }
+  .app-shell {
+    @apply mx-auto w-full max-w-[1440px] px-2.5 py-2.5 sm:px-5 sm:py-5 lg:px-8;
+  }
+  .app-page {
+    @apply min-w-0 space-y-3 overflow-x-hidden pb-[calc(5rem+env(safe-area-inset-bottom,0px))] sm:space-y-6 lg:pb-0;
+  }
+  .ui-card {
+    @apply rounded-[1.35rem] border border-white/10 bg-white/[0.055] shadow-[0_18px_42px_rgba(0,0,0,0.28)] backdrop-blur-xl;
+  }
+  .ui-card-pad {
+    @apply p-3 sm:p-5 lg:p-6;
+  }
+  .ui-button-base {
+    @apply inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold leading-tight transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-11 sm:rounded-2xl sm:px-4 sm:text-sm;
+  }
+  .ui-muted {
+    @apply text-sm leading-relaxed text-white/60;
+  }
+  .ui-title {
+    @apply min-w-0 break-words text-white/95;
+  }
+  .text-safe {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .id-chip {
+    @apply inline-flex max-w-full min-w-0 items-center rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/60;
+  }
+  .id-chip > span {
+    @apply min-w-0 truncate;
+  }
+  .chat-bubble-safe {
+    max-width: min(82%, 680px);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.55;
+  }
+  .mobile-bottom-safe {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+  .mobile-operator-page {
+    @apply min-w-0 space-y-3 overflow-x-hidden px-4 pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))] pt-2 lg:px-0 lg:pb-0 lg:pt-0;
+    color: var(--mobile-text);
+  }
+  .mobile-app-card {
+    @apply min-w-0 rounded-[1.35rem] p-3;
+    border: 1px solid var(--mobile-border);
+    background: var(--mobile-surface);
+  }
+  .mobile-app-card-warm {
+    @apply min-w-0 rounded-[1.35rem] p-4;
+    border: 1px solid var(--mobile-border);
+    background: var(--mobile-elevated);
+  }
+  .mobile-surface {
+    @apply min-w-0 rounded-[1.35rem] p-3;
+    border: 1px solid var(--mobile-border);
+    background: var(--mobile-surface);
+  }
+  .mobile-surface-elevated {
+    @apply min-w-0 rounded-[1.35rem] p-4;
+    border: 1px solid var(--mobile-border);
+    background: var(--mobile-elevated);
+  }
+  .mobile-app-row {
+    @apply flex min-w-0 items-center gap-3 rounded-2xl px-3 py-2.5 text-left;
+    border: 1px solid var(--mobile-border);
+    background: rgba(22, 28, 27, 0.72);
+  }
+  .mobile-action-button {
+    @apply inline-flex min-h-10 min-w-0 items-center justify-center rounded-xl px-3 text-xs font-bold leading-tight transition active:scale-[0.99];
+  }
+  .mobile-chip {
+    @apply inline-flex min-h-9 shrink-0 items-center rounded-full border px-3 text-xs font-bold;
+  }
+  .mobile-status-pill {
+    @apply inline-flex min-h-7 shrink-0 items-center rounded-full border px-2.5 text-[11px] font-bold;
+  }
+  .mobile-section-label {
+    @apply text-sm font-black tracking-tight text-white;
+  }
+  .mobile-muted {
+    @apply text-xs leading-relaxed text-white/50;
+  }
+  .mobile-conversation-row,
+  .mobile-appointment-row,
+  .mobile-client-row,
+  .mobile-settings-row {
+    @apply flex min-w-0 items-center gap-3 rounded-2xl px-3 py-3 text-left transition active:scale-[0.995];
+    border: 1px solid var(--mobile-border);
+    background: var(--mobile-surface);
+  }
+  .mobile-conversation-row:hover,
+  .mobile-appointment-row:hover,
+  .mobile-client-row:hover,
+  .mobile-settings-row:hover {
+    background: var(--mobile-elevated);
+  }
+  .mobile-bottom-sheet {
+    @apply fixed inset-x-0 bottom-0 z-[60] rounded-t-[1.5rem] px-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] pt-3 shadow-[0_-20px_50px_rgba(0,0,0,0.4)] lg:hidden;
+    border: 1px solid var(--mobile-border);
+    background: var(--mobile-elevated);
   }
   .bg-app { background: rgb(var(--app-bg)); }
   .bg-card { background: rgb(var(--card-bg)); }

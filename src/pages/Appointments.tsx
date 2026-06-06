@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { useClinic } from "../context/ClinicContext";
-
-const SELECTED_ORG_STORAGE_KEY = "selected_organization_id";
-const FALLBACK_ORG_ID = "barber-demo";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
+import { AppointmentCard } from "../components/AppointmentCard";
+import { Tabs } from "../components/ui/Tabs";
+import { MobileAppointmentRow, MobileBottomSheet, MobileCard, MobileChip, MobileEmptyState, MobileHeader } from "../components/mobile/MobilePrimitives";
+const FALLBACK_ORG_ID = "clinic-demo";
 
 type AppointmentRow = {
   id: string;
@@ -85,6 +87,22 @@ function timeText(d: Date): string {
   return d.toLocaleTimeString("es-HN", { hour: "numeric", minute: "2-digit" });
 }
 
+function buildTimePreview(open: string, close: string): string[] {
+  const [openHour = 8, openMin = 0] = open.split(":").map((part) => Number(part));
+  const [closeHour = 18, closeMin = 0] = close.split(":").map((part) => Number(part));
+  const start = new Date();
+  start.setHours(openHour, openMin, 0, 0);
+  const end = new Date();
+  end.setHours(closeHour, closeMin, 0, 0);
+  const slots: string[] = [];
+  const cursor = new Date(start);
+  while (cursor < end && slots.length < 6) {
+    slots.push(cursor.toLocaleTimeString("es-HN", { hour: "numeric", minute: "2-digit" }));
+    cursor.setMinutes(cursor.getMinutes() + 60);
+  }
+  return slots;
+}
+
 function serviceText(a: AppointmentRow): string {
   return a.reason || a.title || "Servicio";
 }
@@ -93,61 +111,81 @@ function clientText(a: AppointmentRow): string {
   return a.patient_name || "Cliente";
 }
 
-function barberText(a: AppointmentRow): string {
-  return a.provider_name || "Cualquier barbero";
+function barberText(a: AppointmentRow, providerLabel = "Barbero"): string {
+  return a.provider_name || `Cualquier ${providerLabel.toLowerCase()}`;
 }
 
 export default function Appointments() {
-  const { activeOrgId, clinic } = useClinic();
+  const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<AppointmentRow[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [barberFilter, setBarberFilter] = useState<string>("all");
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-
-  useEffect(() => {
-    function syncSelectedOrg() {
-      try {
-        setSelectedOrgId(localStorage.getItem(SELECTED_ORG_STORAGE_KEY) ?? "");
-      } catch {
-        setSelectedOrgId("");
-      }
-    }
-    syncSelectedOrg();
-    window.addEventListener("storage", syncSelectedOrg);
-    window.addEventListener("dev-org-changed", syncSelectedOrg);
-    return () => {
-      window.removeEventListener("storage", syncSelectedOrg);
-      window.removeEventListener("dev-org-changed", syncSelectedOrg);
-    };
-  }, []);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [hoursSummary, setHoursSummary] = useState("Horario activo");
+  const [mobileAvailableTimes, setMobileAvailableTimes] = useState<string[]>([]);
+  const [newAppointmentOpen, setNewAppointmentOpen] = useState(false);
+  const [blockTimeOpen, setBlockTimeOpen] = useState(false);
+  const [actionNotice, setActionNotice] = useState("");
+  const [draftPatient, setDraftPatient] = useState("");
+  const [draftService, setDraftService] = useState("");
+  const [draftProvider, setDraftProvider] = useState("");
+  const [draftDate, setDraftDate] = useState(dayKey(new Date()));
+  const [draftTime, setDraftTime] = useState("09:00");
+  const [blockProvider, setBlockProvider] = useState("");
+  const [blockDate, setBlockDate] = useState(dayKey(new Date()));
+  const [blockFrom, setBlockFrom] = useState("09:00");
+  const [blockTo, setBlockTo] = useState("10:00");
+  const [blockReason, setBlockReason] = useState("");
 
   const effectiveOrgId = useMemo(() => {
-    return selectedOrgId || activeOrgId || clinic?.organization_id || FALLBACK_ORG_ID;
-  }, [selectedOrgId, activeOrgId, clinic?.organization_id]);
+    return resolvedOrgId || FALLBACK_ORG_ID;
+  }, [resolvedOrgId]);
 
   useEffect(() => {
     let mounted = true;
     async function run() {
       setLoading(true);
       setError(null);
-      const { data, error } = await supabase
+      const [{ data, error }, settingsRes] = await Promise.all([
+      supabase
         .from("appointments")
         .select("id, organization_id, lead_id, patient_name, reason, title, appointment_date, appointment_time, starts_at, ends_at, provider_id, provider_name, status, created_at, updated_at")
         .eq("organization_id", effectiveOrgId)
         .order("starts_at", { ascending: true, nullsFirst: false })
-        .order("appointment_date", { ascending: true, nullsFirst: false });
+        .order("appointment_date", { ascending: true, nullsFirst: false }),
+      supabase
+        .from("organization_settings")
+        .select("hours")
+        .eq("organization_id", effectiveOrgId)
+        .maybeSingle(),
+      ]);
       if (!mounted) return;
       if (error) {
         setRows([]);
         setError(error.message);
       } else {
         setRows((data as AppointmentRow[]) ?? []);
+      }
+      const hours = (settingsRes.data as any)?.hours;
+      const todayDay = new Date().getDay();
+      const keys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      const todayHours = hours?.[keys[todayDay]];
+      if (todayHours?.closed) {
+        setHoursSummary("Hoy cerrado");
+        setMobileAvailableTimes([]);
+      } else if (todayHours?.open && todayHours?.close) {
+        setHoursSummary(`Horario activo: ${todayHours.open}–${todayHours.close}`);
+        setMobileAvailableTimes(buildTimePreview(todayHours.open, todayHours.close));
+      } else {
+        setHoursSummary(resolvedBusinessType === "barbershop" ? "Horario activo: 8:00 AM–6:00 PM" : "Horario activo");
+        setMobileAvailableTimes(resolvedBusinessType === "barbershop" ? buildTimePreview("08:00", "18:00") : []);
       }
       setLoading(false);
     }
@@ -165,9 +203,9 @@ export default function Appointments() {
 
   const barbers = useMemo(() => {
     const set = new Set<string>();
-    for (const a of mapped) set.add(barberText(a));
+    for (const a of mapped) set.add(barberText(a, vertical.providerLabel));
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [mapped]);
+  }, [mapped, vertical.providerLabel]);
 
   const services = useMemo(() => {
     const set = new Set<string>();
@@ -178,7 +216,7 @@ export default function Appointments() {
   const filtered = useMemo(() => {
     return mapped.filter((a) => {
       if (statusFilter !== "all" && statusKey(a.status) !== statusFilter) return false;
-      if (barberFilter !== "all" && barberText(a) !== barberFilter) return false;
+      if (barberFilter !== "all" && barberText(a, vertical.providerLabel) !== barberFilter) return false;
       if (serviceFilter !== "all" && serviceText(a) !== serviceFilter) return false;
       const k = dayKey(a.derivedDate);
       if (dateFrom && k < dateFrom) return false;
@@ -230,94 +268,138 @@ export default function Appointments() {
   }, [upcoming, weekKeys]);
 
   const empty = !loading && !error && filtered.length === 0;
+  const isDental = resolvedBusinessType === "dental";
+  const sheetServices = services.length ? services : [vertical.serviceLabel];
+  const sheetProviders = barbers.length ? barbers : [vertical.providerLabel];
+
+  function openNewAppointmentSheet(prefillTime?: string) {
+    setDraftPatient("");
+    setDraftService(sheetServices[0] ?? vertical.serviceLabel);
+    setDraftProvider(sheetProviders[0] ?? vertical.providerLabel);
+    setDraftDate(dayKey(new Date()));
+    setDraftTime(prefillTime ?? "09:00");
+    setActionNotice("");
+    setNewAppointmentOpen(true);
+  }
+
+  function openBlockTimeSheet() {
+    setBlockProvider(sheetProviders[0] ?? vertical.providerLabel);
+    setBlockDate(dayKey(new Date()));
+    setBlockFrom("09:00");
+    setBlockTo("10:00");
+    setBlockReason("");
+    setActionNotice("");
+    setBlockTimeOpen(true);
+  }
+
+  function submitNewAppointment() {
+    setNewAppointmentOpen(false);
+    setActionNotice("Crear cita listo para conectar");
+    window.setTimeout(() => setActionNotice(""), 3000);
+  }
+
+  function submitBlockTime() {
+    setBlockTimeOpen(false);
+    setActionNotice("Bloqueo listo para conectar");
+    window.setTimeout(() => setActionNotice(""), 3000);
+  }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-800 bg-slate-950/70 px-5 py-5 sm:px-6">
-        <h1 className="text-2xl font-semibold text-slate-100">BarberLine Appointments</h1>
-        <p className="mt-1 text-sm text-slate-400">Citas creadas automáticamente desde WhatsApp</p>
-        <p className="mt-2 text-xs font-medium text-emerald-300">Viewing: {effectiveOrgId === "barber-demo" ? "Barbería Demo" : effectiveOrgId}</p>
+    <div className="app-page">
+      <MobileCard elevated className="lg:hidden">
+        <MobileHeader
+          title={vertical.agendaTitle}
+          subtitle={`${kpi.today} hoy · ${kpi.confirmed} confirmadas`}
+          action={(
+            <button onClick={() => setShowMobileFilters((v) => !v)} className="min-h-10 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-bold text-white/70">
+              Filtros
+            </button>
+          )}
+        />
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+          {[
+            { value: "all", label: "Todas" },
+            { value: "confirmed", label: "Confirmadas" },
+            { value: "pending", label: "Pendientes" },
+            { value: "cancelled", label: "Canceladas" },
+          ].map((item) => (
+            <MobileChip key={item.value} onClick={() => setStatusFilter(item.value as StatusFilter)} active={statusFilter === item.value} tone="accent">
+              {item.label}
+            </MobileChip>
+          ))}
+        </div>
+      </MobileCard>
+
+      <section className="hidden lg:block relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#17120F] p-3 shadow-[0_18px_48px_rgba(0,0,0,0.28)] sm:rounded-[2rem] sm:p-6">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(201,119,56,0.2),transparent_34%),radial-gradient(circle_at_90%_20%,rgba(240,194,120,0.12),transparent_30%)]" />
+        <div className="relative flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="inline-flex rounded-full border border-[#C97738]/25 bg-[#C97738]/10 px-2.5 py-1 text-[11px] font-bold text-[#FFD7AE] sm:px-3 sm:text-xs">
+              {resolvedBusinessType === "barbershop" ? "Agenda compartida BarberLine" : vertical.agendaTitle}
+            </div>
+            <h1 className="mt-3 text-2xl font-black tracking-tight text-white sm:mt-4 sm:text-3xl">{vertical.agendaTitle}</h1>
+            <p className="text-safe mt-1 text-xs text-white/55 sm:mt-2 sm:text-sm">
+              {resolvedBusinessType === "barbershop"
+                ? "Citas de WhatsApp, walk-ins y ocupación por barbero en una vista limpia para tablet."
+                : "Citas creadas automáticamente desde WhatsApp y Messenger."}
+            </p>
+          </div>
+          <Tabs
+            value={statusFilter}
+            onChange={setStatusFilter}
+            items={[
+              { value: "all", label: "Todas" },
+              { value: "confirmed", label: "Confirmadas" },
+              { value: "pending", label: "Pendientes" },
+              { value: "cancelled", label: "Canceladas" },
+            ]}
+          />
+        </div>
       </section>
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-          <div className="text-xs text-slate-400">Citas hoy</div>
-          <div className="mt-1 text-2xl font-semibold text-slate-100">{kpi.today}</div>
-        </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-          <div className="text-xs text-slate-400">Confirmadas</div>
-          <div className="mt-1 text-2xl font-semibold text-emerald-300">{kpi.confirmed}</div>
-        </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-          <div className="text-xs text-slate-400">Pendientes</div>
-          <div className="mt-1 text-2xl font-semibold text-amber-300">{kpi.pending}</div>
-        </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-          <div className="text-xs text-slate-400">Canceladas</div>
-          <div className="mt-1 text-2xl font-semibold text-rose-300">{kpi.cancelled}</div>
-        </div>
+      <section className="hidden grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3 lg:grid">
+        {[
+          { label: "Citas hoy", value: kpi.today, tone: "text-white" },
+          { label: "Confirmadas", value: kpi.confirmed, tone: "text-emerald-200" },
+          { label: "Pendientes", value: kpi.pending, tone: "text-amber-200" },
+          { label: "Canceladas", value: kpi.cancelled, tone: "text-rose-200" },
+        ].map((item) => (
+          <div key={item.label} className="ui-card p-3 sm:p-4">
+            <div className="truncate text-xs text-white/45">{item.label}</div>
+            <div className={`mt-1 text-2xl font-black sm:text-3xl ${item.tone}`}>{item.value}</div>
+          </div>
+        ))}
       </section>
 
-      <section className="rounded-3xl border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <label className="text-xs text-slate-400">
-            Estado
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"
-            >
-              <option value="all">Todos</option>
-              <option value="confirmed">Confirmadas</option>
-              <option value="pending">Pendientes</option>
-              <option value="cancelled">Canceladas</option>
-            </select>
-          </label>
-          <label className="text-xs text-slate-400">
-            Barbero
-            <select
-              value={barberFilter}
-              onChange={(e) => setBarberFilter(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"
-            >
+      <section className={`${showMobileFilters ? "block" : "hidden lg:block"} ui-card ui-card-pad`}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="text-xs font-semibold text-white/55">
+            {vertical.providerLabel}
+            <select value={barberFilter} onChange={(e) => setBarberFilter(e.target.value)} className="dc-select mt-1">
               <option value="all">Todos</option>
               {barbers.map((b) => <option key={b} value={b}>{b}</option>)}
             </select>
           </label>
-          <label className="text-xs text-slate-400">
-            Servicio
-            <select
-              value={serviceFilter}
-              onChange={(e) => setServiceFilter(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"
-            >
+          <label className="text-xs font-semibold text-white/55">
+            {vertical.serviceLabel}
+            <select value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} className="dc-select mt-1">
               <option value="all">Todos</option>
               {services.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
-          <label className="text-xs text-slate-400">
+          <label className="text-xs font-semibold text-white/55">
             Desde
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"
-            />
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="dc-input mt-1" />
           </label>
-          <label className="text-xs text-slate-400">
+          <label className="text-xs font-semibold text-white/55">
             Hasta
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"
-            />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="dc-input mt-1" />
           </label>
         </div>
       </section>
 
       {loading && (
-        <section className="rounded-3xl border border-slate-800 bg-slate-950/60 p-5 text-sm text-slate-300">
+        <section className="ui-card ui-card-pad text-sm text-white/60">
           Cargando citas...
         </section>
       )}
@@ -329,89 +411,133 @@ export default function Appointments() {
       )}
 
       {empty && (
-        <section className="rounded-3xl border border-slate-800 bg-slate-950/60 p-6 text-sm text-slate-300">
+        <section className="lg:hidden space-y-3">
+          <MobileEmptyState
+            title="No hay citas confirmadas para hoy."
+            description={hoursSummary}
+            action={(
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={isDental ? () => openNewAppointmentSheet() : undefined} className="min-h-10 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/12 px-3 text-xs font-black text-[#BDF8D1]">{isDental ? "Nueva cita" : "Crear cita"}</button>
+                <button onClick={isDental ? openBlockTimeSheet : undefined} className="min-h-10 rounded-2xl border border-[#25384A] bg-[#162838] px-3 text-xs font-bold text-[#9CAAB8]">Bloquear horario</button>
+              </div>
+            )}
+          />
+          <div className="space-y-2">
+            {mobileAvailableTimes.map((time) => (
+              <MobileAppointmentRow key={time} onClick={isDental ? () => openNewAppointmentSheet(time) : undefined}>
+                <span className="w-16 shrink-0 text-sm font-black text-[#25D366]">{time}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-[#F8FAFC]">Disponible</span>
+                  <span className="block truncate text-xs text-[#9CAAB8]">{isDental ? "Espacio libre para cita" : "Espacio libre para cita o walk-in"}</span>
+                </span>
+              </MobileAppointmentRow>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {empty && (
+        <section className="hidden ui-card ui-card-pad text-sm text-white/60 lg:block">
           Cuando WhatsApp confirme una cita, aparecerá aquí.
         </section>
       )}
 
       {!loading && !error && !empty && (
         <>
-          <section className="rounded-3xl border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
-            <h2 className="text-lg font-semibold text-slate-100">Citas de hoy</h2>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[620px] text-sm">
-                <thead>
-                  <tr className="border-b border-slate-800 text-left text-slate-400">
-                    <th className="px-2 py-2 font-medium">Hora</th>
-                    <th className="px-2 py-2 font-medium">Cliente</th>
-                    <th className="px-2 py-2 font-medium">Servicio</th>
-                    <th className="px-2 py-2 font-medium">Barbero</th>
-                    <th className="px-2 py-2 font-medium">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {todayAppointments.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-2 py-4 text-slate-500">Sin citas para hoy.</td>
-                    </tr>
-                  )}
-                  {todayAppointments.map((a) => (
-                    <tr key={a.id} className="border-b border-slate-900 text-slate-200">
-                      <td className="px-2 py-3">{timeText(a.derivedDate)}</td>
-                      <td className="px-2 py-3">{clientText(a)}</td>
-                      <td className="px-2 py-3">{serviceText(a)}</td>
-                      <td className="px-2 py-3">{barberText(a)}</td>
-                      <td className="px-2 py-3">
-                        <span className={`inline-flex rounded-full border px-2 py-1 text-xs ${statusChipClass(a.status)}`}>
-                          {statusLabel(a.status)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <section className="space-y-3 lg:hidden">
+            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" style={{ scrollbarWidth: "none" }}>
+              {weekKeys.map((k) => {
+                const date = new Date(`${k}T00:00:00`);
+                const list = weeklyByDay.get(k) ?? [];
+                const isToday = k === new Date().toISOString().slice(0, 10);
+                return (
+                  <button key={k} className={`min-w-[74px] rounded-2xl border px-3 py-2 text-left ${isToday ? "border-[#25D366]/40 bg-[#25D366]/12 text-[#BDF8D1]" : "border-[#25384A] bg-[#111F2B] text-[#9CAAB8]"}`}>
+                    <div className="text-[11px] font-bold capitalize">{date.toLocaleDateString("es-HN", { weekday: "short" })}</div>
+                    <div className="text-lg font-black text-[#F8FAFC]">{date.getDate()}</div>
+                    <div className="text-[10px]">{list.length} citas</div>
+                  </button>
+                );
+              })}
             </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={isDental ? () => openNewAppointmentSheet() : undefined} className="min-h-11 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/12 px-3 text-sm font-black text-[#BDF8D1]">{isDental ? "Nueva cita" : "Crear cita"}</button>
+              <button onClick={() => setShowMobileFilters((v) => !v)} className="min-h-11 rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm font-bold text-[#9CAAB8]">Filtros</button>
+            </div>
+
+            <section className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-black text-[#F8FAFC]">Agenda de hoy</h2>
+                <span className="text-xs text-[#9CAAB8]">{todayAppointments.length} citas</span>
+              </div>
+              {todayAppointments.length === 0 ? (
+                <MobileEmptyState title="Sin citas para hoy" description="Las citas confirmadas aparecerán aquí." />
+              ) : todayAppointments.map((a) => (
+                <MobileAppointmentRow key={a.id}>
+                  <span className="w-14 shrink-0 text-sm font-black text-[#25D366]">{timeText(a.derivedDate)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-[#F8FAFC]">{clientText(a)}</span>
+                    <span className="block truncate text-xs text-[#9CAAB8]">{serviceText(a)} · {barberText(a, vertical.providerLabel)}</span>
+                  </span>
+                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusChipClass(a.status)}`}>{statusLabel(a.status)}</span>
+                </MobileAppointmentRow>
+              ))}
+            </section>
           </section>
 
-          <section className="rounded-3xl border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
-            <h2 className="text-lg font-semibold text-slate-100">Próximas citas (7 días)</h2>
-            <div className="mt-3 space-y-2">
-              {upcoming.length === 0 && <div className="text-sm text-slate-500">No hay próximas citas.</div>}
-              {upcoming.map((a) => (
-                <div key={a.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 px-3 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs text-slate-400">{dateText(a.derivedDate)} · {timeText(a.derivedDate)}</div>
-                      <div className="mt-1 text-sm font-medium text-slate-100">{clientText(a)} · {serviceText(a)}</div>
-                      <div className="mt-1 text-xs text-slate-400">{barberText(a)}</div>
-                    </div>
-                    <span className={`inline-flex rounded-full border px-2 py-1 text-xs ${statusChipClass(a.status)}`}>
-                      {statusLabel(a.status)}
-                    </span>
-                  </div>
-                </div>
+          <section className="hidden ui-card ui-card-pad lg:block">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-lg font-black text-white">Citas de hoy</h2>
+                <p className="text-sm text-white/45">Vista rápida para el equipo en mostrador.</p>
+              </div>
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/55">{todayAppointments.length} total</span>
+            </div>
+            <div className="mt-4 grid gap-2 xl:grid-cols-2">
+              {todayAppointments.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm text-white/45">Sin citas para hoy.</div>
+              ) : todayAppointments.map((a) => (
+                <AppointmentCard
+                  key={a.id}
+                  time={timeText(a.derivedDate)}
+                  client={clientText(a)}
+                  service={serviceText(a)}
+                  provider={barberText(a, vertical.providerLabel)}
+                  status={a.status}
+                  accentClass="bg-[#C97738]"
+                />
               ))}
             </div>
           </section>
 
-          <section className="rounded-3xl border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
-            <h2 className="text-lg font-semibold text-slate-100">Vista semanal</h2>
-            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
+          <section className="hidden ui-card ui-card-pad lg:block">
+            <h2 className="text-lg font-black text-white">Próximas citas (7 días)</h2>
+            <div className="mt-4 grid gap-2 lg:grid-cols-2">
+              {upcoming.length === 0 && <div className="text-sm text-white/45">No hay próximas citas.</div>}
+              {upcoming.map((a) => (
+                <AppointmentCard key={a.id} time={`${dateText(a.derivedDate)} · ${timeText(a.derivedDate)}`} client={clientText(a)} service={serviceText(a)} provider={barberText(a, vertical.providerLabel)} status={a.status} accentClass="bg-[#D89A5E]" />
+              ))}
+            </div>
+          </section>
+
+          <section className="hidden ui-card ui-card-pad lg:block">
+            <h2 className="text-lg font-black text-white">Vista semanal</h2>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
               {weekKeys.map((k) => {
                 const date = new Date(`${k}T00:00:00`);
                 const list = weeklyByDay.get(k) ?? [];
                 return (
-                  <div key={k} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                  <div key={k} className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.045] p-3">
+                    <div className="text-xs font-black uppercase tracking-wide text-white/70">
                       {date.toLocaleDateString("es-HN", { weekday: "short", day: "numeric", month: "short" })}
                     </div>
                     <div className="mt-2 space-y-2">
-                      {list.length === 0 && <div className="text-xs text-slate-500">Sin citas</div>}
+                      {list.length === 0 && <div className="text-xs text-white/35">Sin citas</div>}
                       {list.map((a) => (
-                        <div key={a.id} className="rounded-xl border border-slate-700 bg-slate-950/70 px-2 py-2">
-                          <div className="text-xs text-slate-400">{timeText(a.derivedDate)}</div>
-                          <div className="truncate text-sm text-slate-100">{clientText(a)}</div>
-                          <div className="truncate text-xs text-slate-400">{serviceText(a)}</div>
+                        <div key={a.id} className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-2 py-2">
+                          <div className="text-xs text-[#F0C278]">{timeText(a.derivedDate)}</div>
+                          <div className="truncate text-sm text-white">{clientText(a)}</div>
+                          <div className="truncate text-xs text-white/45">{serviceText(a)}</div>
                           <div className="mt-1">
                             <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${statusChipClass(a.status)}`}>
                               {statusLabel(a.status)}
@@ -427,6 +553,89 @@ export default function Appointments() {
           </section>
         </>
       )}
+      {actionNotice ? (
+        <div className="rounded-2xl border border-[#25D366]/35 bg-[#25D366]/12 px-3 py-2 text-xs font-bold text-[#BDF8D1] lg:hidden">
+          {actionNotice}
+        </div>
+      ) : null}
+      {isDental ? (
+        <>
+          <MobileBottomSheet open={newAppointmentOpen}>
+            <div className="space-y-3">
+              <div>
+                <h2 className="text-lg font-black text-[#F8FAFC]">Nueva cita</h2>
+                <p className="text-xs text-[#9CAAB8]">Formulario local, listo para conectar.</p>
+              </div>
+              <label className="block text-xs font-bold text-[#9CAAB8]">
+                Paciente
+                <input value={draftPatient} onChange={(e) => setDraftPatient(e.target.value)} placeholder="Nombre del paciente" className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+              </label>
+              <label className="block text-xs font-bold text-[#9CAAB8]">
+                Servicio dental
+                <select value={draftService} onChange={(e) => setDraftService(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none">
+                  {sheetServices.map((service) => <option key={service} value={service}>{service}</option>)}
+                </select>
+              </label>
+              <label className="block text-xs font-bold text-[#9CAAB8]">
+                Doctor
+                <select value={draftProvider} onChange={(e) => setDraftProvider(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none">
+                  {sheetProviders.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-xs font-bold text-[#9CAAB8]">
+                  Fecha
+                  <input type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+                </label>
+                <label className="block text-xs font-bold text-[#9CAAB8]">
+                  Hora
+                  <input type="time" value={draftTime} onChange={(e) => setDraftTime(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button onClick={() => setNewAppointmentOpen(false)} className="min-h-11 rounded-2xl border border-[#25384A] bg-[#111F2B] text-sm font-bold text-[#9CAAB8]">Cancelar</button>
+                <button onClick={submitNewAppointment} className="min-h-11 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/12 text-sm font-black text-[#BDF8D1]">Crear cita</button>
+              </div>
+            </div>
+          </MobileBottomSheet>
+          <MobileBottomSheet open={blockTimeOpen}>
+            <div className="space-y-3">
+              <div>
+                <h2 className="text-lg font-black text-[#F8FAFC]">Bloquear horario</h2>
+                <p className="text-xs text-[#9CAAB8]">Formulario local, listo para conectar.</p>
+              </div>
+              <label className="block text-xs font-bold text-[#9CAAB8]">
+                Doctor
+                <select value={blockProvider} onChange={(e) => setBlockProvider(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none">
+                  {sheetProviders.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+                </select>
+              </label>
+              <label className="block text-xs font-bold text-[#9CAAB8]">
+                Fecha
+                <input type="date" value={blockDate} onChange={(e) => setBlockDate(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-xs font-bold text-[#9CAAB8]">
+                  Desde
+                  <input type="time" value={blockFrom} onChange={(e) => setBlockFrom(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+                </label>
+                <label className="block text-xs font-bold text-[#9CAAB8]">
+                  Hasta
+                  <input type="time" value={blockTo} onChange={(e) => setBlockTo(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+                </label>
+              </div>
+              <label className="block text-xs font-bold text-[#9CAAB8]">
+                Motivo opcional
+                <input value={blockReason} onChange={(e) => setBlockReason(e.target.value)} placeholder="Ej: reunión, emergencia, descanso" className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+              </label>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button onClick={() => setBlockTimeOpen(false)} className="min-h-11 rounded-2xl border border-[#25384A] bg-[#111F2B] text-sm font-bold text-[#9CAAB8]">Cancelar</button>
+                <button onClick={submitBlockTime} className="min-h-11 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/12 text-sm font-black text-[#BDF8D1]">Bloquear</button>
+              </div>
+            </div>
+          </MobileBottomSheet>
+        </>
+      ) : null}
     </div>
   );
 }

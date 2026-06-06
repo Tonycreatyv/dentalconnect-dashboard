@@ -22,9 +22,9 @@ export default function PageHeader({ title, subtitle, action, backTo, showBackOn
   }
 
   return (
-    <div className="sticky top-0 z-30 -mx-1 mb-4 rounded-2xl border border-white/10 bg-black/35 px-3 pt-[max(env(safe-area-inset-top),12px)] pb-3 backdrop-blur-xl sm:px-4">
+    <div className="sticky top-0 z-30 -mx-1 mb-4 overflow-hidden rounded-2xl border border-white/10 bg-black/35 px-3 pt-[max(env(safe-area-inset-top),12px)] pb-3 backdrop-blur-xl sm:px-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             {showBackOnMobile ? (
               <button
@@ -36,11 +36,11 @@ export default function PageHeader({ title, subtitle, action, backTo, showBackOn
                 Volver
               </button>
             ) : null}
-            <h1 className="truncate text-xl font-semibold text-white/95">{title}</h1>
+            <h1 className="truncate text-xl font-black text-white/95">{title}</h1>
           </div>
-          {subtitle ? <p className="mt-1 text-sm text-white/72">{subtitle}</p> : null}
+          {subtitle ? <p className="text-safe mt-1 text-sm text-white/65">{subtitle}</p> : null}
         </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
+        {action ? <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">{action}</div> : null}
       </div>
     </div>
   );

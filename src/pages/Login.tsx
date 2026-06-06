@@ -66,7 +66,7 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
               className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-white/10 px-4 text-base text-white placeholder:text-white/40 outline-none transition focus:border-[#3CBDB9]/70 focus:ring-4 focus:ring-[#3CBDB9]/30"
-              placeholder="tu@clinica.com"
+              placeholder={vertical.emailPlaceholder}
             />
 
             <label htmlFor="password" className="mt-4 block text-sm font-medium text-white/85">

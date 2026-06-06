@@ -3,10 +3,23 @@ import { useNavigate } from "react-router-dom";
 import {
   Bell, Calendar, MessageCircle, Clock3,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  SendHorizonal, CheckCircle2, XCircle,
+  SendHorizonal, CheckCircle2, XCircle, Scissors, UserPlus, Users, X,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
+import { BarberStatusCard, type BarberAppointment } from "../components/BarberStatusCard";
+import { AppointmentCard as BusinessAppointmentCard } from "../components/AppointmentCard";
+import {
+  MobileActionButton,
+  MobileCard,
+  MobileEmptyState,
+  MobileHeader,
+  MobileListRow,
+  MobileBottomSheet,
+  MobileStatTile,
+  MobileStatusPill,
+} from "../components/mobile/MobilePrimitives";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -20,7 +33,10 @@ type AppointmentRow = {
   status: string | null;
   start_at: string | null;
   starts_at: string | null;
+  appointment_date?: string | null;
+  appointment_time?: string | null;
   provider_name: string | null;
+  channel?: string | null;
 };
 
 type WeekAppt = {
@@ -30,6 +46,8 @@ type WeekAppt = {
   status: string | null;
   patient_name: string | null;
   provider_name: string | null;
+  appointment_date?: string | null;
+  appointment_time?: string | null;
 };
 
 type AlertRow = {
@@ -42,8 +60,11 @@ type AlertRow = {
 
 function startOfDay(d: Date) { const x = new Date(d); x.setHours(0,0,0,0); return x; }
 function endOfDay(d: Date)   { const x = new Date(d); x.setHours(23,59,59,999); return x; }
-function apptISO(a: { start_at: string | null; starts_at: string | null }) {
-  return a.start_at ?? a.starts_at ?? null;
+function apptISO(a: { start_at: string | null; starts_at: string | null; appointment_date?: string | null; appointment_time?: string | null }) {
+  if (a.start_at) return a.start_at;
+  if (a.starts_at) return a.starts_at;
+  if (a.appointment_date) return `${a.appointment_date}T${a.appointment_time ?? "00:00"}:00`;
+  return null;
 }
 function fmtTime(iso: string | null) {
   if (!iso) return "--:--";
@@ -64,6 +85,19 @@ function getMondayOfWeek(d: Date) {
   return m;
 }
 
+function sameDayFromIso(iso: string | null, day: Date): boolean {
+  if (!iso) return false;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return false;
+  return startOfDay(date).getTime() === startOfDay(day).getTime();
+}
+
+function inRangeFromIso(iso: string | null, start: Date, end: Date): boolean {
+  if (!iso) return false;
+  const time = new Date(iso).getTime();
+  return !Number.isNaN(time) && time >= start.getTime() && time <= end.getTime();
+}
+
 type StatusKey = "confirmed" | "pending" | "cancelled" | "completed";
 const STATUS_STYLES: Record<StatusKey, { chip: string; label: string; dot: string; week: string }> = {
   confirmed: { chip: "bg-emerald-400/10 border-emerald-400/30 text-emerald-300", label: "Confirmada", dot: "bg-emerald-400", week: "text-emerald-300" },
@@ -82,9 +116,15 @@ const DOC_COLORS = [
   "bg-teal-500/20 text-teal-300 border-teal-400/30",
   "bg-pink-500/20 text-pink-300 border-pink-400/30",
 ];
+const BARBER_ACCENTS = ["bg-[#25D366]", "bg-[#22C55E]", "bg-[#14B8A6]", "bg-[#84CC16]", "bg-[#38BDF8]"];
 function docColor(name: string, doctors: string[]) {
   const idx = doctors.indexOf(name);
   return DOC_COLORS[idx % DOC_COLORS.length] ?? DOC_COLORS[0];
+}
+function barberAccent(name: string, index: number) {
+  let hash = index;
+  for (const ch of name.toLowerCase()) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+  return BARBER_ACCENTS[Math.abs(hash) % BARBER_ACCENTS.length];
 }
 
 function StatPill({ value, label, color, onClick }: {
@@ -99,32 +139,39 @@ function StatPill({ value, label, color, onClick }: {
   );
 }
 
-function ApptCard({ appt, doctors, onConfirm, onComplete, onCancel, onMessage }: {
+function ApptCard({ appt, doctors, onConfirm, onComplete, onCancel, onMessage, customerLabel, providerLabel, serviceLabel }: {
   appt: AppointmentRow;
   doctors: string[];
   onConfirm: (id: string) => void;
   onComplete: (id: string) => void;
   onCancel: (id: string) => void;
   onMessage: (leadId: string | null) => void;
+  customerLabel: string;
+  providerLabel: string;
+  serviceLabel: string;
 }) {
   const [open, setOpen] = useState(false);
   const status = getStatus(appt.status);
   const st = STATUS_STYLES[status];
   const time = (appt as any).appointment_time || fmtTime(apptISO(appt));
   const docName = appt.provider_name || "Sin asignar";
+  const channelLabel = String(appt.channel ?? "whatsapp").toLowerCase() === "whatsapp" ? "WhatsApp" : String(appt.channel ?? "Canal");
   const dc = appt.provider_name ? docColor(docName, doctors) : "bg-white/5 text-white/30 border-white/10";
+  const serviceValue = appt.reason || appt.title || "Servicio";
+  const customerValue = appt.patient_name || customerLabel;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#0C111C] overflow-hidden">
       <button onClick={() => setOpen(p => !p)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03] transition">
         <div className={`w-2 h-2 rounded-full shrink-0 ${st.dot}`} />
-        <span className="text-sm font-bold text-white/50 w-12 shrink-0">{time}</span>
+        <span className="text-sm font-bold text-white/60 w-16 shrink-0">{time}</span>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-white truncate">{appt.patient_name || "Paciente"}</div>
-          <div className="text-xs text-white/40 truncate">{appt.reason || appt.title || "Consulta general"}</div>
+          <div className="text-sm font-semibold text-white truncate">{serviceValue}</div>
+          <div className="text-xs text-white/70 truncate">{customerValue}</div>
+          <div className="text-[11px] text-white/45 truncate">{docName} · {channelLabel}</div>
         </div>
-        <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border hidden sm:inline ${dc}`}>
+        <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border hidden md:inline ${dc}`}>
           {docName}
         </span>
         <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase border ${st.chip}`}>
@@ -137,10 +184,10 @@ function ApptCard({ appt, doctors, onConfirm, onComplete, onCancel, onMessage }:
         <div className="px-4 pb-4 border-t border-white/[0.06]">
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-3 mb-4">
             {[
-              { label: "Paciente", value: appt.patient_name || "—" },
-              { label: "Servicio", value: appt.reason || appt.title || "Consulta" },
+              { label: customerLabel, value: appt.patient_name || "—" },
+              { label: serviceLabel, value: appt.reason || appt.title || "Consulta" },
               { label: "Hora",     value: time },
-              { label: "Doctor",   value: docName },
+              { label: providerLabel, value: docName },
               { label: "Estado",   value: st.label },
             ].map(({ label, value }) => (
               <div key={label}>
@@ -250,19 +297,36 @@ function WeekCalendar({ weekAppts, selectedDate, onDayClick, docFilter }: {
 
 export default function Hoy() {
   const navigate = useNavigate();
-  const { clinic } = useClinic();
-  const orgId = clinic?.organization_id ?? DEFAULT_ORG;
+  const { activeOrgId, activeBusinessType, activeOrgName } = useActiveOrg();
+  const vertical = getVerticalConfig(activeBusinessType);
+  const orgId = activeOrgId || DEFAULT_ORG;
+  useEffect(() => {
+    console.log("[hoy:active_org]", {
+      activeOrgId,
+      activeBusinessType,
+      activeOrgName,
+      resolvedOrgId: orgId,
+    });
+  }, [activeOrgId, activeBusinessType, activeOrgName, orgId]);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [weekAppts, setWeekAppts] = useState<WeekAppt[]>([]);
+  const [leadChannelById, setLeadChannelById] = useState<Record<string, string>>({});
   const [newMessages, setNewMessages] = useState(0);
   const [pendingOutbox, setPendingOutbox] = useState(0);
+  const [humanHandoffCount, setHumanHandoffCount] = useState(0);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [tomorrowCount, setTomorrowCount] = useState(0);
   const [weekCount, setWeekCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [docFilter, setDocFilter] = useState("all");
+  const [barberStatusOverrides, setBarberStatusOverrides] = useState<Record<string, "Disponible" | "Ocupado">>({});
+  const [walkInOpen, setWalkInOpen] = useState(false);
+  const [walkInNotice, setWalkInNotice] = useState("");
+  const [walkInClient, setWalkInClient] = useState("");
+  const [walkInService, setWalkInService] = useState("");
+  const [walkInProvider, setWalkInProvider] = useState("");
 
   const isToday = useMemo(
     () => startOfDay(selectedDate).getTime() === startOfDay(new Date()).getTime(),
@@ -271,8 +335,19 @@ export default function Hoy() {
 
   const doctors = useMemo(() => {
     const names = appointments.map(a => a.provider_name).filter((n): n is string => !!n);
-    return [...new Set(names)];
-  }, [appointments]);
+    const unique = [...new Set(names)];
+    if (unique.length > 0) return unique;
+    if (orgId === "barber-demo-wimaeil") return ["William"];
+    return [];
+  }, [appointments, orgId]);
+
+  const walkInServices = useMemo(() => {
+    const names = appointments.map((a) => a.reason || a.title).filter((n): n is string => Boolean(n));
+    const unique = [...new Set(names)];
+    if (unique.length > 0) return unique;
+    if (orgId === "barber-demo-wimaeil") return ["Corte general", "Corte + facial"];
+    return ["Corte", "Barba"];
+  }, [appointments, orgId]);
 
   const filteredAppts = useMemo(() => {
     if (docFilter === "all") return appointments;
@@ -282,30 +357,131 @@ export default function Hoy() {
 
   const pendingCount   = appointments.filter(a => getStatus(a.status) === "pending").length;
   const confirmedCount = appointments.filter(a => getStatus(a.status) === "confirmed").length;
+  const nextAppointment = useMemo(() => {
+    return appointments
+      .filter((appt) => getStatus(appt.status) !== "cancelled")
+      .map((appt) => ({ appt, iso: apptISO(appt) }))
+      .filter((item): item is { appt: AppointmentRow; iso: string } => Boolean(item.iso))
+      .filter((item) => new Date(item.iso).getTime() >= Date.now())
+      .sort((a, b) => new Date(a.iso).getTime() - new Date(b.iso).getTime())[0]?.appt ?? null;
+  }, [appointments]);
+  const visibleBusinessName =
+    activeOrgName ||
+    (orgId === "barber-demo-wimaeil"
+      ? "Barbería WIMAEIL"
+      : orgId === "barber-demo"
+        ? "Barbería Premium 504"
+        : activeBusinessType === "barbershop"
+          ? "Barbería"
+          : "DentalConnect");
+  const now = new Date();
+
+  const barberSections = useMemo(() => {
+    const providerNames = doctors.length ? doctors : [activeBusinessType === "barbershop" ? "Barbero disponible" : vertical.providerLabel];
+    return providerNames.map((name, index) => {
+      const list = appointments
+        .filter((appt) => (appt.provider_name || "Sin asignar") === name || (!appt.provider_name && name === "Barbero disponible"))
+        .filter((appt) => getStatus(appt.status) !== "cancelled")
+        .sort((a, b) => {
+          const ai = apptISO(a);
+          const bi = apptISO(b);
+          return (ai ? new Date(ai).getTime() : 0) - (bi ? new Date(bi).getTime() : 0);
+        });
+      const mapped: BarberAppointment[] = list.map((appt) => ({
+        id: appt.id,
+        time: (appt as any).appointment_time || fmtTime(apptISO(appt)),
+        client: appt.patient_name || vertical.customerLabel,
+        service: appt.reason || appt.title || vertical.serviceLabel,
+        provider: appt.provider_name || name,
+        status: appt.status,
+        leadId: appt.lead_id,
+      }));
+      const next = mapped.find((appt) => {
+        const raw = list.find((item) => item.id === appt.id);
+        const iso = raw ? apptISO(raw) : null;
+        return iso ? new Date(iso).getTime() >= now.getTime() : true;
+      }) ?? mapped[0] ?? null;
+      const hasCurrentCut = list.some((appt) => {
+        const iso = apptISO(appt);
+        if (!iso) return false;
+        const start = new Date(iso).getTime();
+        const end = start + 45 * 60 * 1000;
+        return start <= now.getTime() && end >= now.getTime() && getStatus(appt.status) === "confirmed";
+      });
+      const override = barberStatusOverrides[name];
+      const status: "Disponible" | "Ocupado" | "En corte" = override === "Ocupado" ? "Ocupado" : hasCurrentCut ? "En corte" : "Disponible";
+      return {
+        name,
+        status,
+        nextAppointment: next,
+        appointments: mapped,
+        colorClass: barberAccent(name, index),
+      };
+    });
+  }, [appointments, doctors, activeBusinessType, vertical, barberStatusOverrides]);
 
   async function load() {
     setLoading(true);
-    const todayStart = startOfDay(selectedDate).toISOString();
-    const todayEnd   = endOfDay(selectedDate).toISOString();
+    const todayStartDate = startOfDay(selectedDate);
+    const todayEndDate   = endOfDay(selectedDate);
+    const todayStart = todayStartDate.toISOString();
+    const todayEnd   = todayEndDate.toISOString();
+    const selectedDateKey = todayStart.slice(0, 10);
     const tomorrow   = new Date(selectedDate.getTime() + 86_400_000);
     const monday     = getMondayOfWeek(selectedDate);
     const sunday     = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23,59,59,999);
+    const weekStart = monday.toISOString();
+    const weekEnd = sunday.toISOString();
+    const weekStartKey = weekStart.slice(0, 10);
+    const weekEndKey = weekEnd.slice(0, 10);
     const oneDayAgo  = new Date(Date.now() - 86_400_000).toISOString();
+    const apptSelect = "id, organization_id, lead_id, patient_name, title, reason, status, start_at, starts_at, appointment_date, appointment_time, provider_name";
 
-    const [apptsRes, weekRes, msgsRes, outboxRes, alertsRes, tmrwRes, weekCountRes] = await Promise.all([
+    const [
+      todayStartAtRes,
+      todayStartsAtRes,
+      todayDateRes,
+      weekStartAtRes,
+      weekStartsAtRes,
+      weekDateRes,
+      msgsRes,
+      outboxRes,
+      alertsRes,
+      handoffRes,
+    ] = await Promise.all([
       supabase.from("appointments")
-        .select("id, organization_id, lead_id, patient_name, title, reason, status, start_at, starts_at, provider_name, appointment_time")
+        .select(apptSelect)
         .eq("organization_id", orgId)
         .gte("start_at", todayStart).lte("start_at", todayEnd)
         .order("start_at", { ascending: true }),
       supabase.from("appointments")
-        .select("id, start_at, starts_at, status, patient_name, provider_name, appointment_time")
+        .select(apptSelect)
         .eq("organization_id", orgId)
-        .gte("start_at", monday.toISOString()).lte("start_at", sunday.toISOString())
+        .gte("starts_at", todayStart).lte("starts_at", todayEnd)
+        .order("starts_at", { ascending: true }),
+      supabase.from("appointments")
+        .select(apptSelect)
+        .eq("organization_id", orgId)
+        .eq("appointment_date", selectedDateKey)
+        .order("appointment_time", { ascending: true }),
+      supabase.from("appointments")
+        .select(apptSelect)
+        .eq("organization_id", orgId)
+        .gte("start_at", weekStart).lte("start_at", weekEnd)
+        .neq("status", "cancelled"),
+      supabase.from("appointments")
+        .select(apptSelect)
+        .eq("organization_id", orgId)
+        .gte("starts_at", weekStart).lte("starts_at", weekEnd)
+        .neq("status", "cancelled"),
+      supabase.from("appointments")
+        .select(apptSelect)
+        .eq("organization_id", orgId)
+        .gte("appointment_date", weekStartKey).lte("appointment_date", weekEndKey)
         .neq("status", "cancelled"),
       supabase.from("messages")
         .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId).eq("role", "user").gte("created_at", todayStart),
+        .eq("organization_id", orgId).eq("role", "user").eq("channel", "whatsapp").gte("created_at", todayStart),
       supabase.from("reply_outbox")
         .select("id", { count: "exact", head: true })
         .eq("organization_id", orgId).in("status", ["queued","pending","processing"])
@@ -314,25 +490,62 @@ export default function Hoy() {
         .select("id, title, body, type, status")
         .eq("organization_id", orgId).eq("status", "open").neq("type", "daily_digest")
         .order("created_at", { ascending: false }).limit(3),
-      supabase.from("appointments")
+      supabase.from("leads")
         .select("id", { count: "exact", head: true })
         .eq("organization_id", orgId)
-        .gte("start_at", startOfDay(tomorrow).toISOString())
-        .lte("start_at", endOfDay(tomorrow).toISOString()),
-      supabase.from("appointments")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId)
-        .gte("start_at", monday.toISOString()).lte("start_at", sunday.toISOString())
-        .neq("status", "cancelled"),
+        .eq("handoff_to_human", true),
     ]);
+    const todayRows = [
+      ...((todayStartAtRes.data ?? []) as AppointmentRow[]),
+      ...((todayStartsAtRes.data ?? []) as AppointmentRow[]),
+      ...((todayDateRes.data ?? []) as AppointmentRow[]),
+    ];
+    const todayAppointments = Array.from(new Map(todayRows.map((row) => [row.id, row])).values())
+      .filter((row) => sameDayFromIso(apptISO(row), selectedDate))
+      .sort((a, b) => new Date(apptISO(a) ?? 0).getTime() - new Date(apptISO(b) ?? 0).getTime());
+    const weekRows = [
+      ...((weekStartAtRes.data ?? []) as AppointmentRow[]),
+      ...((weekStartsAtRes.data ?? []) as AppointmentRow[]),
+      ...((weekDateRes.data ?? []) as AppointmentRow[]),
+    ];
+    const weekAppointments = Array.from(new Map(weekRows.map((row) => [row.id, row])).values())
+      .filter((row) => inRangeFromIso(apptISO(row), monday, sunday))
+      .sort((a, b) => new Date(apptISO(a) ?? 0).getTime() - new Date(apptISO(b) ?? 0).getTime());
+    const tomorrowAppointments = weekAppointments.filter((row) => sameDayFromIso(apptISO(row), tomorrow));
 
-    if (!apptsRes.error) setAppointments(apptsRes.data as AppointmentRow[] ?? []);
-    if (!weekRes.error)  setWeekAppts(weekRes.data as WeekAppt[] ?? []);
+    console.log("[hoy:load]", {
+      org: orgId,
+      apptsError: todayStartAtRes.error?.message ?? todayStartsAtRes.error?.message ?? todayDateRes.error?.message ?? null,
+      apptsCount: todayAppointments.length,
+      msgsTodayCount: msgsRes.count ?? 0,
+      pendingOutbox: outboxRes.count ?? 0,
+    });
+
+    if (!todayStartAtRes.error && !todayStartsAtRes.error && !todayDateRes.error) setAppointments(todayAppointments);
+    if (!todayStartAtRes.error && !todayStartsAtRes.error && !todayDateRes.error) {
+      const leadIds = todayAppointments.map((a) => a.lead_id).filter(Boolean) as string[];
+      if (leadIds.length > 0) {
+        const { data: leadsData } = await supabase
+          .from("leads")
+          .select("id, channel")
+          .eq("organization_id", orgId)
+          .in("id", leadIds);
+        const map: Record<string, string> = {};
+        for (const row of (leadsData ?? []) as Array<{ id: string; channel: string | null }>) {
+          if (row.id) map[row.id] = row.channel ?? "whatsapp";
+        }
+        setLeadChannelById(map);
+      } else {
+        setLeadChannelById({});
+      }
+    }
+    if (!weekStartAtRes.error && !weekStartsAtRes.error && !weekDateRes.error) setWeekAppts(weekAppointments as WeekAppt[]);
     setNewMessages(msgsRes.count ?? 0);
     setPendingOutbox(outboxRes.count ?? 0);
     if (!alertsRes.error) setAlerts(alertsRes.data as AlertRow[] ?? []);
-    setTomorrowCount(tmrwRes.count ?? 0);
-    setWeekCount(weekCountRes.count ?? 0);
+    setTomorrowCount(tomorrowAppointments.length);
+    setWeekCount(weekAppointments.length);
+    setHumanHandoffCount(handoffRes.count ?? 0);
     setLoading(false);
   }
 
@@ -352,151 +565,312 @@ export default function Hoy() {
     await load();
   }
 
+  function openWalkInSheet() {
+    setWalkInClient("");
+    setWalkInService(walkInServices[0] ?? "");
+    setWalkInProvider(doctors[0] ?? "");
+    setWalkInOpen(true);
+    setWalkInNotice("");
+  }
+
+  function submitWalkIn() {
+    setWalkInOpen(false);
+    setWalkInNotice("Walk-in listo para conectar");
+    window.setTimeout(() => setWalkInNotice(""), 3000);
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="app-page">
+      {activeBusinessType === "barbershop" ? (
+        <section className="space-y-3 lg:hidden">
+          <MobileCard elevated>
+            <MobileHeader
+              title={visibleBusinessName}
+              subtitle={`${fmtWeekday(new Date())}, ${fmtDate(new Date())}`}
+              action={(
+                <MobileStatusPill tone="success">
+                Bot activo
+                </MobileStatusPill>
+              )}
+            />
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">{clinic?.name ?? "Clínica"}</h1>
-          <p className="text-sm text-white/50 capitalize">Hoy · {fmtWeekday(new Date())}</p>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <MobileStatTile label="mensajes" value={newMessages} onClick={() => navigate("/inbox")} />
+              <MobileStatTile label="en humano" value={humanHandoffCount} tone="warning" onClick={() => navigate("/inbox")} />
+              <MobileStatTile label="próxima" value={nextAppointment ? fmtTime(apptISO(nextAppointment)) : "Libre"} onClick={() => navigate("/agenda")} />
+            </div>
+
+            <div className="mt-4 grid grid-cols-4 gap-2">
+              <MobileActionButton onClick={() => navigate("/inbox")}>Inbox</MobileActionButton>
+              <MobileActionButton onClick={() => navigate("/agenda")} tone="accent" className="font-black">Crear cita</MobileActionButton>
+              <MobileActionButton onClick={openWalkInSheet}>Walk-in</MobileActionButton>
+              <MobileActionButton onClick={() => navigate("/agenda?block=1")}>Bloquear</MobileActionButton>
+            </div>
+          </MobileCard>
+
+          <MobileCard>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="mobile-section-label">Agenda de hoy</h2>
+                <p className="mobile-muted">{appointments.length} citas · {confirmedCount} confirmadas</p>
+              </div>
+              <MobileActionButton onClick={() => navigate("/agenda")} tone="muted">Ver</MobileActionButton>
+            </div>
+            {loading ? (
+              <div className="py-8 text-center text-xs text-white/45">Cargando...</div>
+            ) : filteredAppts.length === 0 ? (
+              <MobileEmptyState
+                icon={Calendar}
+                title="No hay citas para este día."
+                action={<button onClick={() => navigate("/agenda")} className="text-xs font-bold text-[#25D366]">Crear cita</button>}
+              />
+            ) : (
+              <div className="space-y-2">
+                {filteredAppts.slice(0, 5).map((appt) => (
+                  <MobileListRow key={appt.id} onClick={() => appt.lead_id ? navigate(`/inbox/${appt.lead_id}`) : navigate("/agenda")}>
+                    <span className="w-14 shrink-0 text-sm font-black text-[#25D366]">{(appt as any).appointment_time || fmtTime(apptISO(appt))}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-white">{appt.patient_name || "Cliente"}</span>
+                      <span className="block truncate text-xs text-white/45">{appt.reason || appt.title || "Cita"}{appt.provider_name ? ` · ${appt.provider_name}` : ""}</span>
+                    </span>
+                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[getStatus(appt.status)].chip}`}>{STATUS_STYLES[getStatus(appt.status)].label}</span>
+                  </MobileListRow>
+                ))}
+              </div>
+            )}
+          </MobileCard>
+          {walkInNotice ? (
+            <div className="rounded-2xl border border-[#25D366]/35 bg-[#25D366]/12 px-3 py-2 text-xs font-bold text-[#BDF8D1]">
+              {walkInNotice}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      <MobileBottomSheet open={walkInOpen}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-black text-[#F8FAFC]">Agregar walk-in</h2>
+            <p className="text-xs text-[#9CAAB8]">UI local, listo para conectar.</p>
+          </div>
+          <button onClick={() => setWalkInOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111F2B] text-[#9CAAB8]">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <button onClick={() => navigate("/settings?tab=integraciones")}
-          className="relative flex items-center justify-center w-11 h-11 rounded-2xl border border-white/15 bg-white/5 text-white/80 hover:bg-white/10">
-          <Bell className="h-5 w-5" />
-          {alerts.length > 0 && (
-            <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-rose-500 text-[10px] font-bold text-white px-1">
-              {alerts.length}
-            </span>
-          )}
-        </button>
-      </div>
+        <div className="space-y-3">
+          <label className="block text-xs font-bold text-[#9CAAB8]">
+            Cliente
+            <input value={walkInClient} onChange={(e) => setWalkInClient(e.target.value)} placeholder="Opcional" className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none" />
+          </label>
+          <label className="block text-xs font-bold text-[#9CAAB8]">
+            Servicio
+            <select value={walkInService} onChange={(e) => setWalkInService(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none">
+              {walkInServices.map((service) => <option key={service} value={service}>{service}</option>)}
+            </select>
+          </label>
+          <label className="block text-xs font-bold text-[#9CAAB8]">
+            Barbero
+            <select value={walkInProvider} onChange={(e) => setWalkInProvider(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-sm text-[#F8FAFC] outline-none">
+              {(doctors.length ? doctors : ["Barbero disponible"]).map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+            </select>
+          </label>
+          <div className="rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 py-2 text-sm text-[#F8FAFC]">
+            <div className="text-xs font-bold text-[#9CAAB8]">Hora</div>
+            <div className="mt-1 font-black">{fmtTime(new Date().toISOString())}</div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button onClick={() => setWalkInOpen(false)} className="min-h-11 rounded-2xl border border-[#25384A] bg-[#111F2B] text-sm font-bold text-[#9CAAB8]">Cancelar</button>
+            <button onClick={submitWalkIn} className="min-h-11 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/12 text-sm font-black text-[#BDF8D1]">Agregar walk-in</button>
+          </div>
+        </div>
+      </MobileBottomSheet>
 
-      {pendingCount > 0 && (
+      <section className={`${activeBusinessType === "barbershop" ? "hidden lg:block" : ""} relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#16110D] p-3 shadow-[0_18px_48px_rgba(0,0,0,0.28)] sm:rounded-[2rem] sm:p-6`}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_0%,rgba(201,119,56,0.22),transparent_32%),radial-gradient(circle_at_88%_20%,rgba(240,194,120,0.14),transparent_30%)]" />
+        <div className="relative flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#C97738]/25 bg-[#C97738]/10 px-2.5 py-1 text-[11px] font-bold text-[#FFD7AE] sm:px-3 sm:text-xs">
+              {activeBusinessType === "barbershop" ? <Scissors className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}
+              {activeBusinessType === "barbershop" ? "BarberLine OS" : "Recepción dental"}
+            </div>
+            <h1 className="text-safe mt-3 text-2xl font-black tracking-tight text-white sm:mt-4 sm:text-4xl">
+              {visibleBusinessName}
+            </h1>
+            <p className="mt-1 text-xs text-white/60 sm:mt-2 sm:text-sm">
+              {fmtWeekday(new Date())}, {fmtDate(new Date())} · {appointments.length} citas · {newMessages} mensajes nuevos
+            </p>
+          </div>
+          <div className={`${activeBusinessType === "barbershop" ? "grid-cols-3" : "grid-cols-4"} grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:justify-end`}>
+            <button onClick={() => navigate("/inbox")} className="ui-button-base border border-white/10 bg-white/[0.08] text-white/80 hover:bg-white/[0.12]">
+              <MessageCircle className="h-4 w-4" />
+              Inbox
+            </button>
+            <button onClick={() => navigate("/agenda")} className="ui-button-base bg-[#C97738] text-[#160C06] hover:brightness-110">
+              {activeBusinessType === "barbershop" ? <UserPlus className="h-4 w-4" /> : <Calendar className="h-4 w-4" />}
+              {activeBusinessType === "barbershop" ? "Walk-in" : "Nueva cita"}
+            </button>
+            {activeBusinessType !== "barbershop" ? (
+              <button onClick={() => navigate("/agenda")} className="ui-button-base border border-white/10 bg-white/[0.08] text-white/80 hover:bg-white/[0.12]">
+                <Calendar className="h-4 w-4" />
+                Agenda
+              </button>
+            ) : null}
+            <button onClick={() => navigate(activeBusinessType === "barbershop" ? "/settings?tab=integraciones" : "/leads")}
+              className="relative ui-button-base border border-white/10 bg-white/[0.08] text-white/80 hover:bg-white/[0.12]">
+              {activeBusinessType === "barbershop" ? <Bell className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+              {activeBusinessType === "barbershop" ? "Alertas" : "Pacientes"}
+              {alerts.length > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+                  {alerts.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {pendingCount > 0 ? (
         <button onClick={() => navigate("/agenda")}
-          className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition text-left">
-          <span className="relative flex h-2 w-2 shrink-0">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#59E0B8] opacity-60" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#59E0B8]" />
+          className="flex w-full min-w-0 items-center gap-3 rounded-2xl border border-[#C97738]/22 bg-[#C97738]/10 px-4 py-3 text-left transition hover:bg-[#C97738]/14">
+          <span className="relative flex h-2.5 w-2.5 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#F0C278] opacity-60" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#F0C278]" />
           </span>
-          <span className="text-sm text-white/70">
-            {pendingCount} {pendingCount === 1 ? "cita pendiente" : "citas pendientes"} de confirmación hoy
+          <span className="min-w-0 flex-1 text-sm text-[#FFE3BD]">
+            {pendingCount} {pendingCount === 1 ? "cita pendiente" : "citas pendientes"} necesitan confirmación hoy.
           </span>
-          <span className="ml-auto text-xs text-[#59E0B8]">Ver →</span>
+          <span className="shrink-0 text-xs font-bold text-[#F0C278]">Ver</span>
         </button>
-      )}
+      ) : null}
 
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-        <StatPill value={newMessages} label="mensajes"
-          color="bg-blue-500/10 border border-blue-400/20 text-blue-400"
-          onClick={() => navigate("/inbox")} />
-        <StatPill value={pendingOutbox} label="pendientes"
-          color="bg-amber-500/10 border border-amber-400/20 text-amber-400"
-          onClick={() => navigate("/inbox")} />
-        <StatPill value={appointments.length} label="citas hoy"
-          color="bg-white/5 border border-white/10 text-white" />
-        <StatPill value={weekCount} label="esta semana"
-          color="bg-emerald-500/10 border border-emerald-400/20 text-emerald-400"
-          onClick={() => navigate("/agenda")} />
+      <div className={`${activeBusinessType === "barbershop" ? "hidden lg:grid" : "grid"} grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4`}>
+        <StatPill value={appointments.length} label="citas hoy" color="bg-white/[0.07] border border-white/10 text-white" />
+        <StatPill value={confirmedCount} label="confirmadas" color="bg-emerald-400/10 border border-emerald-300/20 text-emerald-200" />
+        <StatPill value={newMessages} label="mensajes" color="bg-[#C97738]/12 border border-[#C97738]/24 text-[#FFD7AE]" onClick={() => navigate("/inbox")} />
+        <StatPill value={weekCount} label="esta semana" color="bg-white/[0.07] border border-white/10 text-white/80" onClick={() => navigate("/agenda")} />
       </div>
 
-      <WeekCalendar
-        weekAppts={weekAppts}
-        selectedDate={selectedDate}
-        onDayClick={setSelectedDate}
-        docFilter={docFilter}
-      />
+      <div className={activeBusinessType === "barbershop" ? "hidden lg:block" : ""}>
+        <WeekCalendar weekAppts={weekAppts} selectedDate={selectedDate} onDayClick={setSelectedDate} docFilter={docFilter} />
+      </div>
 
-      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-2">
-        <button onClick={() => setSelectedDate(new Date(selectedDate.getTime() - 86_400_000))}
-          className="p-2 rounded-xl hover:bg-white/10 text-white/70">
+      <div className={`${activeBusinessType === "barbershop" ? "hidden lg:flex" : "flex"} min-w-0 items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-2`}>
+        <button onClick={() => setSelectedDate(new Date(selectedDate.getTime() - 86_400_000))} className="rounded-xl p-3 text-white/70 hover:bg-white/10">
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <div className="flex-1 text-center">
-          <button onClick={() => setSelectedDate(new Date())}
-            className="text-sm font-semibold text-white hover:text-[#3CBDB9]">
+        <div className="min-w-0 flex-1 text-center">
+          <button onClick={() => setSelectedDate(new Date())} className="truncate text-sm font-black text-white hover:text-[#F0C278]">
             {fmtDate(selectedDate)}
           </button>
-          {!isToday && (
-            <button onClick={() => setSelectedDate(new Date())}
-              className="ml-2 text-xs text-[#3CBDB9] hover:underline">
-              Ir a hoy
-            </button>
-          )}
+          {!isToday ? <button onClick={() => setSelectedDate(new Date())} className="ml-2 text-xs font-bold text-[#F0C278] hover:underline">Ir a hoy</button> : null}
         </div>
-        <button onClick={() => setSelectedDate(new Date(selectedDate.getTime() + 86_400_000))}
-          className="p-2 rounded-xl hover:bg-white/10 text-white/70">
+        <button onClick={() => setSelectedDate(new Date(selectedDate.getTime() + 86_400_000))} className="rounded-xl p-3 text-white/70 hover:bg-white/10">
           <ChevronRight className="h-5 w-5" />
         </button>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-        {[
-          { key: "all", label: "Todos" },
-          ...doctors.map(d => ({ key: d, label: d })),
-          { key: "unassigned", label: "Sin asignar" },
-        ].map(({ key, label }) => (
+      <div className={`${activeBusinessType === "barbershop" ? "hidden lg:flex" : "flex"} flex-wrap gap-2`}>
+        {[{ key: "all", label: `Todos los ${vertical.providersLabel.toLowerCase()}` }, ...doctors.map(d => ({ key: d, label: d })), { key: "unassigned", label: "Sin asignar" }].map(({ key, label }) => (
           <button key={key} onClick={() => setDocFilter(key)}
-            className={`shrink-0 text-xs px-3 py-1.5 rounded-full border transition ${
+            className={`min-h-10 max-w-full rounded-full border px-3 py-1.5 text-xs font-bold transition ${
               docFilter === key
-                ? "bg-[#3CBDB9]/10 border-[#3CBDB9]/40 text-[#3CBDB9]"
-                : "border-white/10 text-white/40 hover:text-white/70 hover:border-white/20"
+                ? "border-[#C97738]/45 bg-[#C97738]/14 text-[#FFD7AE]"
+                : "border-white/10 text-white/45 hover:border-white/20 hover:text-white/75"
             }`}>
-            {label}
+            <span className="block truncate">{label}</span>
           </button>
         ))}
       </div>
 
-      <div className="space-y-1">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wide">
-            {isToday ? "Citas de hoy" : `Citas del ${fmtDate(selectedDate)}`}
-          </h2>
-          <span className="text-xs text-white/30">
-            {confirmedCount} confirmadas · {pendingCount} pendientes
-          </span>
+      {activeBusinessType === "barbershop" ? (
+        <section className="hidden space-y-3 lg:block">
+          <div className="flex min-w-0 items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-base font-black text-white sm:text-lg">Barberos en turno</h2>
+              <p className="text-xs text-white/45 sm:text-sm">Vista compartida para citas, walk-ins y ocupación.</p>
+            </div>
+            <span className="hidden shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/55 sm:inline-flex">
+              <Users className="h-3.5 w-3.5" />
+              {barberSections.length} activos
+            </span>
+          </div>
+          {loading ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {[1, 2].map((i) => <div key={i} className="h-56 animate-pulse rounded-[1.35rem] border border-white/10 bg-white/5" />)}
+            </div>
+          ) : (
+            <div className="grid gap-3 xl:grid-cols-2">
+              {barberSections.map((barber) => (
+                <BarberStatusCard
+                  key={barber.name}
+                  name={barber.name}
+                  colorClass={barber.colorClass}
+                  status={barber.status}
+                  nextAppointment={barber.nextAppointment}
+                  appointments={barber.appointments}
+                  onBusy={() => setBarberStatusOverrides((prev) => ({ ...prev, [barber.name]: "Ocupado" }))}
+                  onFree={() => setBarberStatusOverrides((prev) => ({ ...prev, [barber.name]: "Disponible" }))}
+                  onWalkIn={() => navigate("/agenda?view=day&date=today")}
+                  onMessage={(leadId) => navigate(leadId ? `/inbox/${leadId}` : "/inbox")}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      <section className={`${activeBusinessType === "barbershop" ? "hidden lg:block" : ""} ui-card ui-card-pad`}>
+        <div className="mb-4 flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-black text-white">
+              {isToday ? "Agenda de hoy" : `Agenda del ${fmtDate(selectedDate)}`}
+            </h2>
+            <p className="text-sm text-white/45">{confirmedCount} confirmadas · {pendingCount} pendientes</p>
+          </div>
+          <button type="button" onClick={() => navigate("/agenda")} className="ui-button-base min-h-10 border border-white/10 bg-white/[0.06] px-3 text-xs text-white/75 hover:bg-white/10">
+            Ver agenda
+          </button>
         </div>
 
         {loading ? (
           <div className="py-10 text-center text-sm text-white/40">Cargando...</div>
         ) : filteredAppts.length === 0 ? (
-          <div className="py-10 text-center">
-            <Calendar className="h-10 w-10 text-white/15 mx-auto mb-3" />
-            <p className="text-sm text-white/40">
-              {docFilter !== "all" ? "No hay citas para este filtro" : "No hay citas para este día"}
-            </p>
-            <button onClick={() => navigate("/agenda")}
-              className="mt-3 text-sm text-[#3CBDB9] font-medium hover:underline">
-              Crear nueva cita
-            </button>
+          <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] py-10 text-center">
+            <Calendar className="mx-auto mb-3 h-10 w-10 text-white/15" />
+            <p className="text-sm text-white/45">{docFilter !== "all" ? "No hay citas para este filtro." : "No hay citas para este día."}</p>
+            <button onClick={() => navigate("/agenda")} className="mt-3 text-sm font-bold text-[#F0C278] hover:underline">Crear nueva cita</button>
           </div>
         ) : (
-          <div className="space-y-2">
-            {filteredAppts.map(a => (
-              <ApptCard key={a.id} appt={a} doctors={doctors}
-                onConfirm={confirmAppointment}
-                onComplete={completeAppointment}
-                onCancel={cancelAppointment}
-                onMessage={leadId => navigate(leadId ? `/inbox/${leadId}` : "/inbox")}
+          <div className="grid gap-2 lg:grid-cols-2">
+            {filteredAppts.map((a) => (
+              <BusinessAppointmentCard
+                key={a.id}
+                time={(a as any).appointment_time || fmtTime(apptISO(a))}
+                client={a.patient_name || vertical.customerLabel}
+                service={a.reason || a.title || vertical.serviceLabel}
+                provider={a.provider_name || vertical.providerLabel}
+                status={a.status}
+                accentClass={barberAccent(a.provider_name || "Sin asignar", doctors.indexOf(a.provider_name || ""))}
+                onMessage={a.lead_id ? () => navigate(`/inbox/${a.lead_id}`) : undefined}
               />
             ))}
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Clock3 className="h-4 w-4 text-white/30" />
-          <div>
+      <div className={`${activeBusinessType === "barbershop" ? "hidden lg:flex" : "flex"} min-w-0 items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3`}>
+        <div className="flex min-w-0 items-center gap-2">
+          <Clock3 className="h-4 w-4 shrink-0 text-white/30" />
+          <div className="min-w-0">
             <p className="text-sm font-medium text-white/70">Mañana</p>
-            <p className="text-xs text-white/40">{tomorrowCount} citas programadas</p>
+            <p className="truncate text-xs text-white/40">{tomorrowCount} citas programadas</p>
           </div>
         </div>
         <button onClick={() => setSelectedDate(new Date(selectedDate.getTime() + 86_400_000))}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-xs font-medium text-white/70 hover:bg-white/10">
+          className="ui-button-base min-h-10 border border-white/15 bg-white/5 px-3 text-xs text-white/70 hover:bg-white/10">
           <SendHorizonal className="h-3.5 w-3.5" /> Ver
         </button>
       </div>
-
     </div>
   );
 }

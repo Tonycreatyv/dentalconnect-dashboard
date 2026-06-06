@@ -5,6 +5,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { BadgeCheck, CalendarDays, Globe, Instagram, Lock, MessageCircle, MessagesSquare, PhoneCall, Check, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import {
+  getVerticalConfig,
+  getVerticalDefaultServices,
+  getVerticalDefaultSpecialties,
+  getVerticalDefaultFaqs,
+} from "../config/verticalConfig";
 import { Toggle } from "../components/Toggle";
 import { BotKillSwitch } from "../components/BotKillSwitch";
 import { Modal } from "../components/ui/Modal";
@@ -12,6 +19,7 @@ import { Toast, type ToastKind } from "../components/ui/Toast";
 import { startMetaOAuth } from "../components/integrations/ConnectMessengerButton";
 import StatusChip from "../components/ui/StatusChip";
 import PageHeader from "../components/PageHeader";
+import { MobileAppHeader, MobileSettingsRow, MobileStatusPill } from "../components/mobile/MobilePrimitives";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -20,7 +28,19 @@ type FaqItem = { q: string; a: string };
 type DayHours = { closed: boolean; open?: string; close?: string };
 type HoursMap = Record<string, DayHours>;
 
-type ClinicSettingsRow = { clinic_id: string; phone: string | null; address: string | null; google_maps_url: string | null; hours: any; services: ServiceItem[] | null; faqs: FaqItem[] | null; emergency: string | null; policies: any; updated_at: string | null; specialties: any };
+type OrganizationSettingsRow = {
+  organization_id: string;
+  business_type: string;
+  services: ServiceItem[] | null;
+  faqs: FaqItem[] | null;
+  specialties: string[] | null;
+  hours: any;
+  providers: any[] | null;
+  policies: any;
+  location: Record<string, unknown> | null;
+  integrations: Record<string, unknown> | null;
+  updated_at: string | null;
+};
 
 type OrgIntegrationState = {
   meta_page_id: string | null;
@@ -32,35 +52,54 @@ type OrgIntegrationState = {
   whatsapp_business_account_id: string | null;
 };
 
-const SPECIALTIES = [
-  { value: "general", label: "Clínica general" },
-  { value: "ortho", label: "Ortodoncia" },
-  { value: "pediatric", label: "Odontopediatría" },
-  { value: "endo", label: "Endodoncia" },
-  { value: "implants", label: "Implantes" },
-  { value: "aesthetic", label: "Estética dental" },
-];
-
-const TEMPLATE_SERVICES: ServiceItem[] = [
-  { name: "Consulta / valoración", price_from: 400, currency: "HNL", duration_min: 30, notes: "Diagnóstico inicial." },
-  { name: "Limpieza dental", price_from: 700, currency: "HNL", duration_min: 45, notes: "Incluye evaluación." },
-  { name: "Resina", price_from: 900, currency: "HNL", duration_min: 60, notes: "Varía por tamaño." },
-  { name: "Extracción simple", price_from: 900, currency: "HNL", duration_min: 45, notes: "" },
-  { name: "Blanqueamiento", price_from: 1800, currency: "HNL", duration_min: 60, notes: "Requiere evaluación." },
-];
-
-const TEMPLATE_FAQS: FaqItem[] = [
-  { q: "¿Tienen disponibilidad hoy?", a: "Podemos revisar disponibilidad. ¿Qué hora te conviene?" },
-  { q: "¿Cuánto cuesta una limpieza?", a: "La limpieza inicia desde L 700." },
-  { q: "¿Dónde están ubicados?", a: "Te comparto la ubicación." },
-  { q: "¿Atienden urgencias?", a: "Sí. ¿Qué síntomas presentas?" },
-];
-
 function defaultHours(): HoursMap {
   return { mon: { closed: false, open: "08:00", close: "17:00" }, tue: { closed: false, open: "08:00", close: "17:00" }, wed: { closed: false, open: "08:00", close: "17:00" }, thu: { closed: false, open: "08:00", close: "17:00" }, fri: { closed: false, open: "08:00", close: "17:00" }, sat: { closed: false, open: "09:00", close: "13:00" }, sun: { closed: true } };
 }
 
 const dayLabels: Record<string, string> = { mon: "Lunes", tue: "Martes", wed: "Miércoles", thu: "Jueves", fri: "Viernes", sat: "Sábado", sun: "Domingo" };
+const dayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+function providerScheduleFromBusinessHours(sourceHours: HoursMap): HoursMap {
+  const defaults = defaultHours();
+  return dayKeys.reduce((acc, key) => {
+    const day = sourceHours[key] ?? defaults[key];
+    acc[key] = day?.closed
+      ? { closed: true }
+      : { closed: false, open: day?.open ?? "09:00", close: day?.close ?? "18:00" };
+    return acc;
+  }, {} as HoursMap);
+}
+
+function normalizeProviderForSave(provider: any, orgId: string, sourceHours: HoursMap) {
+  const schedule = provider.schedule && typeof provider.schedule === "object"
+    ? provider.schedule
+    : providerScheduleFromBusinessHours(sourceHours);
+  return {
+    id: provider.id,
+    organization_id: orgId,
+    name: String(provider.name ?? "").trim(),
+    role: provider.role ?? "doctor",
+    active: provider.active !== false,
+    services: Array.isArray(provider.services) ? provider.services : [],
+    schedule,
+    color: provider.color ?? provider.calendar_color ?? "#3CBDB9",
+  };
+}
+
+function normalizeForCompare(text: string) {
+  return String(text ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function isLikelyDentalCatalog(items: ServiceItem[]): boolean {
+  if (!items.length) return false;
+  const names = items.map((item) => normalizeForCompare(item.name ?? ""));
+  const dentalSignals = ["consulta", "limpieza", "blanqueamiento", "ortodoncia", "resina", "extraccion"];
+  return names.some((name) => dentalSignals.some((signal) => name.includes(signal)));
+}
 
 type TabKey = "integraciones" | "clinica" | "equipo" | "equipo" | "equipo" | "horario" | "servicios" | "faqs" | "cuenta";
 
@@ -75,30 +114,39 @@ export default function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
   const { clinic, clinicId, activeOrgId } = useClinic();
-  const ORG = activeOrgId ?? clinic?.organization_id ?? DEFAULT_ORG;
+  const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
+  const ORG = resolvedOrgId || activeOrgId || clinic?.organization_id || DEFAULT_ORG;
+  const vertical = getVerticalConfig(resolvedBusinessType);
 
   const [tab, setTab] = useState<TabKey>("integraciones");
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
-  const [localClinicId, setLocalClinicId] = useState<string | null>(null);
 
-  const [clinicName, setClinicName] = useState(clinic?.name ?? "Clínica");
-  const [specialties, setSpecialties] = useState<string[]>(["general"]);
+  const [clinicName, setClinicName] = useState(clinic?.name ?? vertical.organizationLabel);
+  const [specialties, setSpecialties] = useState<string[]>(
+    getVerticalDefaultSpecialties(resolvedBusinessType).map((item) => item.value),
+  );
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [mapsUrl, setMapsUrl] = useState("");
   const [hours, setHours] = useState<HoursMap>(defaultHours());
-  const [services, setServices] = useState<ServiceItem[]>(TEMPLATE_SERVICES);
-  const [faqs, setFaqs] = useState<FaqItem[]>(TEMPLATE_FAQS);
+  const [services, setServices] = useState<ServiceItem[]>(getVerticalDefaultServices(resolvedBusinessType));
+  const [faqs, setFaqs] = useState<FaqItem[]>(getVerticalDefaultFaqs(resolvedBusinessType));
   const [emergency, setEmergency] = useState("Si es urgencia, cuéntanos síntomas.");
   const [policiesCancel, setPoliciesCancel] = useState("Avisa con 2 horas de anticipación.");
   const [policiesDeposit, setPoliciesDeposit] = useState("Algunos tratamientos requieren depósito.");
 
   const [doctors, setDoctors] = useState<any[]>([]);
+  const [deletedProviderIds, setDeletedProviderIds] = useState<string[]>([]);
+  async function loadDoctorsForOrg() {
+    const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+    return data ?? [];
+  }
   async function fetchDoctors() {
-    const { data } = await supabase.from('providers').select('*').eq('organization_id', ORG).eq('role', 'doctor');
-    if (data) setDoctors(data);
+    const data = await loadDoctorsForOrg();
+    if (data.length > 0) setDoctors(data);
   }
 
   const [orgIntegration, setOrgIntegration] = useState<OrgIntegrationState>({
@@ -118,7 +166,25 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
 
-  useEffect(() => { fetchDoctors(); }, [ORG]);
+  const defaultServices = useMemo(() => getVerticalDefaultServices(resolvedBusinessType), [resolvedBusinessType]);
+  const defaultFaqs = useMemo(() => getVerticalDefaultFaqs(resolvedBusinessType), [resolvedBusinessType]);
+  const defaultSpecialties = useMemo(
+    () => getVerticalDefaultSpecialties(resolvedBusinessType).map((item) => item.value),
+    [resolvedBusinessType],
+  );
+
+  useEffect(() => {
+    setServices(defaultServices);
+    setFaqs(defaultFaqs);
+    setSpecialties(defaultSpecialties);
+    setHours(defaultHours());
+    setPhone("");
+    setAddress("");
+    setMapsUrl("");
+    setDoctors([]);
+    setDeletedProviderIds([]);
+    setInitialSnapshot(null);
+  }, [ORG, resolvedBusinessType, defaultServices, defaultFaqs, defaultSpecialties]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -152,58 +218,220 @@ export default function Settings() {
     }
   }
 
-  async function ensureClinic(): Promise<string | null> {
-    if (clinicId) return clinicId;
-    if (localClinicId) return localClinicId;
-    const find = await supabase.from("clinics").select("id, name").eq("organization_id", ORG).limit(1).maybeSingle();
-    if (find.data?.id) { setLocalClinicId(find.data.id); setClinicName(find.data.name ?? "Clínica"); return find.data.id; }
-    const created = await supabase.from("clinics").insert({ name: clinicName.trim() || "Clínica", organization_id: ORG }).select("id, name").maybeSingle();
-    if (created.data?.id) { setLocalClinicId(created.data.id); return created.data.id; }
-    return null;
-  }
-
   useEffect(() => {
     let mounted = true;
     async function load() {
       setLoading(true);
-      const id = await ensureClinic();
-      if (!mounted || !id) { setLoading(false); return; }
-      const s = await supabase.from("clinic_settings").select("*").eq("clinic_id", id).maybeSingle();
+      const s = await supabase
+        .from("organization_settings")
+        .select("organization_id, business_type, services, faqs, specialties, hours, providers, policies, location, integrations")
+        .eq("organization_id", ORG)
+        .maybeSingle();
       if (!mounted) return;
-      const row = s.data as ClinicSettingsRow | null;
+      const row = s.data as OrganizationSettingsRow | null;
+      const providerRows = await loadDoctorsForOrg();
       if (row) {
-        setPhone(row.phone ?? "");
-        setAddress(row.address ?? "");
-        setMapsUrl(row.google_maps_url ?? "");
+        const location = (row.location ?? {}) as Record<string, unknown>;
+        setPhone(String(location.phone ?? ""));
+        setAddress(String(location.address ?? ""));
+        setMapsUrl(String(location.google_maps_url ?? ""));
         setHours((row.hours as HoursMap) ?? defaultHours());
-        setEmergency(row.emergency ?? emergency);
         const pol = row.policies ?? {};
         setPoliciesCancel(pol.cancelacion ?? policiesCancel);
         setPoliciesDeposit(pol.deposito ?? policiesDeposit);
         if (row.services?.length) setServices(row.services);
+        else setServices(defaultServices);
         if (row.faqs?.length) setFaqs(row.faqs);
+        else setFaqs(defaultFaqs);
         if (Array.isArray(row.specialties) && row.specialties.length) setSpecialties(row.specialties);
+        else setSpecialties(defaultSpecialties);
+        if (providerRows.length > 0) setDoctors(providerRows);
+        else if (Array.isArray(row.providers)) setDoctors(row.providers);
+      } else {
+        setServices(defaultServices);
+        setFaqs(defaultFaqs);
+        setSpecialties(defaultSpecialties);
+        setDoctors(providerRows);
       }
       await loadOrgIntegration();
       setLoading(false);
     }
     load();
     return () => { mounted = false; };
-  }, [clinicId, ORG]);
+  }, [ORG, resolvedBusinessType, vertical.organizationLabel, defaultServices, defaultFaqs, defaultSpecialties]);
 
-  const settingsSnapshot = useMemo(() => JSON.stringify({ clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, emergency, policiesCancel, policiesDeposit }), [clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, emergency, policiesCancel, policiesDeposit]);
+  const showBarbershopCatalogReset = useMemo(() => {
+    return resolvedBusinessType === "barbershop" && isLikelyDentalCatalog(services);
+  }, [resolvedBusinessType, services]);
+
+  async function resetCurrentVerticalDemoData() {
+    const confirmed = window.confirm(`Reset data for ${ORG} (${resolvedBusinessType})?`);
+    if (!confirmed) return;
+    const servicesDefaults = getVerticalDefaultServices(resolvedBusinessType);
+    const faqDefaults = getVerticalDefaultFaqs(resolvedBusinessType);
+    const specialtyDefaults = getVerticalDefaultSpecialties(resolvedBusinessType).map((item) => item.value);
+    const now = new Date().toISOString();
+
+    if (import.meta.env.DEV) {
+      console.log("[settings:reset_demo]", {
+        activeOrgId: ORG,
+        activeBusinessType: resolvedBusinessType,
+        clinicId,
+        tableTarget: "organization_settings",
+        services: servicesDefaults.map((s) => s.name),
+      });
+    }
+    const payload: OrganizationSettingsRow = {
+      organization_id: ORG,
+      business_type: resolvedBusinessType,
+      hours,
+      services: servicesDefaults,
+      faqs: faqDefaults,
+      providers: doctors,
+      policies: { cancelacion: policiesCancel.trim(), deposito: policiesDeposit.trim() },
+      specialties: specialtyDefaults,
+      location: {
+        phone: phone.trim() || null,
+        address: address.trim() || null,
+        google_maps_url: mapsUrl.trim() || null,
+      },
+      integrations: {},
+      updated_at: now,
+    };
+
+    const res = await supabase
+      .from("organization_settings")
+      .upsert(payload, { onConflict: "organization_id" });
+    const upsertErr = res.error;
+    if (upsertErr && import.meta.env.DEV) {
+      console.error("[settings:reset_demo:organization_settings_error]", {
+        activeOrgId: ORG,
+        activeBusinessType: resolvedBusinessType,
+        code: (upsertErr as any).code ?? null,
+        message: upsertErr.message,
+        details: (upsertErr as any).details ?? null,
+        hint: (upsertErr as any).hint ?? null,
+        payload,
+      });
+    }
+    if (upsertErr) {
+      setToast({ kind: "error", message: "No se pudo resetear los datos demo de la vertical actual." });
+      return;
+    }
+
+    setServices(servicesDefaults);
+    setFaqs(faqDefaults);
+    setSpecialties(specialtyDefaults);
+    setHours(defaultHours());
+    setDoctors([]);
+    const postResetSnapshot = JSON.stringify({
+      clinicName,
+      specialties: specialtyDefaults,
+      phone,
+      address,
+      mapsUrl,
+      hours,
+      services: servicesDefaults,
+      faqs: faqDefaults,
+      emergency,
+      policiesCancel,
+      policiesDeposit,
+    });
+    setInitialSnapshot(postResetSnapshot);
+    setToast({ kind: "success", message: "Datos demo de la vertical actual aplicados." });
+  }
+
+  function updateDoctor(providerId: string, updater: (provider: any) => any) {
+    setDoctors((prev) => prev.map((provider) => {
+      if (provider.id !== providerId) return provider;
+      return updater({ ...provider });
+    }));
+  }
+
+  function updateDoctorSchedule(providerId: string, dayKey: string, updater: (day: DayHours) => DayHours) {
+    updateDoctor(providerId, (provider) => {
+      const currentSchedule = provider.schedule && typeof provider.schedule === "object" ? provider.schedule : {};
+      const currentDay = (currentSchedule[dayKey] as DayHours | undefined) ?? { closed: true };
+      return {
+        ...provider,
+        schedule: {
+          ...currentSchedule,
+          [dayKey]: updater({ ...currentDay }),
+        },
+      };
+    });
+  }
+
+  const settingsSnapshot = useMemo(() => JSON.stringify({ clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, doctors, emergency, policiesCancel, policiesDeposit }), [clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, doctors, emergency, policiesCancel, policiesDeposit]);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
   useEffect(() => { if (!loading) setInitialSnapshot((prev) => prev ?? settingsSnapshot); }, [loading, settingsSnapshot]);
-  const isDirty = initialSnapshot !== null && initialSnapshot !== settingsSnapshot;
+  const isDirty = (initialSnapshot !== null && initialSnapshot !== settingsSnapshot) || deletedProviderIds.length > 0;
 
   async function save() {
     if (!isDirty) return;
     setSaving(true);
-    const id = await ensureClinic();
-    if (!id) { setToast({ kind: "error", message: "No se pudo guardar." }); setSaving(false); return; }
-    const payload: ClinicSettingsRow = { clinic_id: id, phone: phone.trim() || null, address: address.trim() || null, google_maps_url: mapsUrl.trim() || null, hours, services, faqs, emergency: emergency.trim() || null, policies: { cancelacion: policiesCancel.trim(), deposito: policiesDeposit.trim() }, specialties, updated_at: new Date().toISOString() };
-    const res = await supabase.from("clinic_settings").upsert(payload, { onConflict: "clinic_id" });
-    if (res.error) { setToast({ kind: "error", message: "Error al guardar." }); } else { await supabase.from("clinics").update({ name: clinicName.trim() }).eq("id", id); setToast({ kind: "success", message: "Guardado." }); setInitialSnapshot(settingsSnapshot); }
+    const normalizedDoctors = doctors.map((provider) => normalizeProviderForSave(provider, ORG, hours));
+    let savedDoctors = normalizedDoctors;
+    if (deletedProviderIds.length > 0) {
+      for (const providerId of deletedProviderIds) {
+        const deleteRes = await supabase.from("providers").delete().eq("id", providerId);
+        if (deleteRes.error) {
+          setToast({ kind: "error", message: `Error al eliminar proveedor: ${deleteRes.error.message}` });
+          setSaving(false);
+          return;
+        }
+      }
+    }
+    if (normalizedDoctors.length > 0) {
+      const providerRes = await supabase
+        .from("providers")
+        .upsert(normalizedDoctors, { onConflict: "id" })
+        .select("*");
+      if (providerRes.error) {
+        setToast({ kind: "error", message: `Error al guardar proveedores: ${providerRes.error.message}` });
+        setSaving(false);
+        return;
+      }
+      savedDoctors = providerRes.data?.length ? providerRes.data : normalizedDoctors;
+      setDoctors(savedDoctors);
+    }
+    const payload: OrganizationSettingsRow = {
+      organization_id: ORG,
+      business_type: resolvedBusinessType,
+      services,
+      faqs,
+      specialties,
+      hours,
+      providers: savedDoctors,
+      policies: { cancelacion: policiesCancel.trim(), deposito: policiesDeposit.trim() },
+      location: {
+        phone: phone.trim() || null,
+        address: address.trim() || null,
+        google_maps_url: mapsUrl.trim() || null,
+      },
+      integrations: {},
+      updated_at: new Date().toISOString(),
+    };
+    if (import.meta.env.DEV) {
+      console.log("[settings:save]", {
+        activeOrgId: ORG,
+        activeBusinessType: resolvedBusinessType,
+        clinicId,
+        tableTarget: "providers + organization_settings",
+        services: services.map((s) => s.name),
+        providers: savedDoctors.map((p) => p.name),
+      });
+    }
+    const res = await supabase
+      .from("organization_settings")
+      .upsert(payload, { onConflict: "organization_id" });
+    if (res.error) {
+      setToast({ kind: "error", message: `Error al guardar: ${res.error.message}` });
+    } else {
+      setToast({ kind: "success", message: "Guardado." });
+      setDeletedProviderIds([]);
+      setInitialSnapshot(JSON.stringify({ clinicName, specialties, phone, address, mapsUrl, hours, services, faqs, doctors: savedDoctors, emergency, policiesCancel, policiesDeposit }));
+    }
     setSaving(false);
   }
 
@@ -250,10 +478,10 @@ export default function Settings() {
 
   const tabs = [
     { key: "integraciones" as const, label: "Integraciones" },
-    { key: "clinica" as const, label: "Clínica" },
+    { key: "clinica" as const, label: vertical.organizationLabel },
     { key: "horario" as const, label: "Horario" },
-    { key: "servicios" as const, label: "Servicios" },
-    { key: "equipo" as const, label: "Equipo" },
+    { key: "servicios" as const, label: vertical.servicesLabel },
+    { key: "equipo" as const, label: vertical.providersLabel },
     { key: "faqs" as const, label: "FAQs" },
     { key: "cuenta" as const, label: "Cuenta" },
   ];
@@ -268,13 +496,13 @@ export default function Settings() {
         const isWhatsApp = integration.key === "whatsapp";
         const isDisabled = integration.key === "google_calendar";
         return (
-          <div key={integration.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div className="flex items-start gap-3">
-                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/5 border border-white/10">
+          <div key={integration.key} className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 sm:h-10 sm:w-10">
                   <Icon className="h-5 w-5 text-white/70" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="font-semibold text-white">{integration.name}</div>
                   <div className="text-sm text-white/50">{integration.description}</div>
                 </div>
@@ -283,15 +511,15 @@ export default function Settings() {
             </div>
             <div className="flex flex-wrap gap-2">
               {isMessenger && status.status === "connected" ? (
-                <button onClick={disconnectMessenger} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Desconectar</button>
+                <button onClick={disconnectMessenger} className="min-h-10 rounded-xl border border-white/15 px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/10 sm:px-4">Desconectar</button>
               ) : isMessenger ? (
-                <button onClick={connectMeta} className="px-4 py-2 rounded-xl bg-[#3CBDB9] text-[#0B1117] text-sm font-semibold hover:bg-[#3CBDB9]/90">Conectar</button>
+                <button onClick={connectMeta} className="min-h-10 rounded-xl bg-[#3CBDB9] px-3 py-2 text-sm font-semibold text-[#0B1117] hover:bg-[#3CBDB9]/90 sm:px-4">Conectar</button>
               ) : isWhatsApp && status.status !== "connected" ? (
-                <WhatsAppConnect organizationId={ORG} onConnected={() => loadSettings()} />
+                <WhatsAppConnect organizationId={ORG} businessType={resolvedBusinessType} onConnected={() => loadSettings()} />
               ) : isDisabled ? (
-                <button onClick={() => setWaitlistOpen(true)} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Lista de espera</button>
+                <button onClick={() => setWaitlistOpen(true)} className="min-h-10 rounded-xl border border-white/15 px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/10 sm:px-4">Lista de espera</button>
               ) : (
-                <button onClick={() => setGuideOpen(integration.key)} className="px-4 py-2 rounded-xl border border-white/15 text-sm font-medium text-white/80 hover:bg-white/10">Ver guía</button>
+                <button onClick={() => setGuideOpen(integration.key)} className="min-h-10 rounded-xl border border-white/15 px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/10 sm:px-4">Ver guía</button>
               )}
             </div>
             {isMessenger && orgIntegration.meta_page_id && (
@@ -309,8 +537,8 @@ export default function Settings() {
   const renderClinica = () => (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-        <label className="block text-xs font-medium text-white/60 mb-2">Nombre de la clínica</label>
-        <input value={clinicName} onChange={(e) => setClinicName(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder="Ej: Clínica Sonrisas" />
+        <label className="block text-xs font-medium text-white/60 mb-2">Nombre de la {vertical.organizationLabel.toLowerCase()}</label>
+        <input value={clinicName} onChange={(e) => setClinicName(e.target.value)} className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#3CBDB9]/50" placeholder={`Ej: ${vertical.organizationLabel} Demo`} />
       </div>
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -331,7 +559,7 @@ export default function Settings() {
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="text-sm font-medium text-white mb-3">Especialidades</div>
         <div className="grid grid-cols-2 gap-2">
-          {SPECIALTIES.map((s) => {
+          {getVerticalDefaultSpecialties(resolvedBusinessType).map((s) => {
             const checked = specialties.includes(s.value);
             return (
               <button key={s.value} onClick={() => setSpecialties(prev => checked ? prev.filter(x => x !== s.value) : [...prev, s.value])}
@@ -373,9 +601,28 @@ export default function Settings() {
   const renderServicios = () => (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="font-medium text-white">Servicios y precios</div>
-        <button onClick={() => setServices(prev => [...prev, { name: "Nuevo servicio", price_from: null, currency: "HNL", duration_min: 30, notes: "" }])} className="px-3 py-1.5 rounded-lg bg-white/10 text-sm font-medium text-white/80 hover:bg-white/15">+ Agregar</button>
+        <div className="font-medium text-white">{vertical.servicesLabel}</div>
+        <button onClick={() => setServices(prev => [...prev, { name: `Nuevo ${vertical.serviceLabel.toLowerCase()}`, price_from: null, currency: "HNL", duration_min: 30, notes: "" }])} className="px-3 py-1.5 rounded-lg bg-white/10 text-sm font-medium text-white/80 hover:bg-white/15">+ Agregar</button>
       </div>
+      {import.meta.env.DEV ? (
+        <div className="rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-sm text-amber-100">
+          <div className="font-medium">
+            {showBarbershopCatalogReset
+              ? "Se detectaron servicios de clínica dental en esta barbería."
+              : "Podés restaurar los datos demo de la vertical actual."}
+          </div>
+          <div className="mt-1 text-amber-100/80">
+            Reemplaza servicios, FAQs y especialidades por los valores por defecto de la vertical activa.
+          </div>
+          <button
+            type="button"
+            onClick={resetCurrentVerticalDemoData}
+            className="mt-2 rounded-lg border border-amber-300/40 bg-amber-200/10 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-200/20"
+          >
+            Reset current vertical demo data
+          </button>
+        </div>
+      ) : null}
       <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
         {services.map((s, idx) => (
           <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-3">
@@ -460,19 +707,56 @@ export default function Settings() {
   );
 
   if (loading) return <div className="py-20 text-center text-white/50">Cargando...</div>;
+  function openMobileSettingsTab(nextTab: TabKey) {
+    setTab(nextTab);
+    setMobileDetailOpen(true);
+  }
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Configuración" subtitle="Gestiona tu clínica, horarios, servicios e integraciones." showBackOnMobile backTo="/overview"
-        action={<button onClick={save} disabled={saving || !isDirty} className={`px-4 py-2 rounded-xl text-sm font-semibold ${isDirty ? "bg-[#3CBDB9] text-[#0B1117]" : "bg-white/10 text-white/40"}`}>{saving ? "Guardando..." : isDirty ? "Guardar" : "Guardado"}</button>}
-      />
+      <section className="space-y-3 rounded-[1.35rem] border border-[#25384A] bg-[#111F2B] p-4 lg:hidden">
+        <MobileAppHeader
+          title="Ajustes"
+          subtitle={resolvedBusinessType === "barbershop" ? "Configuración de la barbería" : vertical.settingsSubtitle}
+          action={<MobileStatusPill tone="success">Bot activo</MobileStatusPill>}
+        />
+        <div className="space-y-2">
+          <MobileSettingsRow icon={MessageCircle} title="Bot" detail="Estado y pausa manual" onClick={() => openMobileSettingsTab("integraciones")} />
+          <MobileSettingsRow icon={Globe} title={resolvedBusinessType === "barbershop" ? "Barbería" : "Clínica"} detail="Perfil, teléfono y ubicación" onClick={() => openMobileSettingsTab("clinica")} />
+          <MobileSettingsRow icon={BadgeCheck} title="Servicios" detail="Precios y duración" onClick={() => openMobileSettingsTab("servicios")} />
+          <MobileSettingsRow icon={CalendarDays} title="Horario" detail="Días y horas de atención" onClick={() => openMobileSettingsTab("horario")} />
+          <MobileSettingsRow icon={PhoneCall} title={resolvedBusinessType === "barbershop" ? "Barberos" : "Equipo"} detail="Personal y disponibilidad" onClick={() => openMobileSettingsTab("equipo")} />
+          <MobileSettingsRow icon={MessagesSquare} title="Canales" detail="WhatsApp y Messenger" onClick={() => openMobileSettingsTab("integraciones")} />
+          <MobileSettingsRow icon={Lock} title="Cuenta" detail="Acceso y contraseña" onClick={() => openMobileSettingsTab("cuenta")} />
+        </div>
+        {mobileDetailOpen ? (
+          <div className="rounded-3xl border border-[#25384A] bg-[#162838] p-3">
+            <div className="text-sm font-black text-[#F8FAFC]">
+              {tabs.find((item) => item.key === tab)?.label ?? "Detalle"}
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-[#9CAAB8]">
+              Abajo tenés el panel de edición. En la siguiente iteración este detalle debe vivir como pantalla móvil propia.
+            </p>
+            <button onClick={() => setMobileDetailOpen(false)} className="mt-3 min-h-10 rounded-2xl border border-[#25384A] bg-[#111F2B] px-3 text-xs font-bold text-[#9CAAB8]">
+              Cerrar detalle
+            </button>
+          </div>
+        ) : null}
+      </section>
 
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+      <div className="hidden lg:block">
+        <PageHeader title="Configuracion" subtitle={vertical.settingsSubtitle} showBackOnMobile backTo="/overview"
+          action={<button onClick={save} disabled={saving || !isDirty} className={`px-4 py-2 rounded-xl text-sm font-semibold ${isDirty ? "bg-[#3CBDB9] text-[#0B1117]" : "bg-white/10 text-white/40"}`}>{saving ? "Guardando..." : isDirty ? "Guardar" : "Guardado"}</button>}
+        />
+      </div>
+
+      <div className={`${mobileDetailOpen ? "flex" : "hidden"} -mx-2 gap-2 overflow-x-auto px-2 pb-2 lg:flex`} style={{ scrollbarWidth: "none" }}>
         {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`shrink-0 px-4 py-2 rounded-xl text-sm font-medium ${tab === t.key ? "bg-white/10 text-white" : "bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"}`}>{t.label}</button>
+          <button key={t.key} onClick={() => setTab(t.key)} className={`min-h-10 shrink-0 rounded-xl px-3 py-2 text-xs font-semibold sm:px-4 sm:text-sm ${tab === t.key ? "bg-white/10 text-white" : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10"}`}>{t.label}</button>
         ))}
       </div>
 
+      <div className={`${mobileDetailOpen ? "block" : "hidden"} lg:block`}>
       {tab === "integraciones" && renderIntegrations()}
       {tab === "clinica" && renderClinica()}
       {tab === "horario" && renderHorario()}
@@ -482,26 +766,26 @@ export default function Settings() {
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <div>
-                <h3 className="text-lg font-medium text-white">Equipo Médico</h3>
-                <p className="text-sm text-zinc-400">Doctores, servicios que atienden y horarios.</p>
+                <h3 className="text-lg font-medium text-white">{vertical.providersLabel}</h3>
+                <p className="text-sm text-zinc-400">{vertical.providersLabel}, servicios que atienden y horarios.</p>
               </div>
               <button onClick={async () => {
-                const name = prompt("Nombre del doctor (ej: Dr. García):");
+                const name = prompt(`Nombre del ${vertical.providerLabel.toLowerCase()} (ej: Alex):`);
                 if (!name?.trim()) return;
                 const { error } = await supabase.from("providers").insert({
                   organization_id: ORG, name: name.trim(), role: "doctor", active: true,
-                  services: [], schedule: {"mon":{"open":"08:00","close":"17:00"},"tue":{"open":"08:00","close":"17:00"},"wed":{"open":"08:00","close":"17:00"},"thu":{"open":"08:00","close":"17:00"},"fri":{"open":"08:00","close":"17:00"},"sat":{"closed":true},"sun":{"closed":true}},
+                  services: [], schedule: providerScheduleFromBusinessHours(hours),
                   color: "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6,"0"),
                 });
                 if (!error) { const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor"); setDoctors(data || []); }
               }} className="bg-[#3CBDB9] hover:bg-[#35a9a5] text-white px-4 py-2 rounded-xl text-sm font-medium">
-                + Agregar Doctor
+                + Agregar {vertical.providerLabel}
               </button>
             </div>
             <div className="space-y-4">
               {doctors.length === 0 ? (
                 <div className="py-10 text-center border-2 border-dashed border-white/10 rounded-xl">
-                  <p className="text-zinc-500">No hay doctores registrados. Agregá uno para empezar.</p>
+                  <p className="text-zinc-500">No hay {vertical.providersLabel.toLowerCase()} registrados. Agrega uno para empezar.</p>
                 </div>
               ) : (
                 doctors.map((doc) => {
@@ -519,9 +803,8 @@ export default function Settings() {
                       <div className="flex gap-2">
                         <button onClick={async () => {
                           if (!confirm("¿Eliminar a " + doc.name + "?")) return;
-                          await supabase.from("providers").delete().eq("id", doc.id);
-                          const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                          setDoctors(data || []);
+                          setDeletedProviderIds((prev) => doc.id ? [...prev, doc.id] : prev);
+                          setDoctors((prev) => prev.filter((provider) => provider.id !== doc.id));
                         }} className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded-lg border border-red-500/20">Eliminar</button>
                       </div>
                     </div>
@@ -532,21 +815,17 @@ export default function Settings() {
                         {svcs.map((s: string) => (
                           <span key={s} className="text-xs bg-[#3CBDB9]/10 text-[#3CBDB9] px-3 py-1 rounded-full border border-[#3CBDB9]/20 flex items-center gap-1">
                             {s}
-                            <button onClick={async () => {
+                            <button onClick={() => {
                               const newSvcs = svcs.filter((x: string) => x !== s);
-                              await supabase.from("providers").update({ services: newSvcs }).eq("id", doc.id);
-                              const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                              setDoctors(data || []);
+                              updateDoctor(doc.id, (provider) => ({ ...provider, services: newSvcs }));
                             }} className="ml-1 text-zinc-400 hover:text-red-400">×</button>
                           </span>
                         ))}
-                        <button onClick={async () => {
+                        <button onClick={() => {
                           const svc = prompt("Nombre del servicio (ej: Blanqueamiento):");
                           if (!svc?.trim()) return;
                           const newSvcs = [...svcs, svc.trim()];
-                          await supabase.from("providers").update({ services: newSvcs }).eq("id", doc.id);
-                          const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                          setDoctors(data || []);
+                          updateDoctor(doc.id, (provider) => ({ ...provider, services: newSvcs }));
                         }} className="text-xs text-zinc-400 hover:text-white px-3 py-1 rounded-full border border-dashed border-white/20">+ Servicio</button>
                       </div>
                     </div>
@@ -561,42 +840,26 @@ export default function Settings() {
                             <div key={key} className={"rounded-xl border p-2 text-center text-xs " + (isClosed ? "border-white/5 bg-white/[0.02] text-zinc-600" : "border-[#3CBDB9]/20 bg-[#3CBDB9]/5 text-zinc-300")}>
                               <div className="font-medium mb-1">{label}</div>
                               {isClosed ? (
-                                <button onClick={async () => {
-                                  const newSched = { ...sched };
-                                  newSched[key] = { open: "08:00", close: "17:00", closed: false };
-                                  await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
-                                  const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                                  setDoctors(data || []);
+                                <button onClick={() => {
+                                  updateDoctorSchedule(doc.id, key, () => ({ open: hours[key]?.open ?? "09:00", close: hours[key]?.close ?? "18:00", closed: false }));
                                 }} className="cursor-pointer text-zinc-500 hover:text-white">Cerrado</button>
                               ) : (
                                 <div className="space-y-1">
                                   <div className="flex gap-1 items-center">
-                                    <select value={day.open || "08:00"} onChange={async (e) => {
-                                      const newSched = { ...sched };
-                                      newSched[key] = { ...day, open: e.target.value };
-                                      await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
-                                      const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                                      setDoctors(data || []);
+                                    <select value={day.open || "08:00"} onChange={(e) => {
+                                      updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, open: e.target.value, closed: false }));
                                     }} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
                                       <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
                                     </select>
                                     <span className="text-zinc-500">-</span>
-                                    <select value={day.close || "17:00"} onChange={async (e) => {
-                                      const newSched = { ...sched };
-                                      newSched[key] = { ...day, close: e.target.value };
-                                      await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
-                                      const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                                      setDoctors(data || []);
+                                    <select value={day.close || "17:00"} onChange={(e) => {
+                                      updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, close: e.target.value, closed: false }));
                                     }} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
                                       <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
                                     </select>
                                   </div>
-                                  <button onClick={async () => {
-                                    const newSched = { ...sched };
-                                    newSched[key] = { closed: true };
-                                    await supabase.from("providers").update({ schedule: newSched }).eq("id", doc.id);
-                                    const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
-                                    setDoctors(data || []);
+                                  <button onClick={() => {
+                                    updateDoctorSchedule(doc.id, key, () => ({ closed: true }));
                                   }} className="text-[9px] text-red-400/60 hover:text-red-400 cursor-pointer">Cerrar día</button>
                                 </div>
                               )}
@@ -612,13 +875,13 @@ export default function Settings() {
             </div>
           </div>
         )}
-
         {tab === "faqs" && renderFaqs()}
       {tab === "cuenta" && renderCuenta()}
+      </div>
 
       <Modal open={guideOpen !== null} title="Guía de integración" description="Pasos para conectar." onClose={() => setGuideOpen(null)} actions={<button onClick={() => setGuideOpen(null)} className="rounded-xl bg-[#3CBDB9] px-4 py-2 text-sm font-medium text-white hover:bg-[#35a9a5]">Entendido</button>}>
         <div className="space-y-3 text-sm text-white/70">
-          <div className="flex items-start gap-3"><Globe className="h-4 w-4 mt-0.5" /><span>Confirma los datos de tu clínica.</span></div>
+          <div className="flex items-start gap-3"><Globe className="h-4 w-4 mt-0.5" /><span>Confirma los datos de tu {vertical.organizationLabel.toLowerCase()}.</span></div>
           <div className="flex items-start gap-3"><PhoneCall className="h-4 w-4 mt-0.5" /><span>Ten a mano el canal principal.</span></div>
           <div className="flex items-start gap-3"><BadgeCheck className="h-4 w-4 mt-0.5" /><span>Envía la solicitud.</span></div>
         </div>

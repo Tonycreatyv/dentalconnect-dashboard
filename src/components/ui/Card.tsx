@@ -8,5 +8,5 @@ export function Card({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("dc-card p-5 sm:p-6", className)}>{children}</div>;
+  return <div className={cn("ui-card ui-card-pad overflow-hidden", className)}>{children}</div>;
 }

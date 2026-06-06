@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarDays, User } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
 import { SectionCard } from "../components/SectionCard";
 import { EmptyState } from "../components/EmptyState";
 import { normalizedStartISO } from "../lib/appointments";
 import { Toast, type ToastKind } from "../components/ui/Toast";
 import PageHeader from "../components/PageHeader";
+import { getVerticalConfig } from "../config/verticalConfig";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -63,8 +64,9 @@ function formatDateTime(iso: string | null) {
 
 export default function Patients() {
   const navigate = useNavigate();
-  const { clinic } = useClinic();
-  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
+  const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
+  const ORG = resolvedOrgId || DEFAULT_ORG;
 
   const [rows, setRows] = useState<AppointmentPatientRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +117,7 @@ export default function Patients() {
     for (const row of rows) {
       const key = derivePatientKey(row);
       const iso = getAppointmentISO(row);
-      const name = row.patient_name?.trim() || (row.lead_id ? `Paciente ${row.lead_id.slice(-4)}` : "Sin nombre");
+      const name = row.patient_name?.trim() || (row.lead_id ? `${vertical.customerLabel} ${row.lead_id.slice(-4)}` : "Sin nombre");
 
       const prev = grouped.get(key);
       if (!prev) {
@@ -177,15 +179,15 @@ export default function Patients() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Pacientes" showBackOnMobile backTo="/overview" />
+      <PageHeader title={vertical.customersLabel} showBackOnMobile backTo="/overview" />
 
-      <SectionCard title="Pacientes" description="Listado generado desde tus citas registradas.">
+      <SectionCard title={vertical.customersLabel} description={`Listado generado desde tus citas registradas de ${vertical.customersLabel.toLowerCase()}.`}>
         {loading ? (
           <div className="text-sm text-white/60">Cargando…</div>
         ) : error ? (
           <div className="text-sm text-rose-400">{error}</div>
         ) : patients.length === 0 ? (
-          <EmptyState title="Sin pacientes" message="Cuando registres citas con paciente, aparecerán aquí." />
+          <EmptyState title={`Sin ${vertical.customersLabel.toLowerCase()}`} message={`Cuando registres citas con ${vertical.customerLabel.toLowerCase()}, aparecerán aquí.`} />
         ) : (
           <div className="grid gap-2">
             {patients.map((p) => (
@@ -193,7 +195,7 @@ export default function Patients() {
                 key={p.key}
                 type="button"
                 onClick={() => setActivePatient(p)}
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
+                className="w-full min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#3CBDB9]/20"
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
@@ -201,11 +203,11 @@ export default function Patients() {
                       <User className="h-4 w-4 text-white/50" />
                       <div className="truncate text-sm font-semibold text-white">{p.name}</div>
                     </div>
-                    <div className="mt-1 text-xs text-white/60">
+                    <div className="text-safe mt-1 text-xs text-white/60">
                       Última visita: {formatDateTime(p.lastVisitISO)} · {p.appointments.length} cita(s)
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {p.nextVisitISO ? (
                       <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-400">
                         Próxima cita
@@ -224,11 +226,11 @@ export default function Patients() {
 
       {activePatient ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 backdrop-blur-xl p-4">
-          <div className="h-[min(90vh,760px)] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-white/6 p-6 text-white shadow-2xl">
+          <div className="h-[min(90vh,760px)] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-white/[0.06] p-4 text-white shadow-2xl sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-lg font-semibold text-white/95">{activePatient.name}</div>
-                <div className="text-sm text-white/72">Historial y contexto del paciente</div>
+                <div className="text-sm text-white/72">Historial y contexto del {vertical.customerLabel.toLowerCase()}</div>
               </div>
               <button
                 type="button"

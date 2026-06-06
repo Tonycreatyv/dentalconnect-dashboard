@@ -161,7 +161,7 @@ export default function Register() {
                     onChange={(e) => setBrandName(e.target.value)}
                     required
                     className="h-12 rounded-2xl border border-white/10 bg-slate-950/40 px-4 text-sm text-white placeholder:text-white/35 outline-none focus:border-white/25"
-                    placeholder="Ej: Clínica Sonrisa"
+                    placeholder={vertical.brandPlaceholder}
                     autoComplete="organization"
                   />
                 </label>
@@ -173,7 +173,7 @@ export default function Register() {
                       value={businessType}
                       onChange={(e) => setBusinessType(e.target.value)}
                       className="h-12 rounded-2xl border border-white/10 bg-slate-950/40 px-4 text-sm text-white placeholder:text-white/35 outline-none focus:border-white/25"
-                      placeholder="dental"
+                      placeholder={vertical.businessType ?? "dental"}
                     />
                   </label>
 

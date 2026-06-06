@@ -8,6 +8,16 @@ export type VerticalConfig = {
   tagline: string;
   primaryCTA: string;
   dashboardLabel: string;
+  documentTitle: string;
+  emailPlaceholder: string;
+  orgSlugFallback: string;
+  onboardingOrgQuestion: string;
+  onboardingOrgNameLabel: string;
+  onboardingOrgInfoCopy: string;
+  onboardingMessengerError: string;
+  onboardingServicesCopy: string;
+  onboardingConnectCopy: string;
+  brandPlaceholder: string;
   theme: {
     accent: string;
     accentSoft: string;
@@ -51,6 +61,16 @@ const DENTAL_CONFIG: VerticalConfig = {
   tagline: "Sistema operativo para clínicas dentales en WhatsApp.",
   primaryCTA: "Entrar al panel dental",
   dashboardLabel: "Panel DentalConnect",
+  documentTitle: "DentalConnect - Panel para clínicas dentales",
+  emailPlaceholder: "tu@clinica.com",
+  orgSlugFallback: "clinica",
+  onboardingOrgQuestion: "¿Cómo se llama tu clínica?",
+  onboardingOrgNameLabel: "Nombre de la clínica *",
+  onboardingOrgInfoCopy: "Esta información aparecerá cuando el bot se comunique con tus pacientes.",
+  onboardingMessengerError: "Primero debemos crear la clínica antes de conectar Messenger.",
+  onboardingServicesCopy: "Activa los servicios que ofrece tu clínica. Puedes editar duración y precio.",
+  onboardingConnectCopy: "Para que el asistente pueda responder mensajes de tus pacientes, necesitamos conectar la página de Facebook de tu clínica.",
+  brandPlaceholder: "Ej: Clínica Sonrisa",
   theme: {
     accent: "#3CBDB9",
     accentSoft: "rgba(60,189,185,0.18)",
@@ -96,6 +116,16 @@ const BARBERSHOP_CONFIG: VerticalConfig = {
   tagline: "Sistema operativo para barberías que trabajan desde WhatsApp.",
   primaryCTA: "Entrar al panel BarberLine",
   dashboardLabel: "Panel BarberLine",
+  documentTitle: "BarberLine - Panel para barberías",
+  emailPlaceholder: "contacto@barberia.com",
+  orgSlugFallback: "barberia",
+  onboardingOrgQuestion: "¿Cómo se llama tu barbería?",
+  onboardingOrgNameLabel: "Nombre de la barbería *",
+  onboardingOrgInfoCopy: "Esta información aparecerá cuando el bot se comunique con tus clientes.",
+  onboardingMessengerError: "Primero debemos crear la barbería antes de conectar Messenger.",
+  onboardingServicesCopy: "Activa los servicios que ofrece tu barbería. Puedes editar duración y precio.",
+  onboardingConnectCopy: "Para que el asistente pueda responder mensajes de tus clientes, necesitamos conectar la página de Facebook de tu barbería.",
+  brandPlaceholder: "Ej: Barbería Central",
   theme: {
     accent: "#25D366",
     accentSoft: "rgba(37,211,102,0.16)",
@@ -142,6 +172,16 @@ const CREATYV_CONFIG: VerticalConfig = {
   tagline: "Sistema operativo para negocios locales usando WhatsApp.",
   primaryCTA: "Entrar al panel",
   dashboardLabel: "Panel Creatyv",
+  documentTitle: "Creatyv - Panel para negocios locales",
+  emailPlaceholder: "contacto@negocio.com",
+  orgSlugFallback: "negocio",
+  onboardingOrgQuestion: "¿Cómo se llama tu negocio?",
+  onboardingOrgNameLabel: "Nombre del negocio *",
+  onboardingOrgInfoCopy: "Esta información aparecerá cuando el bot se comunique con tus clientes.",
+  onboardingMessengerError: "Primero debemos crear el negocio antes de conectar Messenger.",
+  onboardingServicesCopy: "Activa los servicios que ofrece tu negocio. Puedes editar duración y precio.",
+  onboardingConnectCopy: "Para que el asistente pueda responder mensajes de tus clientes, necesitamos conectar la página de Facebook de tu negocio.",
+  brandPlaceholder: "Ej: Mi negocio",
   productName: "Creatyv",
   verticalName: "Negocios locales",
   organizationLabel: "Organización",
@@ -175,4 +215,22 @@ export function detectVerticalFromHostname(hostname: string): VerticalConfig {
 export function getDetectedVerticalConfig(): VerticalConfig {
   if (typeof window === "undefined") return DENTAL_CONFIG;
   return detectVerticalFromHostname(window.location.hostname);
+}
+
+export function applyDetectedVerticalDocumentMetadata() {
+  if (typeof document === "undefined") return;
+  const vertical = getDetectedVerticalConfig();
+  document.title = vertical.documentTitle;
+  document
+    .querySelector('meta[property="og:title"]')
+    ?.setAttribute("content", vertical.documentTitle);
+  document
+    .querySelector('meta[name="twitter:title"]')
+    ?.setAttribute("content", vertical.documentTitle);
+  document
+    .querySelector('meta[property="og:site_name"]')
+    ?.setAttribute("content", `${vertical.brandName} by Creatyv`);
+  document
+    .querySelector('meta[name="apple-mobile-web-app-title"]')
+    ?.setAttribute("content", vertical.brandName);
 }

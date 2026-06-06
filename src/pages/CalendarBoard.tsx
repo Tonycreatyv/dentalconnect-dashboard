@@ -1,11 +1,14 @@
 import { Component, type ReactNode } from "react";
 import CalendarBoard from "../components/CalendarBoard";
+import Appointments from "./Appointments";
+import { useActiveOrg } from "../hooks/useActiveOrg";
+import { getVerticalConfig } from "../config/verticalConfig";
 
 type AgendaBoundaryState = {
   hasError: boolean;
 };
 
-class AgendaErrorBoundary extends Component<{ children: ReactNode }, AgendaBoundaryState> {
+class AgendaErrorBoundary extends Component<{ children: ReactNode; agendaTitle: string }, AgendaBoundaryState> {
   state: AgendaBoundaryState = { hasError: false };
 
   static getDerivedStateFromError() {
@@ -42,8 +45,11 @@ class AgendaErrorBoundary extends Component<{ children: ReactNode }, AgendaBound
 }
 
 export default function CalendarBoardPage() {
+  const { resolvedBusinessType } = useActiveOrg();
+  const vertical = getVerticalConfig(resolvedBusinessType);
+  if (resolvedBusinessType === "barbershop") return <Appointments />;
   return (
-    <AgendaErrorBoundary>
+    <AgendaErrorBoundary agendaTitle={vertical.agendaTitle}>
       <CalendarBoard />
     </AgendaErrorBoundary>
   );

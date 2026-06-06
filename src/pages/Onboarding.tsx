@@ -151,7 +151,7 @@ export default function Onboarding() {
 
     const now = new Date().toISOString();
     const trialEnds = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-    const baseSlug = slugifyClinicName(clinicName) || "clinica";
+    const baseSlug = slugifyClinicName(clinicName) || vertical.orgSlugFallback;
     const orgId = `${baseSlug}-${Date.now().toString(36)}`;
 
     const orgInsert = await supabase.from("organizations").insert({
@@ -267,7 +267,7 @@ export default function Onboarding() {
     try {
       setError(null);
       const orgId = createdOrgId || activeOrgId;
-      if (!orgId) throw new Error("Primero debemos crear la clínica antes de conectar Messenger.");
+      if (!orgId) throw new Error(vertical.onboardingMessengerError);
       localStorage.setItem(META_REDIRECT_FLAG, "/onboarding?connected=1");
       await startMetaOAuth(orgId);
     } catch (err: any) {
@@ -302,13 +302,13 @@ export default function Onboarding() {
           {/* ── Step 1 ── */}
           {step === 1 && (
             <div className="space-y-4">
-              <h2 className="text-xl font-semibold text-white">¿Cómo se llama tu clínica?</h2>
-              <p className="text-white/50 text-sm">Esta información aparecerá cuando el bot se comunique con tus pacientes.</p>
+              <h2 className="text-xl font-semibold text-white">{vertical.onboardingOrgQuestion}</h2>
+              <p className="text-white/50 text-sm">{vertical.onboardingOrgInfoCopy}</p>
               <div className="space-y-3">
                 <div>
-                  <label className={labelCls}>Nombre de la clínica *</label>
+                  <label className={labelCls}>{vertical.onboardingOrgNameLabel}</label>
                   <input value={clinicName} onChange={(e) => setClinicName(e.target.value)}
-                    className={inputCls} placeholder="Ej: Clínica Dental Sonrisas" />
+                    className={inputCls} placeholder={vertical.brandPlaceholder} />
                 </div>
                 <div>
                   <label className={labelCls}>País y zona horaria *</label>
@@ -385,7 +385,7 @@ export default function Onboarding() {
             <div className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold text-white">¿Qué servicios ofreces?</h2>
-                <p className="text-white/50 text-sm">Activa los servicios que ofrece tu clínica. Puedes editar duración y precio.</p>
+                <p className="text-white/50 text-sm">{vertical.onboardingServicesCopy}</p>
               </div>
               <div className="space-y-3">
                 {services.map((service, index) => (
@@ -428,7 +428,7 @@ export default function Onboarding() {
             <div className="space-y-4 text-center">
               <h2 className="text-xl font-semibold text-white">Conecta tu página de Facebook</h2>
               <p className="text-sm text-white/50">
-                Para que el asistente pueda responder mensajes de tus pacientes, necesitamos conectar la página de Facebook de tu clínica.
+                {vertical.onboardingConnectCopy}
               </p>
               <div className="py-8">
                 <button onClick={connectMessenger}

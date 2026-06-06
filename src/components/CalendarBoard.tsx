@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { CalendarDays, ChevronDown, ChevronLeft, Clock, PencilLine, Plus, Trash2, User } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useClinic } from "../context/ClinicContext";
+import { useActiveOrg } from "../hooks/useActiveOrg";
 import { dedupeByKey } from "../lib/dedupe";
 import { appointmentKey, normalizedStartISO } from "../lib/appointments";
 import { addDays, buildLocalISO, startOfWeekSunday, toEndOfDay, toStartOfDay } from "../lib/time";
@@ -600,9 +601,10 @@ function AppointmentCard({
 export default function CalendarBoard() {
   const navigate = useNavigate();
   const { clinic } = useClinic();
+  const { resolvedOrgId } = useActiveOrg();
   const [searchParams] = useSearchParams();
 
-  const ORG = clinic?.organization_id ?? DEFAULT_ORG;
+  const ORG = resolvedOrgId || clinic?.organization_id || DEFAULT_ORG;
 
   const [view, setView] = useState<ViewMode>(() =>
     typeof window !== "undefined" && window.innerWidth < 1024 ? "day" : "week"

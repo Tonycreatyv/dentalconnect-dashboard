@@ -17,6 +17,7 @@ type ConnectionStatus = "idle" | "loading" | "connecting" | "saving" | "success"
 interface Props {
   organizationId: string;
   onConnected?: () => void;
+  businessType?: "dental" | "barbershop";
 }
 
 // Extend window for FB SDK
@@ -58,7 +59,7 @@ function loadFacebookSDK(): Promise<void> {
   });
 }
 
-export default function WhatsAppConnect({ organizationId, onConnected }: Props) {
+export default function WhatsAppConnect({ organizationId, onConnected, businessType = "dental" }: Props) {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [connectedPhone, setConnectedPhone] = useState<string | null>(null);
@@ -232,15 +233,17 @@ export default function WhatsAppConnect({ organizationId, onConnected }: Props) 
   }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-      <div className="flex items-start gap-4">
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-5">
+      <div className="flex items-start gap-3 sm:gap-4">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-500/20">
           <MessageCircle className="h-5 w-5 text-green-400" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-white">Conectar WhatsApp</div>
           <div className="mt-1 text-sm text-white/50">
-            Conectá el número de WhatsApp de tu clínica para recibir y responder pacientes automáticamente.
+            {businessType === "barbershop"
+              ? "Conectá el WhatsApp de tu barbería para recibir y responder clientes automáticamente."
+              : "Conectá el número de WhatsApp de tu clínica para recibir y responder pacientes automáticamente."}
           </div>
 
           {error ? (
@@ -254,7 +257,7 @@ export default function WhatsAppConnect({ organizationId, onConnected }: Props) 
             type="button"
             onClick={handleConnect}
             disabled={status === "loading" || status === "connecting" || status === "saving"}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#20bd5a] disabled:opacity-50"
+            className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#20bd5a] disabled:opacity-50 sm:px-5 sm:py-2.5"
           >
             {status === "loading" ? (
               <>
@@ -280,7 +283,9 @@ export default function WhatsAppConnect({ organizationId, onConnected }: Props) 
           </button>
 
           <div className="mt-3 text-[11px] text-white/30">
-            Se abrirá una ventana de Meta para autorizar la conexión. Necesitás acceso admin al WhatsApp Business de la clínica.
+            {businessType === "barbershop"
+              ? "Se abrirá una ventana de Meta. Necesitás acceso admin al WhatsApp Business de la barbería."
+              : "Se abrirá una ventana de Meta para autorizar la conexión. Necesitás acceso admin al WhatsApp Business de la clínica."}
           </div>
         </div>
       </div>
