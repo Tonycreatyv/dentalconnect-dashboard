@@ -136,7 +136,12 @@ export function Topbar({
   }
 
   return (
-    <div className="overflow-hidden border-b border-[#25384A] bg-[#0B1620]/95 px-4 py-2 backdrop-blur lg:ui-card lg:border-white/10 lg:bg-white/[0.055] lg:px-5 lg:py-4">
+    <div className={[
+      "overflow-hidden border-b px-4 py-2 backdrop-blur lg:px-5 lg:py-4",
+      resolvedBusinessType === "barbershop"
+        ? "border-[#1E2227] bg-[#0B0D0F]/95 lg:rounded-3xl lg:border lg:bg-[#0E1014]"
+        : "border-[#25384A] bg-[#0B1620]/95 lg:ui-card lg:border-white/10 lg:bg-white/[0.055]",
+    ].join(" ")}>
       <div className="flex items-center justify-between gap-3 lg:hidden">
         {onMenu ? (
           <button
@@ -171,9 +176,9 @@ export function Topbar({
 
       <div className="hidden min-w-0 lg:flex lg:items-center lg:gap-3">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[10px] uppercase tracking-[0.22em] text-white/50">{productLabel} · {appLabel}</div>
+          <div className={`truncate text-[10px] uppercase tracking-[0.22em] ${resolvedBusinessType === "barbershop" ? "text-[#18C37E]" : "text-white/50"}`}>{resolvedBusinessType === "barbershop" ? "BARBERÍA · BARBERLINE" : `${productLabel} · ${appLabel}`}</div>
           <div className="mt-1 truncate text-lg font-black tracking-[-0.03em] text-white">{displayTitle}</div>
-          <div className="mt-1 truncate text-xs font-medium text-emerald-300">Viewing: {viewingLabel}</div>
+          <div className={`mt-1 truncate text-xs font-medium ${resolvedBusinessType === "barbershop" ? "text-[#8A9299]" : "text-emerald-300"}`}>{resolvedBusinessType === "barbershop" ? viewingLabel : `Viewing: ${viewingLabel}`}</div>
           <div className="mt-1 truncate text-sm text-white/70">
             {subtitle}
           </div>
@@ -185,7 +190,7 @@ export function Topbar({
             <select
               value={selectedOrgId || resolvedOrgId || activeOrgId || orgOptions[0]?.organizationId || DEV_ORG_OPTIONS[0].organizationId}
               onChange={(e) => void handleDevOrgChange(e.target.value)}
-              className="w-full truncate rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2 text-sm text-white outline-none"
+              className={resolvedBusinessType === "barbershop" ? "w-full truncate rounded-xl border border-white/[0.08] bg-[#05060A] px-3 py-2 text-sm text-[#E8ECF2] outline-none focus:border-[#18C37E]/35" : "w-full truncate rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2 text-sm text-white outline-none"}
             >
               {operatorOrgOptions.length > 0 ? (
                 <optgroup label={resolvedBusinessType === "barbershop" ? "Barberías" : "Demos activos"}>

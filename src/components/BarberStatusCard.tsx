@@ -37,7 +37,7 @@ export function BarberStatusCard({
     status === "Disponible"
       ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-200"
       : status === "En corte"
-      ? "border-[#C97738]/35 bg-[#C97738]/14 text-[#FFD7AE]"
+      ? "border-[#18C37E]/30 bg-[#18C37E]/10 text-[#BDF8D1]"
       : "border-amber-300/25 bg-amber-400/10 text-amber-200";
 
   return (

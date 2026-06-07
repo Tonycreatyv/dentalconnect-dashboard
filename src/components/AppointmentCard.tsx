@@ -22,7 +22,7 @@ export function AppointmentCard({
   service,
   provider,
   status,
-  accentClass = "bg-[#C97738]",
+  accentClass = "bg-[#18C37E]",
   compact = false,
   onMessage,
   onClick,

@@ -66,6 +66,7 @@ type MsgRow = {
   role: string | null;
   content: string | null;
   created_at: string;
+  interactive_options?: string[];
 };
 
 type OutboxStatus = {
@@ -200,6 +201,7 @@ export default function Inbox() {
   }, [directLead, leads, leadId]);
   const resolvedLeadId = selectedLead?.id ?? leadId ?? "";
   const selectedConversationMode = getConversationModeLabel(selectedLead);
+  const hasActiveThread = Boolean(leadId);
 
   const orgOptions = useMemo(() => {
     const map = new Map<string, { organizationId: string; label: string; businessType: "dental" | "barbershop" }>();
@@ -667,7 +669,7 @@ export default function Inbox() {
   const selectedName = selectedLead ? getBestDisplayName(selectedLead) : "Conversación";
 
   return (
-    <div className="mobile-bottom-safe flex h-[100dvh] min-w-0 flex-col overflow-hidden bg-[#0B1620] lg:h-auto lg:min-h-screen lg:bg-[#0B1117] lg:pb-0">
+    <div className={`mobile-bottom-safe flex h-[100dvh] min-w-0 flex-col overflow-hidden ${inboxIsBarbershop ? "bg-[#050608] text-[#F0F4F8]" : "bg-[#0B1620] lg:bg-[#0B1117]"} lg:h-auto lg:min-h-screen lg:pb-0`}>
       {leadId && (
         <div className="safe-area-top border-b border-[#25384A] bg-[#0B1620]/95 px-4 py-2 backdrop-blur lg:hidden">
           <div className="flex min-w-0 items-center gap-3">
@@ -711,9 +713,10 @@ export default function Inbox() {
         </div>
       )}
 
-      <div className={["border-b border-[#25384A] bg-[#0B1620] px-4 py-3 lg:border-0 lg:bg-transparent lg:px-3", leadId ? "hidden lg:block" : "block"].join(" ")}>
+      <div className={[inboxIsBarbershop ? "border-b border-[#1E2227] bg-[#0B0D0F] px-4 py-3 lg:border-0 lg:bg-transparent lg:px-0" : "border-b border-[#25384A] bg-[#0B1620] px-4 py-3 lg:border-0 lg:bg-transparent lg:px-3", leadId ? "hidden lg:block" : "block"].join(" ")}>
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
+            {inboxIsBarbershop ? <div className="bl-eyebrow">WHATSAPP · BARBERLINE</div> : null}
             <h1 className="text-[22px] font-black tracking-[-0.03em] text-[#F8FAFC] lg:text-xl lg:text-white">Inbox</h1>
             <p className="text-safe text-xs text-[#9CAAB8] sm:text-sm lg:text-white/50">
               {inboxIsBarbershop
@@ -732,7 +735,7 @@ export default function Inbox() {
                   void setActiveOrgId(nextOrg);
                   navigate("/inbox");
                 }}
-                className="mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none"
+                className={inboxIsBarbershop ? "mt-1 h-10 w-full truncate rounded-xl border border-white/[0.08] bg-[#05060A] px-3 text-xs text-[#E8ECF2] outline-none sm:text-sm" : "mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none"}
               >
                 {orgOptions.map((org) => (
                   <option key={org.organizationId} value={org.organizationId}>
@@ -743,7 +746,7 @@ export default function Inbox() {
             </label>
             <label className="text-xs text-white/50">
               Canal
-              <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value as ChannelFilter)} className="mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none">
+              <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value as ChannelFilter)} className={inboxIsBarbershop ? "mt-1 h-10 w-full truncate rounded-xl border border-white/[0.08] bg-[#05060A] px-3 text-xs text-[#E8ECF2] outline-none sm:text-sm" : "mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none"}>
                 <option value="all">All</option>
                 <option value="messenger">Messenger</option>
                 <option value="whatsapp">WhatsApp</option>
@@ -751,7 +754,7 @@ export default function Inbox() {
             </label>
             <label className="text-xs text-white/50">
               Buscar
-              <div className="mt-1 flex h-10 min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-[#111923] px-3">
+              <div className={`mt-1 flex h-10 min-w-0 items-center gap-2 rounded-xl border px-3 ${inboxIsBarbershop ? "border-white/[0.08] bg-[#05060A]" : "border-white/10 bg-[#111923]"}`}>
                 <Search className="h-4 w-4 shrink-0 text-white/40" />
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="9595, nombre, mensaje..." className="min-w-0 flex-1 bg-transparent text-xs sm:text-sm text-white outline-none placeholder:text-white/30" />
               </div>
@@ -801,7 +804,7 @@ export default function Inbox() {
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="grid h-full min-h-0 grid-cols-12 gap-0 lg:gap-4 lg:p-4">
-          <div className={["col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-5 xl:col-span-4", leadId ? "hidden lg:flex" : "flex"].join(" ")}>
+          <div className={["col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-5 xl:col-span-4", hasActiveThread ? "hidden lg:flex" : "flex"].join(" ")}>
             <div className="flex-1 overflow-y-auto">
               <div className="space-y-2 p-3 pb-4 lg:p-0">
                 {loadingLeads ? (
@@ -819,7 +822,7 @@ export default function Inbox() {
                   const mode = getConversationModeLabel(lead);
                   const status = conversationStatusCopy(mode);
                   return (
-                    <MobileConversationRow key={lead.id} onClick={() => navigate(`/inbox/${lead.id}`)} className={["group relative overflow-hidden", active ? "border-[#25D366]/40 bg-[#25D366]/10 ring-1 ring-[#25D366]/15" : ""].join(" ")}>
+                    <MobileConversationRow key={lead.id} onClick={() => navigate(`/inbox/${lead.id}`)} className={["group relative overflow-hidden", inboxIsBarbershop ? "border-[#1E2228] bg-[#0E1014] hover:bg-[#131820]" : "", active ? "border-[#25D366]/40 bg-[#25D366]/10 ring-1 ring-[#25D366]/15" : ""].join(" ")}>
                       <div className="flex min-w-0 gap-3">
                         <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#162838] text-xs font-black text-[#25D366]">
                           {displayName.slice(0, 1).toUpperCase()}
@@ -852,14 +855,14 @@ export default function Inbox() {
             </div>
           </div>
 
-          <div className={["col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-7 xl:col-span-8", leadId ? "flex" : "hidden lg:flex"].join(" ")}>
-            {!leadId ? (
+          <div className={["col-span-12 flex min-h-0 flex-col overflow-hidden lg:col-span-7 xl:col-span-8", hasActiveThread ? "flex" : "hidden lg:flex"].join(" ")}>
+            {!hasActiveThread ? (
               <div className="flex flex-1 items-center justify-center bg-white/5 lg:rounded-2xl lg:border lg:border-white/10">
                 <div className="py-12 text-center"><MessageCircle className="mx-auto mb-4 h-16 w-16 text-white/20" /><div className="text-xs text-white/50 sm:text-sm">Selecciona una conversación</div></div>
               </div>
             ) : (
-              <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white/5 lg:rounded-2xl lg:border lg:border-white/10">
-                <div className="hidden min-w-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 lg:flex">
+              <div className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden lg:rounded-2xl lg:border ${inboxIsBarbershop ? "border-[#1E2228] bg-[#0E1014]" : "border-white/10 bg-white/5"}`}>
+                <div className={`hidden min-w-0 items-center justify-between gap-3 border-b px-4 py-3 lg:flex ${inboxIsBarbershop ? "border-[#1E2228]" : "border-white/10"}`}>
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold text-white">{selectedName}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/50">
@@ -908,6 +911,7 @@ export default function Inbox() {
                         tone={isInbound ? "user" : isStaff ? "staff" : "bot"}
                         label={!isInbound ? (isStaff ? "Staff" : isBot ? "Bot" : "Assistant") : undefined}
                         content={m.content ?? "—"}
+                        options={m.interactive_options}
                         meta={
                           <>
                           <span className="shrink-0">{new Date(m.created_at).toLocaleString("es", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}</span>
@@ -920,7 +924,7 @@ export default function Inbox() {
                   })}
                 </div>
 
-                <div className="border-t border-white/10 bg-white/5 p-2.5 sm:p-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}>
+                <div className={`border-t p-2.5 sm:p-3 ${inboxIsBarbershop ? "border-[#1E2228] bg-[#0B0D0F]" : "border-white/10 bg-white/5"}`} style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}>
                   <div className="mb-2 flex flex-wrap gap-2">
                     {quickReplies.map((reply) => <button key={reply.label} onClick={() => setComposer(reply.text)} className="min-h-9 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/60 transition hover:bg-white/10">{reply.label}</button>)}
                   </div>

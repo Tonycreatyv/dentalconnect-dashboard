@@ -118,6 +118,7 @@ function barberText(a: AppointmentRow, providerLabel = "Barbero"): string {
 export default function Appointments() {
   const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
   const vertical = getVerticalConfig(resolvedBusinessType);
+  const isBarbershop = resolvedBusinessType === "barbershop";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<AppointmentRow[]>([]);
@@ -193,7 +194,7 @@ export default function Appointments() {
     return () => {
       mounted = false;
     };
-  }, [effectiveOrgId]);
+  }, [effectiveOrgId, resolvedBusinessType]);
 
   const mapped = useMemo(() => {
     return rows
@@ -305,7 +306,7 @@ export default function Appointments() {
   }
 
   return (
-    <div className="app-page">
+    <div className={`app-page ${isBarbershop ? "text-[#F0F4F8]" : ""}`}>
       <MobileCard elevated className="lg:hidden">
         <MobileHeader
           title={vertical.agendaTitle}
@@ -330,17 +331,17 @@ export default function Appointments() {
         </div>
       </MobileCard>
 
-      <section className="hidden lg:block relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#17120F] p-3 shadow-[0_18px_48px_rgba(0,0,0,0.28)] sm:rounded-[2rem] sm:p-6">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(201,119,56,0.2),transparent_34%),radial-gradient(circle_at_90%_20%,rgba(240,194,120,0.12),transparent_30%)]" />
+      <section className={`hidden lg:block relative overflow-hidden rounded-[1.35rem] border p-3 shadow-[0_18px_48px_rgba(0,0,0,0.28)] sm:rounded-[2rem] sm:p-6 ${isBarbershop ? "border-[#1E2228] bg-[#0E1014]" : "border-white/10 bg-[#17120F]"}`}>
+        {!isBarbershop ? <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(201,119,56,0.2),transparent_34%),radial-gradient(circle_at_90%_20%,rgba(240,194,120,0.12),transparent_30%)]" /> : null}
         <div className="relative flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
-            <div className="inline-flex rounded-full border border-[#C97738]/25 bg-[#C97738]/10 px-2.5 py-1 text-[11px] font-bold text-[#FFD7AE] sm:px-3 sm:text-xs">
+            <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold sm:px-3 sm:text-xs ${isBarbershop ? "border-[#18C37E]/20 bg-[#18C37E]/10 text-[#18C37E]" : "border-[#C97738]/25 bg-[#C97738]/10 text-[#FFD7AE]"}`}>
               {resolvedBusinessType === "barbershop" ? "Agenda compartida BarberLine" : vertical.agendaTitle}
             </div>
             <h1 className="mt-3 text-2xl font-black tracking-tight text-white sm:mt-4 sm:text-3xl">{vertical.agendaTitle}</h1>
             <p className="text-safe mt-1 text-xs text-white/55 sm:mt-2 sm:text-sm">
               {resolvedBusinessType === "barbershop"
-                ? "Citas de WhatsApp, walk-ins y ocupación por barbero en una vista limpia para tablet."
+                ? "Citas de WhatsApp, walk-ins y ocupación por barbero."
                 : "Citas creadas automáticamente desde WhatsApp y Messenger."}
             </p>
           </div>
@@ -364,14 +365,14 @@ export default function Appointments() {
           { label: "Pendientes", value: kpi.pending, tone: "text-amber-200" },
           { label: "Canceladas", value: kpi.cancelled, tone: "text-rose-200" },
         ].map((item) => (
-          <div key={item.label} className="ui-card p-3 sm:p-4">
+          <div key={item.label} className={`${isBarbershop ? "bl-card" : "ui-card"} p-3 sm:p-4`}>
             <div className="truncate text-xs text-white/45">{item.label}</div>
             <div className={`mt-1 text-2xl font-black sm:text-3xl ${item.tone}`}>{item.value}</div>
           </div>
         ))}
       </section>
 
-      <section className={`${showMobileFilters ? "block" : "hidden lg:block"} ui-card ui-card-pad`}>
+      <section className={`${showMobileFilters ? "block" : "hidden lg:block"} ${isBarbershop ? "bl-card" : "ui-card ui-card-pad"}`}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="text-xs font-semibold text-white/55">
             {vertical.providerLabel}
@@ -399,7 +400,7 @@ export default function Appointments() {
       </section>
 
       {loading && (
-        <section className="ui-card ui-card-pad text-sm text-white/60">
+        <section className={`${isBarbershop ? "bl-card" : "ui-card ui-card-pad"} text-sm text-white/60`}>
           Cargando citas...
         </section>
       )}
@@ -437,7 +438,7 @@ export default function Appointments() {
       )}
 
       {empty && (
-        <section className="hidden ui-card ui-card-pad text-sm text-white/60 lg:block">
+        <section className={`hidden text-sm text-white/60 lg:block ${isBarbershop ? "bl-card" : "ui-card ui-card-pad"}`}>
           Cuando WhatsApp confirme una cita, aparecerá aquí.
         </section>
       )}
@@ -474,7 +475,7 @@ export default function Appointments() {
                 <MobileEmptyState title="Sin citas para hoy" description="Las citas confirmadas aparecerán aquí." />
               ) : todayAppointments.map((a) => (
                 <MobileAppointmentRow key={a.id}>
-                  <span className="w-14 shrink-0 text-sm font-black text-[#25D366]">{timeText(a.derivedDate)}</span>
+                  <span className="w-14 shrink-0 text-sm font-black text-[#25D366]">{a.appointment_time || timeText(a.derivedDate)}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-bold text-[#F8FAFC]">{clientText(a)}</span>
                     <span className="block truncate text-xs text-[#9CAAB8]">{serviceText(a)} · {barberText(a, vertical.providerLabel)}</span>
@@ -485,7 +486,7 @@ export default function Appointments() {
             </section>
           </section>
 
-          <section className="hidden ui-card ui-card-pad lg:block">
+          <section className={`hidden lg:block ${isBarbershop ? "bl-card" : "ui-card ui-card-pad"}`}>
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-black text-white">Citas de hoy</h2>
@@ -499,35 +500,35 @@ export default function Appointments() {
               ) : todayAppointments.map((a) => (
                 <AppointmentCard
                   key={a.id}
-                  time={timeText(a.derivedDate)}
+                  time={a.appointment_time || timeText(a.derivedDate)}
                   client={clientText(a)}
                   service={serviceText(a)}
                   provider={barberText(a, vertical.providerLabel)}
                   status={a.status}
-                  accentClass="bg-[#C97738]"
+                  accentClass={isBarbershop ? "bg-[#18C37E]" : "bg-[#C97738]"}
                 />
               ))}
             </div>
           </section>
 
-          <section className="hidden ui-card ui-card-pad lg:block">
+          <section className={`hidden lg:block ${isBarbershop ? "bl-card" : "ui-card ui-card-pad"}`}>
             <h2 className="text-lg font-black text-white">Próximas citas (7 días)</h2>
             <div className="mt-4 grid gap-2 lg:grid-cols-2">
               {upcoming.length === 0 && <div className="text-sm text-white/45">No hay próximas citas.</div>}
               {upcoming.map((a) => (
-                <AppointmentCard key={a.id} time={`${dateText(a.derivedDate)} · ${timeText(a.derivedDate)}`} client={clientText(a)} service={serviceText(a)} provider={barberText(a, vertical.providerLabel)} status={a.status} accentClass="bg-[#D89A5E]" />
+                <AppointmentCard key={a.id} time={`${dateText(a.derivedDate)} · ${a.appointment_time || timeText(a.derivedDate)}`} client={clientText(a)} service={serviceText(a)} provider={barberText(a, vertical.providerLabel)} status={a.status} accentClass={isBarbershop ? "bg-[#18C37E]" : "bg-[#D89A5E]"} />
               ))}
             </div>
           </section>
 
-          <section className="hidden ui-card ui-card-pad lg:block">
+          <section className={`hidden lg:block ${isBarbershop ? "bl-card" : "ui-card ui-card-pad"}`}>
             <h2 className="text-lg font-black text-white">Vista semanal</h2>
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
               {weekKeys.map((k) => {
                 const date = new Date(`${k}T00:00:00`);
                 const list = weeklyByDay.get(k) ?? [];
                 return (
-                  <div key={k} className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.045] p-3">
+                  <div key={k} className={`min-w-0 rounded-2xl border p-3 ${isBarbershop ? "border-[#1E2228] bg-[#0B0D0F]" : "border-white/10 bg-white/[0.045]"}`}>
                     <div className="text-xs font-black uppercase tracking-wide text-white/70">
                       {date.toLocaleDateString("es-HN", { weekday: "short", day: "numeric", month: "short" })}
                     </div>
@@ -535,7 +536,7 @@ export default function Appointments() {
                       {list.length === 0 && <div className="text-xs text-white/35">Sin citas</div>}
                       {list.map((a) => (
                         <div key={a.id} className="min-w-0 rounded-xl border border-white/10 bg-black/20 px-2 py-2">
-                          <div className="text-xs text-[#F0C278]">{timeText(a.derivedDate)}</div>
+                          <div className={`text-xs ${isBarbershop ? "text-[#18C37E]" : "text-[#F0C278]"}`}>{a.appointment_time || timeText(a.derivedDate)}</div>
                           <div className="truncate text-sm text-white">{clientText(a)}</div>
                           <div className="truncate text-xs text-white/45">{serviceText(a)}</div>
                           <div className="mt-1">

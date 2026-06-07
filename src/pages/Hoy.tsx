@@ -11,7 +11,6 @@ import { useActiveOrg } from "../hooks/useActiveOrg";
 import { getVerticalConfig } from "../config/verticalConfig";
 import { BarberStatusCard, type BarberAppointment } from "../components/BarberStatusCard";
 import { AppointmentCard as BusinessAppointmentCard } from "../components/AppointmentCard";
-import { BARBER_DEMO_ORG_ID, buildBarberDemoAppointments } from "../barber-app/mock-data";
 import {
   MobileActionButton,
   MobileCard,
@@ -655,26 +654,6 @@ export default function Hoy() {
 
   async function load() {
     setLoading(true);
-    if (activeBusinessType === "barbershop" && orgId === BARBER_DEMO_ORG_ID) {
-      const demoAppointments = buildBarberDemoAppointments(selectedDate) as unknown as AppointmentRow[];
-      const demoWeekAppointments = buildBarberDemoAppointments(selectedDate) as unknown as WeekAppt[];
-      setAppointments(demoAppointments);
-      setWeekAppts(demoWeekAppointments);
-      setLeadChannelById({
-        "barber-demo-luis-mejia": "whatsapp",
-        "barber-demo-juan-perez": "whatsapp",
-        "barber-demo-andres-castro": "whatsapp",
-        "barber-demo-marco-rodriguez": "whatsapp",
-      });
-      setNewMessages(1);
-      setPendingOutbox(0);
-      setAlerts([]);
-      setTomorrowCount(0);
-      setWeekCount(demoWeekAppointments.length);
-      setHumanHandoffCount(0);
-      setLoading(false);
-      return;
-    }
     const todayStartDate = startOfDay(selectedDate);
     const todayEndDate   = endOfDay(selectedDate);
     const todayStart = todayStartDate.toISOString();

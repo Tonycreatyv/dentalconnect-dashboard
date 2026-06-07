@@ -23,7 +23,7 @@ import { MobileAppHeader, MobileSettingsRow, MobileStatusPill } from "../compone
 
 const DEFAULT_ORG = "clinic-demo";
 
-type ServiceItem = { name: string; price_from?: number | null; price_to?: number | null; currency?: string; duration_min?: number | null; notes?: string };
+type ServiceItem = { name: string; price_from?: number | null; price_to?: number | null; currency?: string; duration_min?: number | null; notes?: string; active?: boolean };
 type FaqItem = { q: string; a: string };
 type DayHours = { closed: boolean; open?: string; close?: string };
 type HoursMap = Record<string, DayHours>;
@@ -117,6 +117,7 @@ export default function Settings() {
   const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
   const ORG = resolvedOrgId || activeOrgId || clinic?.organization_id || DEFAULT_ORG;
   const vertical = getVerticalConfig(resolvedBusinessType);
+  const isBarbershop = resolvedBusinessType === "barbershop";
 
   const [tab, setTab] = useState<TabKey>("integraciones");
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
@@ -133,6 +134,7 @@ export default function Settings() {
   const [mapsUrl, setMapsUrl] = useState("");
   const [hours, setHours] = useState<HoursMap>(defaultHours());
   const [services, setServices] = useState<ServiceItem[]>(getVerticalDefaultServices(resolvedBusinessType));
+  const [editingServiceIndex, setEditingServiceIndex] = useState<number | null>(null);
   const [faqs, setFaqs] = useState<FaqItem[]>(getVerticalDefaultFaqs(resolvedBusinessType));
   const [emergency, setEmergency] = useState("Si es urgencia, cuéntanos síntomas.");
   const [policiesCancel, setPoliciesCancel] = useState("Avisa con 2 horas de anticipación.");
@@ -496,7 +498,7 @@ export default function Settings() {
   }, [location.search, tabs]);
 
   const renderIntegrations = () => (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${isBarbershop ? "text-[#F0F4F8]" : ""}`}>
       <BotKillSwitch orgId={ORG} />
       {INTEGRATIONS.map((integration) => {
         const status = statusFor(integration.key);
@@ -607,11 +609,66 @@ export default function Settings() {
     </div>
   );
 
+  const formatServicePrice = (service: ServiceItem) => {
+    const currency = service.currency ?? "HNL";
+    const from = service.price_from;
+    const to = service.price_to;
+    if (from != null && to != null) return `${currency} ${from} - ${to}`;
+    if (from != null) return `Desde ${currency} ${from}`;
+    if (to != null) return `Hasta ${currency} ${to}`;
+    return "Precio no definido";
+  };
+
+  const addService = () => {
+    const nextIndex = services.length;
+    setServices((prev) => [
+      ...prev,
+      { name: `Nuevo ${vertical.serviceLabel.toLowerCase()}`, price_from: null, currency: "HNL", duration_min: 30, notes: "", active: true } as ServiceItem,
+    ]);
+    setEditingServiceIndex(nextIndex);
+  };
+
+  const renderServiceEditor = (s: ServiceItem, idx: number) => (
+    <div className="mt-3 rounded-2xl border border-[#25D366]/20 bg-[#0B1620] p-3">
+      <div className="flex gap-2">
+        <input value={s.name} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} className="flex-1 h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm" placeholder="Nombre" />
+        <button onClick={() => { setServices(prev => prev.filter((_, i) => i !== idx)); setEditingServiceIndex(null); }} className="w-11 h-11 flex items-center justify-center rounded-xl border border-white/10 text-white/50 hover:bg-white/10"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <input type="number" value={s.price_from ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_from: e.target.value ? Number(e.target.value) : null } : x))} className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm" placeholder="Desde" />
+        <input type="number" value={s.price_to ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_to: e.target.value ? Number(e.target.value) : null } : x))} className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm" placeholder="Hasta" />
+        <input type="number" value={s.duration_min ?? 30} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, duration_min: Number(e.target.value) } : x))} className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm" placeholder="Min" />
+      </div>
+      <input value={s.notes ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, notes: e.target.value } : x))} className="mt-2 w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm" placeholder="Notas internas" />
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setServices(prev => prev.map((x, i) => i === idx ? { ...x, active: (x as any).active === false } as ServiceItem : x))}
+          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/70 hover:bg-white/10"
+        >
+          {(s as any).active === false ? "Activar" : "Desactivar"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditingServiceIndex(null)}
+          className="rounded-xl border border-[#25D366]/30 bg-[#25D366]/12 px-3 py-2 text-xs font-black text-[#BDF8D1] hover:bg-[#25D366]/18"
+        >
+          Listo
+        </button>
+      </div>
+    </div>
+  );
+
   const renderServicios = () => (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="font-medium text-white">{vertical.servicesLabel}</div>
-        <button onClick={() => setServices(prev => [...prev, { name: `Nuevo ${vertical.serviceLabel.toLowerCase()}`, price_from: null, currency: "HNL", duration_min: 30, notes: "" }])} className="px-3 py-1.5 rounded-lg bg-white/10 text-sm font-medium text-white/80 hover:bg-white/15">+ Agregar</button>
+        <div>
+          <div className="text-lg font-black text-white">{vertical.servicesLabel}</div>
+          {resolvedBusinessType === "barbershop" ? (
+            <div className="mt-1 text-sm text-white/50">Precios, duración y estado de cada servicio.</div>
+          ) : null}
+        </div>
+        <button onClick={addService} className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white/85 hover:bg-white/15">+ Agregar</button>
       </div>
       {import.meta.env.DEV ? (
         <div className="rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-sm text-amber-100">
@@ -632,22 +689,54 @@ export default function Settings() {
           </button>
         </div>
       ) : null}
-      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-        {services.map((s, idx) => (
-          <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-3">
-            <div className="flex gap-2">
-              <input value={s.name} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} className="flex-1 h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Nombre" />
-              <button onClick={() => setServices(prev => prev.filter((_, i) => i !== idx))} className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/10 text-white/50 hover:bg-white/10"><X className="h-4 w-4" /></button>
+      {resolvedBusinessType === "barbershop" ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          {services.map((s, idx) => {
+            const active = (s as any).active !== false;
+            return (
+              <div key={idx} className="rounded-2xl border border-white/10 bg-[#0B1620]/70 p-4">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-black text-white">{s.name || "Servicio sin nombre"}</div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-white/72">{formatServicePrice(s)}</span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-white/72">{s.duration_min ?? 30} min</span>
+                      <span className={`rounded-full border px-2.5 py-1 font-bold ${active ? "border-[#25D366]/25 bg-[#25D366]/10 text-[#BDF8D1]" : "border-white/10 bg-white/5 text-white/45"}`}>
+                        {active ? "Activo" : "Inactivo"}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingServiceIndex(editingServiceIndex === idx ? null : idx)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white/75 hover:bg-white/10"
+                  >
+                    Editar
+                  </button>
+                </div>
+                {editingServiceIndex === idx ? renderServiceEditor(s, idx) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+          {services.map((s, idx) => (
+            <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-3">
+              <div className="flex gap-2">
+                <input value={s.name} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} className="flex-1 h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Nombre" />
+                <button onClick={() => setServices(prev => prev.filter((_, i) => i !== idx))} className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/10 text-white/50 hover:bg-white/10"><X className="h-4 w-4" /></button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <input type="number" value={s.price_from ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_from: e.target.value ? Number(e.target.value) : null } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Desde" />
+                <input type="number" value={s.price_to ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_to: e.target.value ? Number(e.target.value) : null } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Hasta" />
+                <input type="number" value={s.duration_min ?? 30} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, duration_min: Number(e.target.value) } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Min" />
+              </div>
+              <input value={s.notes ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, notes: e.target.value } : x))} className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Notas" />
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <input type="number" value={s.price_from ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_from: e.target.value ? Number(e.target.value) : null } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Desde" />
-              <input type="number" value={s.price_to ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, price_to: e.target.value ? Number(e.target.value) : null } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Hasta" />
-              <input type="number" value={s.duration_min ?? 30} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, duration_min: Number(e.target.value) } : x))} className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Min" />
-            </div>
-            <input value={s.notes ?? ""} onChange={(e) => setServices(prev => prev.map((x, i) => i === idx ? { ...x, notes: e.target.value } : x))} className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Notas" />
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -754,14 +843,29 @@ export default function Settings() {
       </section>
 
       <div className="hidden lg:block">
-        <PageHeader title="Configuracion" subtitle={vertical.settingsSubtitle} showBackOnMobile backTo="/overview"
-          action={<button onClick={save} disabled={saving || !isDirty} className={`px-4 py-2 rounded-xl text-sm font-semibold ${isDirty ? "bg-[#3CBDB9] text-[#0B1117]" : "bg-white/10 text-white/40"}`}>{saving ? "Guardando..." : isDirty ? "Guardar" : "Guardado"}</button>}
-        />
+        {isBarbershop ? (
+          <section className="rounded-3xl border border-[#1E2228] bg-[#0E1014] p-5">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className="bl-eyebrow">BARBERÍA · CONFIGURACIÓN</div>
+                <h1 className="mt-2 text-2xl font-black tracking-tight text-[#F0F4F8]">Configuración</h1>
+                <p className="mt-1 text-sm text-[#5A6270]">{vertical.settingsSubtitle}</p>
+              </div>
+              <button onClick={save} disabled={saving || !isDirty} className={`min-h-10 rounded-xl px-4 text-sm font-bold transition ${isDirty ? "bg-[#18C37E] text-[#04100B] hover:bg-[#15AE6F]" : "border border-white/[0.08] bg-white/[0.04] text-[#5A6270]"}`}>
+                {saving ? "Guardando..." : isDirty ? "Guardar" : "Guardado"}
+              </button>
+            </div>
+          </section>
+        ) : (
+          <PageHeader title="Configuracion" subtitle={vertical.settingsSubtitle} showBackOnMobile backTo="/overview"
+            action={<button onClick={save} disabled={saving || !isDirty} className={`px-4 py-2 rounded-xl text-sm font-semibold ${isDirty ? "bg-[#3CBDB9] text-[#0B1117]" : "bg-white/10 text-white/40"}`}>{saving ? "Guardando..." : isDirty ? "Guardar" : "Guardado"}</button>}
+          />
+        )}
       </div>
 
       <div className={`${mobileDetailOpen ? "flex" : "hidden"} -mx-2 gap-2 overflow-x-auto px-2 pb-2 lg:flex`} style={{ scrollbarWidth: "none" }}>
         {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`min-h-10 shrink-0 rounded-xl px-3 py-2 text-xs font-semibold sm:px-4 sm:text-sm ${tab === t.key ? "bg-white/10 text-white" : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10"}`}>{t.label}</button>
+          <button key={t.key} onClick={() => setTab(t.key)} className={`min-h-10 shrink-0 rounded-xl px-3 py-2 text-xs font-semibold sm:px-4 sm:text-sm ${isBarbershop ? (tab === t.key ? "border border-[#18C37E]/20 bg-[#18C37E]/10 text-[#18C37E]" : "border border-[#1E2228] bg-[#0E1014] text-[#8A9299] hover:border-white/[0.10] hover:text-[#F0F4F8]") : (tab === t.key ? "bg-white/10 text-white" : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10")}`}>{t.label}</button>
         ))}
       </div>
 

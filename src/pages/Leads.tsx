@@ -89,6 +89,7 @@ export default function Leads() {
   const navigate = useNavigate();
   const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
   const vertical = getVerticalConfig(resolvedBusinessType);
+  const isBarbershop = resolvedBusinessType === "barbershop";
   const ORG = resolvedOrgId || DEFAULT_ORG;
 
   const [leads, setLeads] = useState<LeadRow[]>([]);
@@ -156,9 +157,9 @@ export default function Leads() {
     attended: leads.filter((l) => l.status === "attended").length,
   };
   return (
-    <div className="flex min-h-screen flex-col bg-[#0B1620] lg:bg-[#0B1117]">
+    <div className={`flex min-h-screen flex-col ${isBarbershop ? "bg-[#050608] text-[#F0F4F8]" : "bg-[#0B1620] lg:bg-[#0B1117]"}`}>
       {/* Header */}
-      <div className="safe-area-top sticky top-0 z-20 border-b border-[#25384A] bg-[#0B1620]/95 backdrop-blur-lg lg:border-white/10 lg:bg-[#0B1117]/90">
+      <div className={`safe-area-top sticky top-0 z-20 border-b backdrop-blur-lg ${isBarbershop ? "border-[#1E2227] bg-[#0B0D0F]/95" : "border-[#25384A] bg-[#0B1620]/95 lg:border-white/10 lg:bg-[#0B1117]/90"}`}>
         <div className="flex items-center gap-3 px-4 py-3">
           <button
             onClick={() => navigate("/overview")}
@@ -167,6 +168,7 @@ export default function Leads() {
             <ArrowLeft className="h-5 w-5 text-[#F8FAFC]" />
           </button>
           <div className="flex-1">
+            {isBarbershop ? <div className="bl-eyebrow">CLIENTES · BARBERLINE</div> : null}
             <h1 className="text-[22px] font-black tracking-[-0.03em] text-[#F8FAFC]">{vertical.customersLabel}</h1>
             <p className="text-xs text-[#9CAAB8]">{stats.total} {resolvedBusinessType === "barbershop" ? "clientes" : "contactos"}</p>
           </div>
@@ -195,7 +197,7 @@ export default function Leads() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={resolvedBusinessType === "barbershop" ? "Buscar cliente o teléfono..." : "Buscar por nombre, teléfono o email..."}
-              className="h-11 w-full rounded-2xl border border-[#25384A] bg-[#111F2B] pl-10 pr-4 text-sm text-[#F8FAFC] outline-none transition placeholder:text-[#9CAAB8]/70 focus:border-[#25D366]/60 focus:ring-4 focus:ring-[#25D366]/15"
+              className={`h-11 w-full rounded-2xl border pl-10 pr-4 text-sm text-[#F8FAFC] outline-none transition placeholder:text-[#9CAAB8]/70 focus:border-[#25D366]/60 focus:ring-4 focus:ring-[#25D366]/15 ${isBarbershop ? "border-white/[0.08] bg-[#05060A]" : "border-[#25384A] bg-[#111F2B]"}`}
             />
           </div>
         </div>
@@ -225,6 +227,7 @@ export default function Leads() {
                 <MobileClientRow
                   key={lead.id}
                   onClick={() => navigate(`/inbox/${lead.id}`)}
+                  className={isBarbershop ? "border-[#1E2228] bg-[#0E1014] hover:bg-[#131820]" : ""}
                 >
                   <div className="flex gap-3">
                     {/* Avatar */}
@@ -301,6 +304,19 @@ export default function Leads() {
                           </span>
                         )}
                       </div>
+                      {isBarbershop ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={(event) => { event.stopPropagation(); navigate(`/inbox/${lead.id}`); }} className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-semibold text-[#8A9299] hover:text-[#F0F4F8]">
+                            Historial
+                          </button>
+                          <button onClick={(event) => { event.stopPropagation(); navigate(`/inbox/${lead.id}`); }} className="rounded-lg border border-[#25D366]/[0.14] bg-[#25D366]/[0.07] px-2.5 py-1.5 text-[11px] font-semibold text-[#25D366]">
+                            Mensaje
+                          </button>
+                          <button onClick={(event) => { event.stopPropagation(); navigate("/agenda"); }} className="rounded-lg border border-[#18C37E]/20 bg-[#18C37E]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#18C37E]">
+                            Agendar cita
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </MobileClientRow>

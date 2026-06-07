@@ -159,7 +159,7 @@ export default function Layout() {
 
   return (
     <AppShell>
-        <div className="flex min-w-0 gap-4 lg:gap-6">
+        <div className={`${resolvedBusinessType === "barbershop" ? "barberline-shell" : ""} flex min-w-0 gap-4 lg:gap-6`}>
           <div className="hidden shrink-0 lg:block lg:w-[272px]">
             <Sidebar />
           </div>
