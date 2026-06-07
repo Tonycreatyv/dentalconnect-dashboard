@@ -20,6 +20,13 @@ import { startMetaOAuth } from "../components/integrations/ConnectMessengerButto
 import StatusChip from "../components/ui/StatusChip";
 import PageHeader from "../components/PageHeader";
 import { MobileAppHeader, MobileSettingsRow, MobileStatusPill } from "../components/mobile/MobilePrimitives";
+import {
+  BarberLineButton,
+  BarberLineCard,
+  BarberLineInput,
+  BarberLineStatus,
+  BarberLineTextarea,
+} from "../components/barberline/BarberLineUI";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -491,7 +498,8 @@ export default function Settings() {
   ], [vertical]);
 
   useEffect(() => {
-    const requestedTab = new URLSearchParams(location.search).get("tab") as TabKey | null;
+    const rawTab = new URLSearchParams(location.search).get("tab");
+    const requestedTab = (rawTab === "barberos" ? "equipo" : rawTab) as TabKey | null;
     if (requestedTab && tabs.some((item) => item.key === requestedTab)) {
       setTab(requestedTab);
     }
@@ -526,7 +534,7 @@ export default function Settings() {
               ) : isMessenger ? (
                 <button onClick={connectMeta} className="min-h-10 rounded-xl bg-[#3CBDB9] px-3 py-2 text-sm font-semibold text-[#0B1117] hover:bg-[#3CBDB9]/90 sm:px-4">Conectar</button>
               ) : isWhatsApp && status.status !== "connected" ? (
-                <WhatsAppConnect organizationId={ORG} businessType={resolvedBusinessType} onConnected={() => loadSettings()} />
+                <WhatsAppConnect organizationId={ORG} businessType={resolvedBusinessType} onConnected={() => void loadOrgIntegration()} />
               ) : isDisabled ? (
                 <button onClick={() => setWaitlistOpen(true)} className="min-h-10 rounded-xl border border-white/15 px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/10 sm:px-4">Lista de espera</button>
               ) : (
@@ -545,7 +553,53 @@ export default function Settings() {
     </div>
   );
 
-  const renderClinica = () => (
+  const renderClinica = () => isBarbershop ? (
+    <div className="space-y-4">
+      <BarberLineCard className="p-4">
+        <div className="mb-4">
+          <div className="text-lg font-black text-[#F5F7FA]">Barbería</div>
+          <p className="mt-1 text-sm text-[#6F7680]">Datos visibles para el equipo y la operación diaria.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Nombre</label>
+            <BarberLineInput value={clinicName} onChange={(e) => setClinicName(e.target.value)} placeholder="Ej: BarberLine Demo" />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Teléfono</label>
+            <BarberLineInput value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+504 9999-9999" />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Google Maps URL</label>
+            <BarberLineInput value={mapsUrl} onChange={(e) => setMapsUrl(e.target.value)} placeholder="Pega el link" />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Dirección</label>
+            <BarberLineInput value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Colonia, calle, ciudad" />
+          </div>
+        </div>
+      </BarberLineCard>
+      <BarberLineCard className="p-4">
+        <div className="mb-3 text-sm font-black text-[#F5F7FA]">Especialidades</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {getVerticalDefaultSpecialties(resolvedBusinessType).map((s) => {
+            const checked = specialties.includes(s.value);
+            return (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => setSpecialties(prev => checked ? prev.filter(x => x !== s.value) : [...prev, s.value])}
+                className={`flex min-h-11 items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${checked ? "border-[#18C37E]/25 bg-[#18C37E]/10 text-[#18C37E]" : "border-[#252A30] bg-[#0A0C0F] text-[#8A9299] hover:text-[#F5F7FA]"}`}
+              >
+                <span>{s.label}</span>
+                {checked ? <Check className="h-4 w-4" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      </BarberLineCard>
+    </div>
+  ) : (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <label className="block text-xs font-medium text-white/60 mb-2">Nombre de la {vertical.organizationLabel.toLowerCase()}</label>
@@ -585,7 +639,39 @@ export default function Settings() {
     </div>
   );
 
-  const renderHorario = () => (
+  const renderHorario = () => isBarbershop ? (
+    <BarberLineCard className="p-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-lg font-black text-[#F5F7FA]">Horarios</div>
+          <p className="mt-1 text-sm text-[#6F7680]">Días y horas de atención para WhatsApp y agenda.</p>
+        </div>
+        <BarberLineStatus label="Agenda activa" tone="success" />
+      </div>
+      <div className="space-y-2">
+        {Object.entries(dayLabels).map(([k, label]) => {
+          const d = hours[k] ?? { closed: true };
+          return (
+            <div key={k} className="grid gap-3 rounded-2xl border border-[#1E2228] bg-[#0A0C0F] p-3 md:grid-cols-[180px_1fr] md:items-center">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-bold text-[#F5F7FA]">{label}</span>
+                <Toggle enabled={!d.closed} onChange={(open) => setHours(prev => ({ ...prev, [k]: open ? { closed: false, open: d.open ?? "08:00", close: d.close ?? "17:00" } : { closed: true } }))} />
+              </div>
+              {!d.closed ? (
+                <div className="flex items-center gap-2">
+                  <BarberLineInput type="time" value={d.open ?? "08:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, open: e.target.value } }))} />
+                  <span className="text-xs font-bold text-[#4A5260]">a</span>
+                  <BarberLineInput type="time" value={d.close ?? "17:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, close: e.target.value } }))} />
+                </div>
+              ) : (
+                <div className="text-sm font-semibold text-[#4A5260]">Cerrado</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </BarberLineCard>
+  ) : (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
       {Object.entries(dayLabels).map(([k, label]) => {
         const d = hours[k] ?? { closed: true };
@@ -740,7 +826,45 @@ export default function Settings() {
     </div>
   );
 
-  const renderFaqs = () => (
+  const renderFaqs = () => isBarbershop ? (
+    <div className="space-y-4">
+      <BarberLineCard className="p-4">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-lg font-black text-[#F5F7FA]">FAQs</div>
+            <p className="mt-1 text-sm text-[#6F7680]">Respuestas rápidas para WhatsApp.</p>
+          </div>
+          <BarberLineButton onClick={() => setFaqs(prev => [...prev, { q: "", a: "" }])}>Agregar</BarberLineButton>
+        </div>
+        <div className="space-y-3">
+          {faqs.map((f, idx) => (
+            <div key={idx} className="rounded-2xl border border-[#1E2228] bg-[#0A0C0F] p-3">
+              <div className="flex gap-2">
+                <BarberLineInput value={f.q} onChange={(e) => setFaqs(prev => prev.map((x, i) => i === idx ? { ...x, q: e.target.value } : x))} placeholder="Pregunta" />
+                <button onClick={() => setFaqs(prev => prev.filter((_, i) => i !== idx))} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#252A30] text-[#6F7680] hover:bg-white/[0.04]"><X className="h-4 w-4" /></button>
+              </div>
+              <BarberLineTextarea value={f.a} onChange={(e) => setFaqs(prev => prev.map((x, i) => i === idx ? { ...x, a: e.target.value } : x))} className="mt-2 min-h-[88px]" placeholder="Respuesta" />
+            </div>
+          ))}
+        </div>
+      </BarberLineCard>
+      <BarberLineCard className="space-y-4 p-4">
+        <div className="text-lg font-black text-[#F5F7FA]">Políticas</div>
+        <div>
+          <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Urgencias</label>
+          <BarberLineTextarea value={emergency} onChange={(e) => setEmergency(e.target.value)} className="min-h-[72px]" />
+        </div>
+        <div>
+          <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Cancelación</label>
+          <BarberLineInput value={policiesCancel} onChange={(e) => setPoliciesCancel(e.target.value)} />
+        </div>
+        <div>
+          <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Depósitos</label>
+          <BarberLineInput value={policiesDeposit} onChange={(e) => setPoliciesDeposit(e.target.value)} />
+        </div>
+      </BarberLineCard>
+    </div>
+  ) : (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="flex items-center justify-between mb-3">
@@ -777,7 +901,30 @@ export default function Settings() {
     </div>
   );
 
-  const renderCuenta = () => (
+  const renderCuenta = () => isBarbershop ? (
+    <BarberLineCard className="space-y-4 p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#252A30] bg-[#0A0C0F]">
+          <Lock className="h-5 w-5 text-[#8A9299]" />
+        </div>
+        <div>
+          <div className="font-black text-[#F5F7FA]">Cuenta</div>
+          <div className="text-sm text-[#6F7680]">Acceso y contraseña del panel.</div>
+        </div>
+      </div>
+      <div>
+        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Nueva contraseña</label>
+        <BarberLineInput type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" />
+      </div>
+      <div>
+        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Confirmar contraseña</label>
+        <BarberLineInput type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" />
+      </div>
+      <BarberLineButton onClick={savePassword} disabled={savingPassword || !newPassword.trim()}>
+        {savingPassword ? "Guardando..." : "Cambiar contraseña"}
+      </BarberLineButton>
+    </BarberLineCard>
+  ) : (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
         <div className="flex items-center gap-3 mb-2">
@@ -803,6 +950,223 @@ export default function Settings() {
       </div>
     </div>
   );
+
+  const addProvider = async () => {
+    const name = prompt(`Nombre del ${vertical.providerLabel.toLowerCase()} (ej: Alex):`);
+    if (!name?.trim()) return;
+    const { error } = await supabase.from("providers").insert({
+      organization_id: ORG, name: name.trim(), role: "doctor", active: true,
+      services: [], schedule: providerScheduleFromBusinessHours(hours),
+      color: "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6,"0"),
+    });
+    if (!error) {
+      const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
+      setDoctors(data || []);
+    }
+  };
+
+  const renderEquipo = () => {
+    const dayNames: Record<string,string> = {"mon":"Lunes","tue":"Martes","wed":"Miércoles","thu":"Jueves","fri":"Viernes","sat":"Sábado","sun":"Domingo"};
+    if (isBarbershop) {
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-black text-[#F5F7FA]">Barberos</h3>
+              <p className="mt-1 text-sm text-[#6F7680]">Equipo, servicios que atienden y disponibilidad.</p>
+            </div>
+            <BarberLineButton onClick={addProvider}>Agregar barbero</BarberLineButton>
+          </div>
+          {doctors.length === 0 ? (
+            <BarberLineCard className="p-8 text-center">
+              <p className="text-sm font-semibold text-[#A4AAB3]">Todavía no hay barberos registrados.</p>
+              <p className="mt-1 text-sm text-[#5A6270]">Agregá el primer barbero para ordenar agenda y servicios.</p>
+            </BarberLineCard>
+          ) : (
+            <div className="grid gap-3 xl:grid-cols-2">
+              {doctors.map((doc) => {
+                const sched = doc.schedule || {};
+                const svcs = Array.isArray(doc.services) ? doc.services : [];
+                return (
+                  <BarberLineCard key={doc.id} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[#252A30] bg-[#0A0C0F]">
+                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: doc.color || "#18C37E" }} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-base font-black text-[#F5F7FA]">{doc.name}</div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <BarberLineStatus label={doc.active === false ? "Inactivo" : "Activo"} tone={doc.active === false ? "neutral" : "success"} />
+                            <span className="text-xs text-[#5A6270]">{svcs.length} servicios</span>
+                          </div>
+                        </div>
+                      </div>
+                      <BarberLineButton
+                        variant="danger"
+                        onClick={() => {
+                          if (!confirm("¿Eliminar a " + doc.name + "?")) return;
+                          setDeletedProviderIds((prev) => doc.id ? [...prev, doc.id] : prev);
+                          setDoctors((prev) => prev.filter((provider) => provider.id !== doc.id));
+                        }}
+                      >
+                        Eliminar
+                      </BarberLineButton>
+                    </div>
+
+                    <div className="mt-4">
+                      <div className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Servicios</div>
+                      <div className="flex flex-wrap gap-2">
+                        {svcs.map((s: string) => (
+                          <span key={s} className="inline-flex items-center gap-2 rounded-full border border-[#18C37E]/20 bg-[#18C37E]/10 px-3 py-1 text-xs font-bold text-[#BDF8D1]">
+                            {s}
+                            <button onClick={() => updateDoctor(doc.id, (provider) => ({ ...provider, services: svcs.filter((x: string) => x !== s) }))} className="text-[#BDF8D1]/50 hover:text-red-300">×</button>
+                          </span>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const svc = prompt("Nombre del servicio (ej: Corte clásico):");
+                            if (!svc?.trim()) return;
+                            updateDoctor(doc.id, (provider) => ({ ...provider, services: [...svcs, svc.trim()] }));
+                          }}
+                          className="rounded-full border border-dashed border-[#252A30] px-3 py-1 text-xs font-bold text-[#6F7680] hover:border-[#18C37E]/30 hover:text-[#F5F7FA]"
+                        >
+                          + Servicio
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      <div className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Horario</div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {Object.entries(dayNames).map(([key, label]) => {
+                          const day = sched[key] || { closed: true };
+                          const isClosed = !!day.closed;
+                          return (
+                            <div key={key} className={`rounded-xl border p-2 ${isClosed ? "border-[#1E2228] bg-[#0A0C0F] text-[#4A5260]" : "border-[#18C37E]/20 bg-[#18C37E]/5 text-[#A4AAB3]"}`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold">{label}</span>
+                                {isClosed ? (
+                                  <button onClick={() => updateDoctorSchedule(doc.id, key, () => ({ open: hours[key]?.open ?? "09:00", close: hours[key]?.close ?? "18:00", closed: false }))} className="text-[11px] font-semibold hover:text-[#F5F7FA]">Cerrado</button>
+                                ) : (
+                                  <button onClick={() => updateDoctorSchedule(doc.id, key, () => ({ closed: true }))} className="text-[11px] font-semibold text-red-300/60 hover:text-red-300">Cerrar</button>
+                                )}
+                              </div>
+                              {!isClosed ? (
+                                <div className="mt-2 flex items-center gap-1">
+                                  <select value={day.open || "08:00"} onChange={(e) => updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, open: e.target.value, closed: false }))} className="min-w-0 flex-1 rounded-lg border border-[#252A30] bg-[#0A0C0F] px-2 py-1 text-[11px] outline-none">
+                                    <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
+                                  </select>
+                                  <span className="text-[#4A5260]">-</span>
+                                  <select value={day.close || "17:00"} onChange={(e) => updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, close: e.target.value, closed: false }))} className="min-w-0 flex-1 rounded-lg border border-[#252A30] bg-[#0A0C0F] px-2 py-1 text-[11px] outline-none">
+                                    <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
+                                  </select>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </BarberLineCard>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div>
+            <h3 className="text-lg font-medium text-white">{vertical.providersLabel}</h3>
+            <p className="text-sm text-zinc-400">{vertical.providersLabel}, servicios que atienden y horarios.</p>
+          </div>
+          <button onClick={addProvider} className="bg-[#3CBDB9] hover:bg-[#35a9a5] text-white px-4 py-2 rounded-xl text-sm font-medium">
+            + Agregar {vertical.providerLabel}
+          </button>
+        </div>
+        <div className="space-y-4">
+          {doctors.length === 0 ? (
+            <div className="py-10 text-center border-2 border-dashed border-white/10 rounded-xl">
+              <p className="text-zinc-500">No hay {vertical.providersLabel.toLowerCase()} registrados. Agrega uno para empezar.</p>
+            </div>
+          ) : (
+            doctors.map((doc) => {
+              const sched = doc.schedule || {};
+              const svcs = Array.isArray(doc.services) ? doc.services : [];
+              return (
+              <div key={doc.id} className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-3 h-3 rounded-full" style={{backgroundColor: doc.color || "#3CBDB9"}} />
+                    <h3 className="text-white font-medium text-lg">{doc.name}</h3>
+                    <span className="text-xs text-zinc-400 bg-white/5 px-2 py-1 rounded-lg">{doc.specialty || "General"}</span>
+                  </div>
+                  <button onClick={() => {
+                    if (!confirm("¿Eliminar a " + doc.name + "?")) return;
+                    setDeletedProviderIds((prev) => doc.id ? [...prev, doc.id] : prev);
+                    setDoctors((prev) => prev.filter((provider) => provider.id !== doc.id));
+                  }} className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded-lg border border-red-500/20">Eliminar</button>
+                </div>
+                <div className="mb-4">
+                  <div className="text-xs text-zinc-400 mb-2">Servicios que atiende</div>
+                  <div className="flex flex-wrap gap-2">
+                    {svcs.map((s: string) => (
+                      <span key={s} className="text-xs bg-[#3CBDB9]/10 text-[#3CBDB9] px-3 py-1 rounded-full border border-[#3CBDB9]/20 flex items-center gap-1">
+                        {s}
+                        <button onClick={() => updateDoctor(doc.id, (provider) => ({ ...provider, services: svcs.filter((x: string) => x !== s) }))} className="ml-1 text-zinc-400 hover:text-red-400">×</button>
+                      </span>
+                    ))}
+                    <button onClick={() => {
+                      const svc = prompt("Nombre del servicio (ej: Blanqueamiento):");
+                      if (!svc?.trim()) return;
+                      updateDoctor(doc.id, (provider) => ({ ...provider, services: [...svcs, svc.trim()] }));
+                    }} className="text-xs text-zinc-400 hover:text-white px-3 py-1 rounded-full border border-dashed border-white/20">+ Servicio</button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-400 mb-2">Horario</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {Object.entries(dayNames).map(([key, label]) => {
+                      const day = sched[key] || { closed: true };
+                      const isClosed = !!day.closed;
+                      return (
+                        <div key={key} className={"rounded-xl border p-2 text-center text-xs " + (isClosed ? "border-white/5 bg-white/[0.02] text-zinc-600" : "border-[#3CBDB9]/20 bg-[#3CBDB9]/5 text-zinc-300")}>
+                          <div className="font-medium mb-1">{label}</div>
+                          {isClosed ? (
+                            <button onClick={() => updateDoctorSchedule(doc.id, key, () => ({ open: hours[key]?.open ?? "09:00", close: hours[key]?.close ?? "18:00", closed: false }))} className="cursor-pointer text-zinc-500 hover:text-white">Cerrado</button>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="flex gap-1 items-center">
+                                <select value={day.open || "08:00"} onChange={(e) => updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, open: e.target.value, closed: false }))} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
+                                  <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
+                                </select>
+                                <span className="text-zinc-500">-</span>
+                                <select value={day.close || "17:00"} onChange={(e) => updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, close: e.target.value, closed: false }))} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
+                                  <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
+                                </select>
+                              </div>
+                              <button onClick={() => updateDoctorSchedule(doc.id, key, () => ({ closed: true }))} className="text-[9px] text-red-400/60 hover:text-red-400 cursor-pointer">Cerrar día</button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  };
 
   if (loading) return <div className="py-20 text-center text-white/50">Cargando...</div>;
   function openMobileSettingsTab(nextTab: TabKey) {
@@ -874,120 +1238,7 @@ export default function Settings() {
       {tab === "clinica" && renderClinica()}
       {tab === "horario" && renderHorario()}
       {tab === "servicios" && renderServicios()}
-      
-        {tab === "equipo" && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-medium text-white">{vertical.providersLabel}</h3>
-                <p className="text-sm text-zinc-400">{vertical.providersLabel}, servicios que atienden y horarios.</p>
-              </div>
-              <button onClick={async () => {
-                const name = prompt(`Nombre del ${vertical.providerLabel.toLowerCase()} (ej: Alex):`);
-                if (!name?.trim()) return;
-                const { error } = await supabase.from("providers").insert({
-                  organization_id: ORG, name: name.trim(), role: "doctor", active: true,
-                  services: [], schedule: providerScheduleFromBusinessHours(hours),
-                  color: "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6,"0"),
-                });
-                if (!error) { const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor"); setDoctors(data || []); }
-              }} className="bg-[#3CBDB9] hover:bg-[#35a9a5] text-white px-4 py-2 rounded-xl text-sm font-medium">
-                + Agregar {vertical.providerLabel}
-              </button>
-            </div>
-            <div className="space-y-4">
-              {doctors.length === 0 ? (
-                <div className="py-10 text-center border-2 border-dashed border-white/10 rounded-xl">
-                  <p className="text-zinc-500">No hay {vertical.providersLabel.toLowerCase()} registrados. Agrega uno para empezar.</p>
-                </div>
-              ) : (
-                doctors.map((doc) => {
-                  const dayNames: Record<string,string> = {"mon":"Lunes","tue":"Martes","wed":"Miércoles","thu":"Jueves","fri":"Viernes","sat":"Sábado","sun":"Domingo"};
-                  const sched = doc.schedule || {};
-                  const svcs = Array.isArray(doc.services) ? doc.services : [];
-                  return (
-                  <div key={doc.id} className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-3 h-3 rounded-full" style={{backgroundColor: doc.color || "#3CBDB9"}} />
-                        <h3 className="text-white font-medium text-lg">{doc.name}</h3>
-                        <span className="text-xs text-zinc-400 bg-white/5 px-2 py-1 rounded-lg">{doc.specialty || "General"}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={async () => {
-                          if (!confirm("¿Eliminar a " + doc.name + "?")) return;
-                          setDeletedProviderIds((prev) => doc.id ? [...prev, doc.id] : prev);
-                          setDoctors((prev) => prev.filter((provider) => provider.id !== doc.id));
-                        }} className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded-lg border border-red-500/20">Eliminar</button>
-                      </div>
-                    </div>
-                    
-                    <div className="mb-4">
-                      <div className="text-xs text-zinc-400 mb-2">Servicios que atiende</div>
-                      <div className="flex flex-wrap gap-2">
-                        {svcs.map((s: string) => (
-                          <span key={s} className="text-xs bg-[#3CBDB9]/10 text-[#3CBDB9] px-3 py-1 rounded-full border border-[#3CBDB9]/20 flex items-center gap-1">
-                            {s}
-                            <button onClick={() => {
-                              const newSvcs = svcs.filter((x: string) => x !== s);
-                              updateDoctor(doc.id, (provider) => ({ ...provider, services: newSvcs }));
-                            }} className="ml-1 text-zinc-400 hover:text-red-400">×</button>
-                          </span>
-                        ))}
-                        <button onClick={() => {
-                          const svc = prompt("Nombre del servicio (ej: Blanqueamiento):");
-                          if (!svc?.trim()) return;
-                          const newSvcs = [...svcs, svc.trim()];
-                          updateDoctor(doc.id, (provider) => ({ ...provider, services: newSvcs }));
-                        }} className="text-xs text-zinc-400 hover:text-white px-3 py-1 rounded-full border border-dashed border-white/20">+ Servicio</button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-zinc-400 mb-2">Horario</div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {Object.entries(dayNames).map(([key, label]) => {
-                          const day = sched[key] || { closed: true };
-                          const isClosed = !!day.closed;
-                          return (
-                            <div key={key} className={"rounded-xl border p-2 text-center text-xs " + (isClosed ? "border-white/5 bg-white/[0.02] text-zinc-600" : "border-[#3CBDB9]/20 bg-[#3CBDB9]/5 text-zinc-300")}>
-                              <div className="font-medium mb-1">{label}</div>
-                              {isClosed ? (
-                                <button onClick={() => {
-                                  updateDoctorSchedule(doc.id, key, () => ({ open: hours[key]?.open ?? "09:00", close: hours[key]?.close ?? "18:00", closed: false }));
-                                }} className="cursor-pointer text-zinc-500 hover:text-white">Cerrado</button>
-                              ) : (
-                                <div className="space-y-1">
-                                  <div className="flex gap-1 items-center">
-                                    <select value={day.open || "08:00"} onChange={(e) => {
-                                      updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, open: e.target.value, closed: false }));
-                                    }} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
-                                      <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
-                                    </select>
-                                    <span className="text-zinc-500">-</span>
-                                    <select value={day.close || "17:00"} onChange={(e) => {
-                                      updateDoctorSchedule(doc.id, key, (currentDay) => ({ ...currentDay, close: e.target.value, closed: false }));
-                                    }} className="bg-transparent border border-white/10 rounded px-1 py-0.5 text-[10px] outline-none">
-                                      <option value="06:00">06:00</option><option value="07:00">07:00</option><option value="08:00">08:00</option><option value="09:00">09:00</option><option value="10:00">10:00</option><option value="11:00">11:00</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="14:00">14:00</option><option value="15:00">15:00</option><option value="16:00">16:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="19:00">19:00</option><option value="20:00">20:00</option><option value="21:00">21:00</option>
-                                    </select>
-                                  </div>
-                                  <button onClick={() => {
-                                    updateDoctorSchedule(doc.id, key, () => ({ closed: true }));
-                                  }} className="text-[9px] text-red-400/60 hover:text-red-400 cursor-pointer">Cerrar día</button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
+      {tab === "equipo" && renderEquipo()}
         {tab === "faqs" && renderFaqs()}
       {tab === "cuenta" && renderCuenta()}
       </div>

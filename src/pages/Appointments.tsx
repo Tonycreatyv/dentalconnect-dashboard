@@ -1,10 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { CalendarDays, Clock, MessageCircle, Plus, Scissors, UserRound } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useActiveOrg } from "../hooks/useActiveOrg";
 import { getVerticalConfig } from "../config/verticalConfig";
 import { AppointmentCard } from "../components/AppointmentCard";
 import { Tabs } from "../components/ui/Tabs";
 import { MobileAppointmentRow, MobileBottomSheet, MobileCard, MobileChip, MobileEmptyState, MobileHeader } from "../components/mobile/MobilePrimitives";
+import {
+  BarberLineButton,
+  BarberLineCard,
+  BarberLineDrawer,
+  BarberLineInput,
+  BarberLinePageShell,
+  BarberLineSelect,
+  BarberLineStatus,
+  BarberLineTabs,
+} from "../components/barberline/BarberLineUI";
 const FALLBACK_ORG_ID = "clinic-demo";
 
 type AppointmentRow = {
@@ -26,6 +38,7 @@ type AppointmentRow = {
 };
 
 type StatusFilter = "all" | "confirmed" | "pending" | "cancelled";
+type BarberCalendarView = "hoy" | "semana" | "lista";
 
 function asDate(a: AppointmentRow): Date | null {
   if (a.starts_at) {
@@ -115,6 +128,18 @@ function barberText(a: AppointmentRow, providerLabel = "Barbero"): string {
   return a.provider_name || `Cualquier ${providerLabel.toLowerCase()}`;
 }
 
+function DrawerInfo({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 text-[#6F7680]">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-[10px] text-[#6F7680]">{label}</p>
+        <p className="mt-0.5 break-words text-xs font-semibold text-[#C8D0DC]">{value}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Appointments() {
   const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
   const vertical = getVerticalConfig(resolvedBusinessType);
@@ -124,6 +149,8 @@ export default function Appointments() {
   const [rows, setRows] = useState<AppointmentRow[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [barberView, setBarberView] = useState<BarberCalendarView>("hoy");
+  const [selectedAppointment, setSelectedAppointment] = useState<(AppointmentRow & { derivedDate: Date }) | null>(null);
   const [barberFilter, setBarberFilter] = useState<string>("all");
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
@@ -303,6 +330,134 @@ export default function Appointments() {
     setBlockTimeOpen(false);
     setActionNotice("Bloqueo listo para conectar");
     window.setTimeout(() => setActionNotice(""), 3000);
+  }
+
+  if (isBarbershop) {
+    const barberList = barberView === "hoy" ? todayAppointments : barberView === "semana" ? upcoming : filtered;
+    return (
+      <BarberLinePageShell
+        title="Citas"
+        subtitle="Gestioná la agenda de tu barbería."
+        eyebrow="AGENDA · BARBERLINE"
+        action={<BarberLineButton onClick={() => openNewAppointmentSheet()}><Plus className="h-4 w-4" />Nueva cita</BarberLineButton>}
+      >
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {[
+            { label: "Hoy", value: kpi.today, tone: "neutral" as const },
+            { label: "Confirmadas", value: kpi.confirmed, tone: "success" as const },
+            { label: "Pendientes", value: kpi.pending, tone: "warning" as const },
+            { label: "Canceladas", value: kpi.cancelled, tone: "danger" as const },
+          ].map((item) => (
+            <BarberLineCard key={item.label} className="p-4 text-center">
+              <p className={`text-2xl font-black ${item.tone === "success" ? "text-[#18C37E]" : item.tone === "warning" ? "text-amber-300" : item.tone === "danger" ? "text-red-300" : "text-[#F5F7FA]"}`}>{item.value}</p>
+              <p className="mt-1 text-xs text-[#A4AAB3]">{item.label}</p>
+            </BarberLineCard>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <BarberLineTabs
+            value={barberView}
+            onChange={setBarberView}
+            items={[
+              { value: "hoy", label: "Hoy" },
+              { value: "semana", label: "Semana" },
+              { value: "lista", label: "Lista" },
+            ]}
+          />
+          <div className="ml-auto grid min-w-[260px] grid-cols-2 gap-2 md:min-w-[520px] md:grid-cols-4">
+            <BarberLineSelect value={barberFilter} onChange={(e) => setBarberFilter(e.target.value)}>
+              <option value="all">Todos los barberos</option>
+              {barbers.map((barber) => <option key={barber} value={barber}>{barber}</option>)}
+            </BarberLineSelect>
+            <BarberLineSelect value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
+              <option value="all">Todos los estados</option>
+              <option value="confirmed">Confirmadas</option>
+              <option value="pending">Pendientes</option>
+              <option value="cancelled">Canceladas</option>
+            </BarberLineSelect>
+            <BarberLineSelect value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)}>
+              <option value="all">Todos los servicios</option>
+              {services.map((service) => <option key={service} value={service}>{service}</option>)}
+            </BarberLineSelect>
+            <BarberLineInput type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </div>
+        </div>
+
+        <BarberLineCard className="overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-[#1E2227] px-5 py-3.5">
+            <div>
+              <p className="text-sm font-bold text-[#F0F4F8]">{barberView === "hoy" ? "Hoy" : barberView === "semana" ? "Esta semana" : "Todas las citas"}</p>
+              <p className="text-xs text-[#4A5260]">{barberList.length} citas</p>
+            </div>
+            <CalendarDays className="h-4 w-4 text-[#6F7680]" />
+          </div>
+          {loading ? (
+            <div className="p-8 text-center text-sm text-[#A4AAB3]">Cargando citas...</div>
+          ) : error ? (
+            <div className="p-8 text-center text-sm text-red-300">Error cargando citas: {error}</div>
+          ) : barberList.length === 0 ? (
+            <div className="p-10 text-center">
+              <CalendarDays className="mx-auto mb-3 h-9 w-9 text-[#4A5260]" />
+              <p className="text-sm font-bold text-[#F5F7FA]">Todavía no hay citas.</p>
+              <p className="mt-1 text-xs text-[#6F7680]">Probá el flujo por WhatsApp o agregá una cita manual.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[#1E2227]">
+              {barberList.map((appt) => (
+                <button
+                  key={appt.id}
+                  type="button"
+                  onClick={() => setSelectedAppointment(appt)}
+                  className="group flex w-full items-start gap-4 px-5 py-4 text-left transition hover:bg-white/[0.03]"
+                >
+                  <div className="w-20 shrink-0 font-mono text-xs font-semibold text-[#18C37E]">{appt.appointment_time || timeText(appt.derivedDate)}</div>
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#252A30] bg-[#171A1E] text-xs font-bold text-[#A4AAB3]">
+                    {clientText(appt).split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-bold text-[#F5F7FA]">{clientText(appt)}</p>
+                      <BarberLineStatus label={statusLabel(appt.status)} tone={statusKey(appt.status) === "confirmed" ? "success" : statusKey(appt.status) === "cancelled" ? "danger" : "warning"} />
+                    </div>
+                    <p className="mt-1 text-xs text-[#A4AAB3]">{serviceText(appt)} · {barberText(appt, vertical.providerLabel)}</p>
+                  </div>
+                  <div className="hidden gap-1 opacity-0 transition group-hover:opacity-100 md:flex">
+                    <span className="rounded-lg border border-[#252A30] p-2 text-[#A4AAB3]"><MessageCircle className="h-3.5 w-3.5" /></span>
+                    <span className="rounded-lg border border-[#252A30] p-2 text-[#A4AAB3]"><Clock className="h-3.5 w-3.5" /></span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </BarberLineCard>
+
+        <BarberLineDrawer
+          open={Boolean(selectedAppointment)}
+          title={selectedAppointment ? clientText(selectedAppointment) : "Cita"}
+          subtitle={selectedAppointment ? `${selectedAppointment.appointment_time || timeText(selectedAppointment.derivedDate)} · ${serviceText(selectedAppointment)}` : undefined}
+          onClose={() => setSelectedAppointment(null)}
+        >
+          {selectedAppointment ? (
+            <div className="space-y-4">
+              <BarberLineCard className="p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <DrawerInfo icon={<Clock className="h-3.5 w-3.5" />} label="Hora" value={selectedAppointment.appointment_time || timeText(selectedAppointment.derivedDate)} />
+                  <DrawerInfo icon={<Scissors className="h-3.5 w-3.5" />} label="Servicio" value={serviceText(selectedAppointment)} />
+                  <DrawerInfo icon={<UserRound className="h-3.5 w-3.5" />} label="Barbero" value={barberText(selectedAppointment, vertical.providerLabel)} />
+                  <DrawerInfo icon={<CalendarDays className="h-3.5 w-3.5" />} label="Fecha" value={dateText(selectedAppointment.derivedDate)} />
+                </div>
+              </BarberLineCard>
+              <div className="grid grid-cols-2 gap-2">
+                <BarberLineButton variant="secondary">Reagendar</BarberLineButton>
+                <BarberLineButton variant="secondary" onClick={() => selectedAppointment.lead_id ? window.location.assign(`/inbox/${selectedAppointment.lead_id}`) : window.location.assign("/inbox")}>Mensaje</BarberLineButton>
+              </div>
+              <BarberLineButton variant="danger" className="w-full">Cancelar cita</BarberLineButton>
+            </div>
+          ) : null}
+        </BarberLineDrawer>
+      </BarberLinePageShell>
+    );
   }
 
   return (

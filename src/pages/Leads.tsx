@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, MessageCircle, Phone, Mail, Calendar, CheckCircle2, Clock, Filter, Search } from "lucide-react";
+import { ArrowLeft, MessageCircle, Phone, Mail, Calendar, CheckCircle2, Clock, Filter, Search, History, Scissors } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useActiveOrg } from "../hooks/useActiveOrg";
 import { getVerticalConfig } from "../config/verticalConfig";
 import { MobileClientRow, MobileEmptyState, MobileFilterChips } from "../components/mobile/MobilePrimitives";
+import { BarberLineButton, BarberLineCard, BarberLineInput, BarberLinePageShell, BarberLineStatus } from "../components/barberline/BarberLineUI";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -156,6 +157,106 @@ export default function Leads() {
     contacted: leads.filter((l) => l.status === "contacted").length,
     attended: leads.filter((l) => l.status === "attended").length,
   };
+
+  if (isBarbershop) {
+    return (
+      <BarberLinePageShell title="Clientes" subtitle="Historial y contactos de tu barbería." eyebrow="CLIENTES · BARBERLINE">
+        <div className="grid grid-cols-3 gap-3">
+          <BarberLineCard className="p-4 text-center">
+            <p className="text-2xl font-black text-[#F5F7FA]">{stats.total}</p>
+            <p className="mt-1 text-xs text-[#A4AAB3]">Total clientes</p>
+          </BarberLineCard>
+          <BarberLineCard className="p-4 text-center">
+            <p className="text-2xl font-black text-[#18C37E]">{stats.attended}</p>
+            <p className="mt-1 text-xs text-[#A4AAB3]">Atendidos</p>
+          </BarberLineCard>
+          <BarberLineCard className="p-4 text-center">
+            <p className="text-2xl font-black text-[#F5F7FA]">{stats.new}</p>
+            <p className="mt-1 text-xs text-[#A4AAB3]">Nuevos</p>
+          </BarberLineCard>
+        </div>
+
+        <div className="relative">
+          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6F7680]" />
+          <BarberLineInput
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar cliente o teléfono..."
+            className="pl-10"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {[
+            { value: "all", label: `Todos (${stats.total})` },
+            { value: "new", label: `Nuevos (${stats.new})` },
+            { value: "contacted", label: `Contactados (${stats.contacted})` },
+            { value: "attended", label: `Atendidos (${stats.attended})` },
+          ].map((item) => (
+            <button
+              key={item.value}
+              onClick={() => setFilterStatus(item.value)}
+              className={filterStatus === item.value
+                ? "rounded-full border border-[#18C37E]/25 bg-[#18C37E]/10 px-3 py-1.5 text-xs font-bold text-[#18C37E]"
+                : "rounded-full border border-[#252A30] bg-[#121417] px-3 py-1.5 text-xs font-bold text-[#A4AAB3] hover:text-[#F5F7FA]"}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <BarberLineCard className="p-10 text-center text-sm text-[#A4AAB3]">Cargando clientes...</BarberLineCard>
+        ) : filteredLeads.length === 0 ? (
+          <BarberLineCard className="p-10 text-center">
+            <MessageCircle className="mx-auto mb-3 h-9 w-9 text-[#4A5260]" />
+            <p className="text-sm font-bold text-[#F5F7FA]">{searchQuery ? "Sin resultados" : "Todavía no hay clientes."}</p>
+            <p className="mt-1 text-xs text-[#6F7680]">{searchQuery ? "Probá con otra búsqueda." : "Los clientes aparecerán cuando entren conversaciones por WhatsApp."}</p>
+          </BarberLineCard>
+        ) : (
+          <div className="space-y-3">
+            {filteredLeads.map((lead) => {
+              const displayName = getBestDisplayName(lead);
+              const channelLabel = effectiveLeadChannel(lead).toUpperCase();
+              const handoff = lead.handoff_to_human === true || String(lead.state?.conversation_mode ?? "").toLowerCase() === "human_active";
+              return (
+                <BarberLineCard key={lead.id} className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#252A30] bg-[#171A1E] text-sm font-bold text-[#A4AAB3]">
+                      {displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-[#F5F7FA]">{displayName}</p>
+                        <BarberLineStatus label={lead.status || "Nuevo"} tone={lead.status === "attended" ? "success" : "neutral"} />
+                        <BarberLineStatus label={handoff ? "Humano" : "Bot"} tone={handoff ? "warning" : "success"} />
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[#A4AAB3]">
+                        {lead.phone ? <span className="flex items-center gap-1"><Phone className="h-3 w-3 text-[#6F7680]" />{lead.phone}</span> : null}
+                        {lead.email ? <span className="flex items-center gap-1"><Mail className="h-3 w-3 text-[#6F7680]" />{lead.email}</span> : null}
+                        <span>{channelLabel}</span>
+                        <span>{formatRelativeTime(lead.last_message_at || lead.created_at)}</span>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[#A4AAB3]">
+                        {lead.last_message_preview ? `"${lead.last_message_preview}"` : "Sin mensajes todavía"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex gap-2 border-t border-[#1E2227] pt-3">
+                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs" onClick={() => navigate(`/inbox/${lead.id}`)}><History className="h-3.5 w-3.5" />Historial</BarberLineButton>
+                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs text-[#25D366]" onClick={() => navigate(`/inbox/${lead.id}`)}><MessageCircle className="h-3.5 w-3.5" />Mensaje</BarberLineButton>
+                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs text-[#18C37E]" onClick={() => navigate("/agenda")}><Calendar className="h-3.5 w-3.5" />Agendar cita</BarberLineButton>
+                    <span className="ml-auto hidden items-center gap-1 text-xs text-[#6F7680] md:flex"><Scissors className="h-3 w-3" />Cliente</span>
+                  </div>
+                </BarberLineCard>
+              );
+            })}
+          </div>
+        )}
+      </BarberLinePageShell>
+    );
+  }
+
   return (
     <div className={`flex min-h-screen flex-col ${isBarbershop ? "bg-[#050608] text-[#F0F4F8]" : "bg-[#0B1620] lg:bg-[#0B1117]"}`}>
       {/* Header */}
