@@ -812,7 +812,11 @@ export default function Hoy() {
   }
 
   function markVisualCheckIn(appt?: AppointmentRow | null) {
-    if (!appt) return;
+    if (!appt) {
+      setWalkInNotice("No hay cita próxima para check-in");
+      window.setTimeout(() => setWalkInNotice(""), 3000);
+      return;
+    }
     setCheckedInIds((prev) => ({ ...prev, [appt.id]: true }));
     setWalkInNotice(`${appt.patient_name || "Cliente"} marcado en espera`);
     window.setTimeout(() => setWalkInNotice(""), 3000);

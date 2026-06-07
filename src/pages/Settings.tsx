@@ -65,6 +65,12 @@ function defaultHours(): HoursMap {
 
 const dayLabels: Record<string, string> = { mon: "Lunes", tue: "Martes", wed: "Miércoles", thu: "Jueves", fri: "Viernes", sat: "Sábado", sun: "Domingo" };
 const dayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const BARBERLINE_FALLBACK_SERVICES: ServiceItem[] = [
+  { name: "Corte de pelo", price_from: 250, currency: "HNL", duration_min: 30, active: true },
+  { name: "Corte y barba", price_from: 400, currency: "HNL", duration_min: 45, active: true },
+  { name: "Barba", price_from: 180, currency: "HNL", duration_min: 20, active: true },
+  { name: "Limpieza facial", price_from: 350, currency: "HNL", duration_min: 40, active: true },
+];
 
 function providerScheduleFromBusinessHours(sourceHours: HoursMap): HoursMap {
   const defaults = defaultHours();
@@ -106,6 +112,13 @@ function isLikelyDentalCatalog(items: ServiceItem[]): boolean {
   const names = items.map((item) => normalizeForCompare(item.name ?? ""));
   const dentalSignals = ["consulta", "limpieza", "blanqueamiento", "ortodoncia", "resina", "extraccion"];
   return names.some((name) => dentalSignals.some((signal) => name.includes(signal)));
+}
+
+function barberDisplayName(value: string): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "BarberLine";
+  if (/\b(cl[ií]nica|sonrisas|dentalconnect|dental demo|dental)\b/i.test(raw)) return "BarberLine";
+  return raw;
 }
 
 type TabKey = "integraciones" | "clinica" | "equipo" | "horario" | "servicios" | "faqs" | "cuenta";
@@ -563,7 +576,7 @@ export default function Settings() {
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Nombre</label>
-            <BarberLineInput value={clinicName} onChange={(e) => setClinicName(e.target.value)} placeholder="Ej: BarberLine Demo" />
+            <BarberLineInput value={barberDisplayName(clinicName)} onChange={(e) => setClinicName(e.target.value)} placeholder="Ej: BarberLine Demo" />
           </div>
           <div>
             <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Teléfono</label>
@@ -756,11 +769,11 @@ export default function Settings() {
         </div>
         <button onClick={addService} className="px-3 py-2 rounded-xl bg-white/10 text-sm font-semibold text-white/85 hover:bg-white/15">+ Agregar</button>
       </div>
-      {import.meta.env.DEV ? (
+      {import.meta.env.DEV && !isBarbershop ? (
         <div className="rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-sm text-amber-100">
           <div className="font-medium">
             {showBarbershopCatalogReset
-              ? "Se detectaron servicios de clínica dental en esta barbería."
+              ? "Datos heredados de demo. Podés actualizarlos para esta organización."
               : "Podés restaurar los datos demo de la vertical actual."}
           </div>
           <div className="mt-1 text-amber-100/80">
@@ -775,9 +788,21 @@ export default function Settings() {
           </button>
         </div>
       ) : null}
+      {import.meta.env.DEV && isBarbershop && showBarbershopCatalogReset ? (
+        <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3 text-sm text-[#A4AAB3]">
+          <div className="font-medium text-[#F0F4F8]">Datos heredados de demo. Podés actualizarlos para esta barbería.</div>
+          <button
+            type="button"
+            onClick={resetCurrentVerticalDemoData}
+            className="mt-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-[#A4AAB3] hover:bg-white/[0.07]"
+          >
+            Restaurar servicios BarberLine
+          </button>
+        </div>
+      ) : null}
       {resolvedBusinessType === "barbershop" ? (
         <div className="grid gap-3 md:grid-cols-2">
-          {services.map((s, idx) => {
+          {(showBarbershopCatalogReset ? BARBERLINE_FALLBACK_SERVICES : services).map((s, idx) => {
             const active = (s as any).active !== false;
             return (
               <div key={idx} className="rounded-2xl border border-white/10 bg-[#0B1620]/70 p-4">
@@ -794,7 +819,14 @@ export default function Settings() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setEditingServiceIndex(editingServiceIndex === idx ? null : idx)}
+                    onClick={() => {
+                      if (showBarbershopCatalogReset) {
+                        setServices(BARBERLINE_FALLBACK_SERVICES);
+                        setEditingServiceIndex(idx);
+                        return;
+                      }
+                      setEditingServiceIndex(editingServiceIndex === idx ? null : idx);
+                    }}
                     className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white/75 hover:bg-white/10"
                   >
                     Editar

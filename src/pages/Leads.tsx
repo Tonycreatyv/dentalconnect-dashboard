@@ -5,7 +5,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useActiveOrg } from "../hooks/useActiveOrg";
 import { getVerticalConfig } from "../config/verticalConfig";
 import { MobileClientRow, MobileEmptyState, MobileFilterChips } from "../components/mobile/MobilePrimitives";
-import { BarberLineButton, BarberLineCard, BarberLineInput, BarberLinePageShell, BarberLineStatus } from "../components/barberline/BarberLineUI";
+import { BarberLineButton, BarberLineCard, BarberLineDrawer, BarberLineInput, BarberLinePageShell, BarberLineStatus } from "../components/barberline/BarberLineUI";
 
 const DEFAULT_ORG = "clinic-demo";
 
@@ -69,6 +69,63 @@ function effectiveLeadChannel(lead: Pick<LeadRow, "channel" | "last_channel">): 
   return String(lead.channel ?? lead.last_channel ?? "whatsapp").trim().toLowerCase() || "whatsapp";
 }
 
+function cleanBarberPreview(value: string | null | undefined): string {
+  const text = String(value ?? "")
+    .replace(/\*/g, "")
+    .replace(/Servicio:\s*[^.\n]+/gi, "")
+    .replace(/Fecha:\s*[^.\n]+/gi, "")
+    .replace(/Hora:\s*[^.\n]+/gi, "")
+    .replace(/Barbero:\s*[^.\n]+/gi, "")
+    .replace(/Nombre:\s*[^.\n]+/gi, "")
+    .replace(/Cl[ií]nica\s+Sonrisas/gi, "BarberLine")
+    .replace(/\bcl[ií]nica\b/gi, "barbería")
+    .replace(/\bpacientes?\b/gi, "clientes")
+    .replace(/\bdoctores?\b/gi, "barberos")
+    .replace(/\bdental(?:es)?\b/gi, "")
+    .replace(/\btratamientos?\b/gi, "servicios")
+    .replace(/appointment[_\s-]?id[:=]\s*\S+/gi, "")
+    .replace(/active_appointment|pending_reschedule|current_flow|collected/gi, "")
+    .replace(/\{[^{}]{20,}\}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "Sin mensajes todavía";
+  return text.length > 80 ? `${text.slice(0, 77).trim()}...` : text;
+}
+
+function leadFrequentService(lead: LeadRow): string {
+  const state = lead.state ?? {};
+  return String(
+    state.frequent_service ??
+    state.last_service ??
+    state.service ??
+    state.selected_service ??
+    state.reason ??
+    "No definido",
+  );
+}
+
+function leadLastAppointment(lead: LeadRow): string {
+  const value = lead.state?.last_appointment_date ?? lead.state?.appointment_date ?? lead.state?.selected_date;
+  if (!value) return "Sin registro";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString("es-HN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function leadVisitCount(lead: LeadRow): string {
+  const value = lead.state?.visit_count ?? lead.state?.visits ?? lead.state?.appointment_count;
+  return value == null ? "Sin registro" : String(value);
+}
+
+function DrawerField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#4A5260]">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-[#DDE4EC]">{value}</p>
+    </div>
+  );
+}
+
 // Status badge component
 function StatusBadge({ status }: { status: string | null }) {
   const statusConfig: Record<string, { label: string; bg: string; text: string }> = {
@@ -97,6 +154,20 @@ export default function Leads() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [selectedCustomer, setSelectedCustomer] = useState<LeadRow | null>(null);
+  const [profileSection, setProfileSection] = useState<"perfil" | "historial">("perfil");
+  const [appointmentLead, setAppointmentLead] = useState<LeadRow | null>(null);
+  const [visualNotice, setVisualNotice] = useState("");
+
+  function showVisualNotice(message: string) {
+    setVisualNotice(message);
+    window.setTimeout(() => setVisualNotice(""), 2600);
+  }
+
+  function openCustomerProfile(lead: LeadRow, section: "perfil" | "historial" = "perfil") {
+    setSelectedCustomer(lead);
+    setProfileSection(section);
+  }
 
   async function loadLeads() {
     setLoading(true);
@@ -220,7 +291,7 @@ export default function Leads() {
               const channelLabel = effectiveLeadChannel(lead).toUpperCase();
               const handoff = lead.handoff_to_human === true || String(lead.state?.conversation_mode ?? "").toLowerCase() === "human_active";
               return (
-                <BarberLineCard key={lead.id} className="p-4">
+                <BarberLineCard key={lead.id} className="p-4" onClick={() => openCustomerProfile(lead)}>
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#252A30] bg-[#171A1E] text-sm font-bold text-[#A4AAB3]">
                       {displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
@@ -234,18 +305,20 @@ export default function Leads() {
                       <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[#A4AAB3]">
                         {lead.phone ? <span className="flex items-center gap-1"><Phone className="h-3 w-3 text-[#6F7680]" />{lead.phone}</span> : null}
                         {lead.email ? <span className="flex items-center gap-1"><Mail className="h-3 w-3 text-[#6F7680]" />{lead.email}</span> : null}
+                        <span>{leadFrequentService(lead)}</span>
+                        <span>{leadLastAppointment(lead)}</span>
                         <span>{channelLabel}</span>
                         <span>{formatRelativeTime(lead.last_message_at || lead.created_at)}</span>
                       </div>
                       <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[#A4AAB3]">
-                        {lead.last_message_preview ? `"${lead.last_message_preview}"` : "Sin mensajes todavía"}
+                        "{cleanBarberPreview(lead.last_message_preview)}"
                       </p>
                     </div>
                   </div>
                   <div className="mt-3 flex gap-2 border-t border-[#1E2227] pt-3">
-                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs" onClick={() => navigate(`/inbox/${lead.id}`)}><History className="h-3.5 w-3.5" />Historial</BarberLineButton>
-                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs text-[#25D366]" onClick={() => navigate(`/inbox/${lead.id}`)}><MessageCircle className="h-3.5 w-3.5" />Mensaje</BarberLineButton>
-                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs text-[#18C37E]" onClick={() => navigate("/agenda")}><Calendar className="h-3.5 w-3.5" />Agendar cita</BarberLineButton>
+                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs" onClick={(event) => { event.stopPropagation(); openCustomerProfile(lead, "historial"); }}><History className="h-3.5 w-3.5" />Historial</BarberLineButton>
+                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs text-[#25D366]" onClick={(event) => { event.stopPropagation(); navigate(`/inbox/${lead.id}`); }}><MessageCircle className="h-3.5 w-3.5" />Mensaje</BarberLineButton>
+                    <BarberLineButton variant="ghost" className="min-h-8 px-2.5 py-1.5 text-xs text-[#18C37E]" onClick={(event) => { event.stopPropagation(); setAppointmentLead(lead); }}><Calendar className="h-3.5 w-3.5" />Agendar cita</BarberLineButton>
                     <span className="ml-auto hidden items-center gap-1 text-xs text-[#6F7680] md:flex"><Scissors className="h-3 w-3" />Cliente</span>
                   </div>
                 </BarberLineCard>
@@ -253,6 +326,79 @@ export default function Leads() {
             })}
           </div>
         )}
+        {visualNotice ? (
+          <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-2xl border border-[#18C37E]/20 bg-[#0B0D0F] px-4 py-3 text-sm font-semibold text-[#BDF8D1] shadow-2xl">
+            {visualNotice}
+          </div>
+        ) : null}
+        <BarberLineDrawer
+          open={Boolean(selectedCustomer)}
+          title="Perfil del cliente"
+          subtitle={selectedCustomer ? getBestDisplayName(selectedCustomer) : undefined}
+          onClose={() => setSelectedCustomer(null)}
+        >
+          {selectedCustomer ? (
+            <div className="space-y-4">
+              <BarberLineCard className="grid gap-4 p-4 sm:grid-cols-2">
+                <DrawerField label="Nombre" value={getBestDisplayName(selectedCustomer)} />
+                <DrawerField label="Teléfono" value={selectedCustomer.phone || "Sin teléfono"} />
+                <DrawerField label="Servicio frecuente" value={leadFrequentService(selectedCustomer)} />
+                <DrawerField label="Última cita" value={leadLastAppointment(selectedCustomer)} />
+                <DrawerField label="Total visitas" value={leadVisitCount(selectedCustomer)} />
+                <DrawerField label="Próxima cita" value={String(selectedCustomer.state?.next_appointment_date ?? "Sin próxima cita")} />
+              </BarberLineCard>
+              <BarberLineCard className="p-4">
+                <div className="mb-2 text-sm font-black text-[#F5F7FA]">Notas</div>
+                <p className="text-sm leading-relaxed text-[#A4AAB3]">{String(selectedCustomer.state?.notes ?? "Sin notas guardadas.")}</p>
+              </BarberLineCard>
+              <BarberLineCard className="p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="text-sm font-black text-[#F5F7FA]">{profileSection === "historial" ? "Historial de citas" : "Últimos mensajes"}</div>
+                  <button type="button" onClick={() => setProfileSection(profileSection === "historial" ? "perfil" : "historial")} className="text-xs font-bold text-[#18C37E]">
+                    {profileSection === "historial" ? "Ver mensajes" : "Ver historial"}
+                  </button>
+                </div>
+                {profileSection === "historial" ? (
+                  <div className="space-y-2 text-sm text-[#A4AAB3]">
+                    <div className="rounded-xl border border-[#252A30] bg-[#0A0C0F] p-3">
+                      {leadLastAppointment(selectedCustomer)} · {leadFrequentService(selectedCustomer)}
+                    </div>
+                    <div className="text-xs text-[#5A6270]">El historial detallado se conecta desde las citas reales del cliente.</div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-[#252A30] bg-[#0A0C0F] p-3 text-sm text-[#A4AAB3]">
+                    {cleanBarberPreview(selectedCustomer.last_message_preview)}
+                  </div>
+                )}
+              </BarberLineCard>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <BarberLineButton onClick={() => navigate(`/inbox/${selectedCustomer.id}`)}>Enviar mensaje</BarberLineButton>
+                <BarberLineButton variant="secondary" onClick={() => setAppointmentLead(selectedCustomer)}>Agendar cita</BarberLineButton>
+                <BarberLineButton variant="secondary" onClick={() => showVisualNotice("Editor de cliente listo para conectar")}>Editar cliente</BarberLineButton>
+              </div>
+            </div>
+          ) : null}
+        </BarberLineDrawer>
+        <BarberLineDrawer
+          open={Boolean(appointmentLead)}
+          title="Agendar cita"
+          subtitle={appointmentLead ? getBestDisplayName(appointmentLead) : undefined}
+          onClose={() => setAppointmentLead(null)}
+        >
+          {appointmentLead ? (
+            <div className="space-y-4">
+              <BarberLineCard className="p-4">
+                <DrawerField label="Cliente" value={getBestDisplayName(appointmentLead)} />
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <DrawerField label="Teléfono" value={appointmentLead.phone || "Sin teléfono"} />
+                  <DrawerField label="Servicio sugerido" value={leadFrequentService(appointmentLead)} />
+                </div>
+              </BarberLineCard>
+              <p className="text-sm leading-relaxed text-[#A4AAB3]">Este panel es visual por ahora. Para crear una cita real, abrí Citas con el cliente en contexto.</p>
+              <BarberLineButton className="w-full" onClick={() => navigate(`/agenda?lead=${encodeURIComponent(appointmentLead.id)}`)}>Abrir agenda</BarberLineButton>
+            </div>
+          ) : null}
+        </BarberLineDrawer>
       </BarberLinePageShell>
     );
   }

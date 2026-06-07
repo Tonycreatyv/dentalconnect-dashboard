@@ -56,6 +56,7 @@ function asDate(a: AppointmentRow): Date | null {
 function statusKey(status: string | null | undefined): "confirmed" | "pending" | "cancelled" {
   const s = String(status ?? "").toLowerCase();
   if (s === "confirmed" || s === "confirmada") return "confirmed";
+  if (s === "attended" || s === "atendida" || s === "completed") return "confirmed";
   if (s === "cancelled" || s === "cancelada" || s === "canceled") return "cancelled";
   return "pending";
 }
@@ -151,6 +152,8 @@ export default function Appointments() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [barberView, setBarberView] = useState<BarberCalendarView>("hoy");
   const [selectedAppointment, setSelectedAppointment] = useState<(AppointmentRow & { derivedDate: Date }) | null>(null);
+  const [localAppointmentStatus, setLocalAppointmentStatus] = useState<Record<string, string>>({});
+  const [drawerNotice, setDrawerNotice] = useState("");
   const [barberFilter, setBarberFilter] = useState<string>("all");
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
@@ -332,6 +335,12 @@ export default function Appointments() {
     window.setTimeout(() => setActionNotice(""), 3000);
   }
 
+  function setVisualAppointmentState(appointmentId: string, label: string) {
+    setLocalAppointmentStatus((prev) => ({ ...prev, [appointmentId]: label }));
+    setDrawerNotice(label);
+    window.setTimeout(() => setDrawerNotice(""), 2600);
+  }
+
   if (isBarbershop) {
     const barberList = barberView === "hoy" ? todayAppointments : barberView === "semana" ? upcoming : filtered;
     return (
@@ -418,7 +427,7 @@ export default function Appointments() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="truncate text-sm font-bold text-[#F5F7FA]">{clientText(appt)}</p>
-                      <BarberLineStatus label={statusLabel(appt.status)} tone={statusKey(appt.status) === "confirmed" ? "success" : statusKey(appt.status) === "cancelled" ? "danger" : "warning"} />
+                      <BarberLineStatus label={localAppointmentStatus[appt.id] || statusLabel(appt.status)} tone={localAppointmentStatus[appt.id] === "Cancelada" || statusKey(appt.status) === "cancelled" ? "danger" : localAppointmentStatus[appt.id] || statusKey(appt.status) === "confirmed" ? "success" : "warning"} />
                     </div>
                     <p className="mt-1 text-xs text-[#A4AAB3]">{serviceText(appt)} · {barberText(appt, vertical.providerLabel)}</p>
                   </div>
@@ -432,6 +441,55 @@ export default function Appointments() {
           )}
         </BarberLineCard>
 
+        {actionNotice ? (
+          <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-2xl border border-[#18C37E]/25 bg-[#07110C] px-4 py-2 text-xs font-bold text-[#BDF8D1] shadow-2xl">
+            {actionNotice}
+          </div>
+        ) : null}
+
+        <BarberLineDrawer
+          open={newAppointmentOpen}
+          title="Nueva cita"
+          subtitle="Prepará una cita manual para esta barbería."
+          onClose={() => setNewAppointmentOpen(false)}
+        >
+          <div className="space-y-4">
+            <BarberLineCard className="space-y-3 p-4">
+              <label className="block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">
+                Cliente
+                <BarberLineInput value={draftPatient} onChange={(e) => setDraftPatient(e.target.value)} placeholder="Nombre del cliente" className="mt-2" />
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">
+                Servicio
+                <BarberLineSelect value={draftService} onChange={(e) => setDraftService(e.target.value)} className="mt-2">
+                  {sheetServices.map((service) => <option key={service} value={service}>{service}</option>)}
+                </BarberLineSelect>
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">
+                Barbero
+                <BarberLineSelect value={draftProvider} onChange={(e) => setDraftProvider(e.target.value)} className="mt-2">
+                  {sheetProviders.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+                </BarberLineSelect>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">
+                  Fecha
+                  <BarberLineInput type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} className="mt-2" />
+                </label>
+                <label className="block text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">
+                  Hora
+                  <BarberLineInput type="time" value={draftTime} onChange={(e) => setDraftTime(e.target.value)} className="mt-2" />
+                </label>
+              </div>
+            </BarberLineCard>
+            <p className="text-sm leading-relaxed text-[#A4AAB3]">Visual por ahora. No crea una cita real hasta conectar esta acción.</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <BarberLineButton variant="secondary" onClick={() => setNewAppointmentOpen(false)}>Cancelar</BarberLineButton>
+              <BarberLineButton onClick={submitNewAppointment}>Preparar cita</BarberLineButton>
+            </div>
+          </div>
+        </BarberLineDrawer>
+
         <BarberLineDrawer
           open={Boolean(selectedAppointment)}
           title={selectedAppointment ? clientText(selectedAppointment) : "Cita"}
@@ -442,17 +500,27 @@ export default function Appointments() {
             <div className="space-y-4">
               <BarberLineCard className="p-4">
                 <div className="grid grid-cols-2 gap-3">
+                  <DrawerInfo icon={<UserRound className="h-3.5 w-3.5" />} label="Cliente" value={clientText(selectedAppointment)} />
+                  <DrawerInfo icon={<MessageCircle className="h-3.5 w-3.5" />} label="Teléfono" value="No registrado" />
                   <DrawerInfo icon={<Clock className="h-3.5 w-3.5" />} label="Hora" value={selectedAppointment.appointment_time || timeText(selectedAppointment.derivedDate)} />
                   <DrawerInfo icon={<Scissors className="h-3.5 w-3.5" />} label="Servicio" value={serviceText(selectedAppointment)} />
                   <DrawerInfo icon={<UserRound className="h-3.5 w-3.5" />} label="Barbero" value={barberText(selectedAppointment, vertical.providerLabel)} />
                   <DrawerInfo icon={<CalendarDays className="h-3.5 w-3.5" />} label="Fecha" value={dateText(selectedAppointment.derivedDate)} />
+                  <DrawerInfo icon={<CalendarDays className="h-3.5 w-3.5" />} label="Estado" value={localAppointmentStatus[selectedAppointment.id] || statusLabel(selectedAppointment.status)} />
                 </div>
               </BarberLineCard>
+              <BarberLineCard className="space-y-3 p-4">
+                <DrawerInfo icon={<MessageCircle className="h-3.5 w-3.5" />} label="Notas" value={selectedAppointment.title || selectedAppointment.reason || "Sin notas"} />
+                <DrawerInfo icon={<MessageCircle className="h-3.5 w-3.5" />} label="Último mensaje" value="Sin último mensaje disponible" />
+                {drawerNotice ? <div className="rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/10 p-3 text-xs font-bold text-[#BDF8D1]">{drawerNotice}</div> : null}
+              </BarberLineCard>
               <div className="grid grid-cols-2 gap-2">
-                <BarberLineButton variant="secondary">Reagendar</BarberLineButton>
-                <BarberLineButton variant="secondary" onClick={() => selectedAppointment.lead_id ? window.location.assign(`/inbox/${selectedAppointment.lead_id}`) : window.location.assign("/inbox")}>Mensaje</BarberLineButton>
+                <BarberLineButton variant="secondary" onClick={() => setVisualAppointmentState(selectedAppointment.id, "Check-in realizado")}>Check-in</BarberLineButton>
+                <BarberLineButton variant="secondary" onClick={() => setVisualAppointmentState(selectedAppointment.id, "Atendida")}>Marcar atendida</BarberLineButton>
+                <BarberLineButton variant="secondary" onClick={() => setVisualAppointmentState(selectedAppointment.id, "Reagenda lista para conectar")}>Reagendar</BarberLineButton>
+                <BarberLineButton variant="secondary" onClick={() => selectedAppointment.lead_id ? window.location.assign(`/inbox/${selectedAppointment.lead_id}`) : window.location.assign("/inbox")}>Enviar mensaje</BarberLineButton>
               </div>
-              <BarberLineButton variant="danger" className="w-full">Cancelar cita</BarberLineButton>
+              <BarberLineButton variant="danger" className="w-full" onClick={() => setVisualAppointmentState(selectedAppointment.id, "Cancelada")}>Cancelar cita</BarberLineButton>
             </div>
           ) : null}
         </BarberLineDrawer>

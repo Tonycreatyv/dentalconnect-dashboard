@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import type { MouseEventHandler, ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
 export function BarberLinePageShell({
@@ -41,7 +41,7 @@ export function BarberLineCard({
   children: ReactNode;
   className?: string;
   asButton?: boolean;
-  onClick?: () => void;
+  onClick?: MouseEventHandler<HTMLButtonElement>;
 }) {
   const classes = cn(
     "rounded-2xl border border-[#252A30] bg-[#121417] text-left shadow-[0_14px_36px_rgba(0,0,0,0.22)] transition",
@@ -50,9 +50,20 @@ export function BarberLineCard({
   );
   if (asButton || onClick) {
     return (
-      <button type="button" onClick={onClick} className={cn("w-full", classes)}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onClick?.();
+          }
+        }}
+        className={cn("w-full cursor-pointer", classes)}
+      >
         {children}
-      </button>
+      </div>
     );
   }
   return <div className={classes}>{children}</div>;

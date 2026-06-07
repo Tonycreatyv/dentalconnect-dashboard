@@ -9,6 +9,7 @@ import { useClinic } from "../context/ClinicContext";
 import { getVerticalConfig } from "../config/verticalConfig";
 import { ChatBubble } from "../components/ChatBubble";
 import { MobileChip, MobileConversationRow, MobileEmptyState } from "../components/mobile/MobilePrimitives";
+import { BarberLineButton, BarberLineCard, BarberLineDrawer } from "../components/barberline/BarberLineUI";
 
 const ORG_OPTIONS = ["clinic-demo", "barber-demo", "barber-demo-wimaeil", "creatyv-product"];
 const CHANNEL_OPTIONS = ["all", "messenger", "whatsapp"] as const;
@@ -158,6 +159,26 @@ function previewForLead(lead: LeadRow): string {
   return lead.latest_message_content || lead.last_message_preview || "Sin mensajes todavía";
 }
 
+function cleanBarberInboxText(value: string | null | undefined): string {
+  const source = String(value ?? "").trim();
+  if (!source) return "Sin mensajes todavía";
+  const cleaned = source
+    .replace(/\*/g, "")
+    .replace(/Cl[ií]nica\s+Sonrisas/gi, "BarberLine")
+    .replace(/\bcl[ií]nica\b/gi, "barbería")
+    .replace(/\bpacientes?\b/gi, "clientes")
+    .replace(/\bdoctores?\b/gi, "barberos")
+    .replace(/\bdental(?:es)?\b/gi, "")
+    .replace(/\btratamientos?\b/gi, "servicios")
+    .replace(/(?:Servicio|Barbero|Fecha|Hora|Nombre):\s*[^.\n]+/gi, "")
+    .replace(/(?:active_appointment|pending_reschedule|current_flow|collected|appointment_id)[\s:=]+[^\s]+/gi, "")
+    .replace(/\{[^{}]{20,}\}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "Perfecto, confirmamos tu cita";
+  return cleaned.length > 140 ? `${cleaned.slice(0, 137).trim()}...` : cleaned;
+}
+
 const LEAD_SELECT =
   "id, organization_id, full_name, first_name, last_name, avatar_url, phone, status, channel, last_channel, channel_user_id, state, last_message_at, last_bot_reply_at, last_message_preview, handoff_to_human";
 
@@ -190,6 +211,9 @@ export default function Inbox() {
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
   const [refreshingThread, setRefreshingThread] = useState(false);
+  const [localThreadByLead, setLocalThreadByLead] = useState<Record<string, MsgRow[]>>({});
+  const [staffTakenByLead, setStaffTakenByLead] = useState<Record<string, boolean>>({});
+  const [visualAppointmentOpen, setVisualAppointmentOpen] = useState(false);
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const leadsReloadTimeoutRef = useRef<number | null>(null);
@@ -202,6 +226,11 @@ export default function Inbox() {
   const resolvedLeadId = selectedLead?.id ?? leadId ?? "";
   const selectedConversationMode = getConversationModeLabel(selectedLead);
   const hasActiveThread = Boolean(leadId);
+  const selectedLocalThread = resolvedLeadId ? localThreadByLead[resolvedLeadId] ?? [] : [];
+  const displayedThread = useMemo(() => {
+    return dedupeByKey([...thread, ...selectedLocalThread], messageKey).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) as MsgRow[];
+  }, [selectedLocalThread, thread]);
+  const staffTaken = Boolean(resolvedLeadId && staffTakenByLead[resolvedLeadId]);
 
   const orgOptions = useMemo(() => {
     const map = new Map<string, { organizationId: string; label: string; businessType: "dental" | "barbershop" }>();
@@ -268,6 +297,29 @@ export default function Inbox() {
         { label: "Agenda", text: "Perfecto. ¿Qué día y hora te queda mejor para coordinar?" },
         { label: "Seguimiento", text: "Estoy pendiente. ¿Querés que lo revisemos ahora?" },
       ];
+
+  function addLocalOutgoingMessage(content: string) {
+    if (!selectedLead) return;
+    const leadKey = selectedLead.id;
+    const message: MsgRow = {
+      id: `local-${leadKey}-${Date.now()}`,
+      organization_id: selectedLead.organization_id,
+      lead_id: leadKey,
+      channel: effectiveLeadChannel(selectedLead),
+      channel_user_id: selectedLead.channel_user_id,
+      actor: "staff",
+      role: "assistant",
+      content,
+      created_at: new Date().toISOString(),
+    };
+    setLocalThreadByLead((prev) => ({ ...prev, [leadKey]: [...(prev[leadKey] ?? []), message] }));
+    window.setTimeout(() => threadScrollRef.current?.scrollTo({ top: threadScrollRef.current.scrollHeight, behavior: "smooth" }), 50);
+  }
+
+  function toggleLocalStaffTaken() {
+    if (!selectedLead) return;
+    setStaffTakenByLead((prev) => ({ ...prev, [selectedLead.id]: !prev[selectedLead.id] }));
+  }
 
   async function hydrateDirectLead(routeLeadId: string) {
     const selectedOrgBefore = selectedOrg;
@@ -737,7 +789,7 @@ export default function Inbox() {
                 }}
                 className={inboxIsBarbershop ? "mt-1 h-10 w-full truncate rounded-xl border border-white/[0.08] bg-[#05060A] px-3 text-xs text-[#E8ECF2] outline-none sm:text-sm" : "mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none"}
               >
-                {orgOptions.map((org) => (
+                {(inboxIsBarbershop ? orgOptions.filter((org) => org.businessType === "barbershop") : orgOptions).map((org) => (
                   <option key={org.organizationId} value={org.organizationId}>
                     {org.label} · {productLabelForBusinessType(org.businessType)}
                   </option>
@@ -812,8 +864,8 @@ export default function Inbox() {
                 ) : filteredLeads.length === 0 ? (
                   <MobileEmptyState
                     icon={MessageCircle}
-                    title={leads.length > 0 ? "Sin resultados con estos filtros" : inboxIsBarbershop ? "No hay mensajes nuevos por ahora." : "Sin conversaciones"}
-                    description={leads.length > 0 ? "Cambiá el filtro o limpiá la búsqueda." : inboxIsBarbershop ? undefined : "No hay leads para esta organización todavía."}
+                    title={leads.length > 0 ? "Sin resultados con estos filtros" : inboxIsBarbershop ? "No hay conversaciones todavía." : "Sin conversaciones"}
+                    description={leads.length > 0 ? "Cambiá el filtro o limpiá la búsqueda." : inboxIsBarbershop ? "Cuando un cliente escriba por WhatsApp aparecerá aquí." : "No hay leads para esta organización todavía."}
                   />
                 ) : filteredLeads.map((lead) => {
                   const active = lead.id === resolvedLeadId;
@@ -822,7 +874,7 @@ export default function Inbox() {
                   const mode = getConversationModeLabel(lead);
                   const status = conversationStatusCopy(mode);
                   return (
-                    <MobileConversationRow key={lead.id} onClick={() => navigate(`/inbox/${lead.id}`)} className={["group relative overflow-hidden", inboxIsBarbershop ? "border-[#1E2228] bg-[#0E1014] hover:bg-[#131820]" : "", active ? "border-[#25D366]/40 bg-[#25D366]/10 ring-1 ring-[#25D366]/15" : ""].join(" ")}>
+                    <MobileConversationRow key={lead.id} onClick={() => navigate(`/inbox/${lead.id}`)} className={["group relative overflow-hidden", inboxIsBarbershop ? "border-[#1E2228] bg-[#0E1014] hover:bg-[#131820]" : "", active ? (inboxIsBarbershop ? "border-l-4 border-l-[#18C37E] bg-[#18C37E]/10 ring-1 ring-[#18C37E]/15" : "border-[#25D366]/40 bg-[#25D366]/10 ring-1 ring-[#25D366]/15") : ""].join(" ")}>
                       <div className="flex min-w-0 gap-3">
                         <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#162838] text-xs font-black text-[#25D366]">
                           {displayName.slice(0, 1).toUpperCase()}
@@ -833,7 +885,7 @@ export default function Inbox() {
                             <span className="truncate text-sm font-bold text-[#F8FAFC]">{displayName}</span>
                             <span className="shrink-0 text-[11px] text-[#9CAAB8]">{formatRelativeTime(lead.latest_message_at || lead.last_message_at)}</span>
                           </div>
-                          <div className="text-safe text-xs leading-relaxed text-[#9CAAB8]" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{previewForLead(lead)}</div>
+                          <div className="text-safe text-xs leading-relaxed text-[#9CAAB8]" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{inboxIsBarbershop ? cleanBarberInboxText(previewForLead(lead)) : previewForLead(lead)}</div>
                           <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             <span className="id-chip"><span>{channelLabel(effectiveLeadChannel(lead))}</span></span>
                             <span className="id-chip"><span>{orgLabelById.get(lead.organization_id) ?? fallbackOrgLabel(lead.organization_id)}</span></span>
@@ -882,29 +934,58 @@ export default function Inbox() {
                       <RefreshCw className={["h-4 w-4", refreshingThread ? "animate-spin" : ""].join(" ")} />
                       Refrescar
                     </button>
-                    {selectedConversationMode === "human_active" ? (
-                      <button onClick={() => void patchLeadForHandoff(false)} className="min-h-11 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20">Reactivar bot</button>
+                    {inboxIsBarbershop ? (
+                      <>
+                        <button onClick={() => addLocalOutgoingMessage("Hoy tenemos horarios disponibles. Te puedo ofrecer 9:00 AM, 10:30 AM o 2:00 PM.")} className="min-h-10 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-2 text-xs font-semibold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar horarios</button>
+                        <button onClick={() => addLocalOutgoingMessage("Corte clásico desde HNL 250, Corte + barba desde HNL 400 y Barba desde HNL 180.")} className="min-h-10 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-2 text-xs font-semibold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar precios</button>
+                        <button onClick={() => setVisualAppointmentOpen(true)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/10 px-3 py-2 text-xs font-semibold text-[#18C37E] transition hover:bg-[#18C37E]/15"><CalendarPlus className="h-4 w-4" /> Agendar cita</button>
+                        <button onClick={toggleLocalStaffTaken} className={`min-h-10 rounded-xl border px-3 py-2 text-xs font-semibold transition ${staffTaken ? "border-[#18C37E]/25 bg-[#18C37E]/10 text-[#BDF8D1]" : "border-amber-400/20 bg-amber-500/10 text-amber-300"}`}>{staffTaken ? "Tomada por staff" : "Tomar conversación"}</button>
+                      </>
                     ) : (
-                      <button onClick={() => void patchLeadForHandoff(true)} className="min-h-11 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20">Tomar conversación</button>
+                      <>
+                        {selectedConversationMode === "human_active" ? (
+                          <button onClick={() => void patchLeadForHandoff(false)} className="min-h-11 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20">Reactivar bot</button>
+                        ) : (
+                          <button onClick={() => void patchLeadForHandoff(true)} className="min-h-11 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20">Tomar conversación</button>
+                        )}
+                        {selectedLead && selectedLead.status !== "attended" && <button onClick={(e) => markAsHandled(selectedLead.id, e)} className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20"><CheckCircle2 className="h-4 w-4" /> Atendido</button>}
+                        <button onClick={() => navigate("/agenda")} className="inline-flex items-center gap-2 rounded-xl bg-[#3CBDB9] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#35a9a5]"><CalendarPlus className="h-4 w-4" /> Crear cita</button>
+                      </>
                     )}
-                    {selectedLead && selectedLead.status !== "attended" && <button onClick={(e) => markAsHandled(selectedLead.id, e)} className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20"><CheckCircle2 className="h-4 w-4" /> Atendido</button>}
-                    <button onClick={() => navigate("/agenda")} className="inline-flex items-center gap-2 rounded-xl bg-[#3CBDB9] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#35a9a5]"><CalendarPlus className="h-4 w-4" /> Crear cita</button>
                   </div>
                 </div>
 
-                {selectedConversationMode === "human_active" ? (
+                {inboxIsBarbershop && staffTaken ? (
+                  <div className="border-b border-[#18C37E]/20 bg-[#18C37E]/10 px-4 py-2 text-xs font-bold text-[#BDF8D1]">
+                    Tomada por staff.
+                  </div>
+                ) : selectedConversationMode === "human_active" ? (
                   <div className="border-b border-amber-400/20 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-200">
                     Bot pausado para esta conversación.
                   </div>
                 ) : null}
 
-                <div ref={threadScrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
-                  {loadingThread ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">Cargando mensajes…</div> : threadError ? <div className="py-12 text-center text-sm text-rose-500">{threadError}</div> : thread.length === 0 ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">{inboxIsBarbershop ? "No hay mensajes nuevos por ahora." : "No hay mensajes"}</div> : thread.map((m) => {
+                <div ref={threadScrollRef} className={`flex-1 space-y-3 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4 ${inboxIsBarbershop ? "bg-[#090B0D]" : ""}`}>
+                  {loadingThread ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">Cargando mensajes…</div> : threadError ? <div className="py-12 text-center text-sm text-rose-500">{threadError}</div> : displayedThread.length === 0 ? <div className="py-12 text-center text-xs text-white/50 sm:text-sm">{inboxIsBarbershop ? "No hay conversaciones todavía." : "No hay mensajes"}</div> : displayedThread.map((m) => {
                     const role = String(m.role ?? "").toLowerCase();
                     const actor = String(m.actor ?? "").toLowerCase();
                     const isInbound = role === "user" || actor === "user";
                     const isStaff = actor === "staff" || actor === "human" || actor === "operator";
                     const isBot = actor === "bot" || role === "assistant";
+                    if (inboxIsBarbershop) {
+                      return (
+                        <div key={messageKey(m)} className={`flex ${isInbound ? "justify-start" : "justify-end"}`}>
+                          <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm shadow-[0_12px_26px_rgba(0,0,0,0.18)] ${isInbound ? "rounded-bl-md border border-[#252A30] bg-[#121417] text-[#DDE4EC]" : "rounded-br-md border border-[#18C37E]/20 bg-[#123225] text-[#DFF9EA]"}`}>
+                            {!isInbound ? <div className="mb-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#8DE8B3]">{isStaff ? "Staff" : isBot ? "BarberLine" : "BarberLine"}</div> : null}
+                            <div className="whitespace-pre-wrap leading-relaxed">{cleanBarberInboxText(m.content)}</div>
+                            <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] opacity-60">
+                              <span>{new Date(m.created_at).toLocaleString("es", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}</span>
+                              <span>{channelLabel(m.channel)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
                     return (
                       <ChatBubble
                         key={messageKey(m)}
@@ -925,9 +1006,18 @@ export default function Inbox() {
                 </div>
 
                 <div className={`border-t p-2.5 sm:p-3 ${inboxIsBarbershop ? "border-[#1E2228] bg-[#0B0D0F]" : "border-white/10 bg-white/5"}`} style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}>
-                  <div className="mb-2 flex flex-wrap gap-2">
-                    {quickReplies.map((reply) => <button key={reply.label} onClick={() => setComposer(reply.text)} className="min-h-9 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/60 transition hover:bg-white/10">{reply.label}</button>)}
-                  </div>
+                  {inboxIsBarbershop ? (
+                    <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-4">
+                      <button onClick={() => addLocalOutgoingMessage("Hoy tenemos horarios disponibles. Te puedo ofrecer 9:00 AM, 10:30 AM o 2:00 PM.")} className="min-h-9 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-1.5 text-xs font-bold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar horarios</button>
+                      <button onClick={() => addLocalOutgoingMessage("Corte clásico desde HNL 250, Corte + barba desde HNL 400 y Barba desde HNL 180.")} className="min-h-9 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-1.5 text-xs font-bold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar precios</button>
+                      <button onClick={() => setVisualAppointmentOpen(true)} className="min-h-9 rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/10 px-3 py-1.5 text-xs font-bold text-[#18C37E] transition hover:bg-[#18C37E]/15">Agendar cita</button>
+                      <button onClick={toggleLocalStaffTaken} className={`min-h-9 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${staffTaken ? "border-[#18C37E]/25 bg-[#18C37E]/10 text-[#BDF8D1]" : "border-amber-400/20 bg-amber-500/10 text-amber-300"}`}>{staffTaken ? "Tomada por staff" : "Tomar conversación"}</button>
+                    </div>
+                  ) : (
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {quickReplies.map((reply) => <button key={reply.label} onClick={() => setComposer(reply.text)} className="min-h-9 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/60 transition hover:bg-white/10">{reply.label}</button>)}
+                    </div>
+                  )}
                   <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end">
                     <textarea ref={composerRef} value={composer} onChange={(e) => { setComposer(e.target.value); const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }} placeholder="Respuesta manual…" rows={1} className="max-h-[120px] min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 sm:px-4 text-sm text-white outline-none placeholder:text-white/30 transition focus:border-[#3CBDB9] focus:ring-4 focus:ring-[#3CBDB9]/20" />
                     <button onClick={sendReply} disabled={!selectedLead || sending || !composer.trim()} className={["min-h-10 w-full shrink-0 rounded-2xl px-4 sm:min-h-11 sm:px-5 text-sm font-semibold transition sm:w-auto", sending || !composer.trim() ? "bg-white/10 text-white/40" : "bg-[#3CBDB9] text-white hover:bg-[#35a9a5]"].join(" ")}>{sending ? "…" : "Enviar"}</button>
@@ -951,6 +1041,39 @@ export default function Inbox() {
           </div>
         </div>
       </div>
+      <BarberLineDrawer
+        open={inboxIsBarbershop && visualAppointmentOpen}
+        title="Agendar cita"
+        subtitle={selectedLead ? getBestDisplayName(selectedLead) : undefined}
+        onClose={() => setVisualAppointmentOpen(false)}
+      >
+        <div className="space-y-4">
+          <BarberLineCard className="p-4">
+            <div className="text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Cliente</div>
+            <div className="mt-1 text-sm font-black text-[#F5F7FA]">{selectedLead ? getBestDisplayName(selectedLead) : "Cliente"}</div>
+            <div className="mt-2 text-sm text-[#A4AAB3]">{selectedLead?.phone || "Sin teléfono registrado"}</div>
+          </BarberLineCard>
+          <BarberLineCard className="space-y-3 p-4">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Servicio</div>
+              <div className="mt-1 text-sm font-semibold text-[#DDE4EC]">Corte clásico</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Horario sugerido</div>
+              <div className="mt-1 text-sm font-semibold text-[#DDE4EC]">10:30 AM</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Barbero</div>
+              <div className="mt-1 text-sm font-semibold text-[#DDE4EC]">Disponible</div>
+            </div>
+          </BarberLineCard>
+          <p className="text-sm leading-relaxed text-[#A4AAB3]">Este drawer es visual por ahora. Para crear una cita real, abrí la agenda con el cliente en contexto.</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <BarberLineButton onClick={() => navigate(selectedLead ? `/agenda?lead=${encodeURIComponent(selectedLead.id)}` : "/agenda")}>Abrir agenda</BarberLineButton>
+            <BarberLineButton variant="secondary" onClick={() => addLocalOutgoingMessage("Perfecto. Te puedo agendar una cita para corte clásico. ¿Te queda bien hoy a las 10:30 AM?")}>Enviar propuesta</BarberLineButton>
+          </div>
+        </div>
+      </BarberLineDrawer>
     </div>
   );
 }
