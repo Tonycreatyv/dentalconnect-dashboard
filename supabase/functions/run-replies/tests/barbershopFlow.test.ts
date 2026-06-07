@@ -33,7 +33,9 @@ String.prototype.includes = function (
   ) {
     const compactValue = value.replace(/\s+/g, " ");
     const compactNeedle = searchString.replace(/\s+/g, " ");
-    if (compactNeedle !== searchString || nativeStringIncludes.call(value, "\n")) {
+    if (
+      compactNeedle !== searchString || nativeStringIncludes.call(value, "\n")
+    ) {
       return nativeStringIncludes.call(compactValue, compactNeedle);
     }
   }
@@ -198,7 +200,9 @@ Deno.test("greeting barbershop usa organization_settings location.name cuando ex
     clinicSettings: { location: { name: "VIP Barbershop 504" } },
   } as any);
   assert(
-    String((result as any).replyText).includes("bienvenido a VIP Barbershop 504"),
+    String((result as any).replyText).includes(
+      "bienvenido a VIP Barbershop 504",
+    ),
   );
   assert(
     !String((result as any).replyText).includes("Barbería Premium 504"),
@@ -7863,7 +7867,7 @@ Deno.test("Interactive fallback: selecting an offered day uses last_offered_date
   assert(source.includes("Estos son algunos horarios disponibles"));
   assert(
     source.includes(
-      "Tocá *Más horas* para ver más opciones.",
+      "Escogé una hora o mirá más opciones.",
     ),
   );
   assert(source.includes("last_offered_slots: offeredSlots"));
@@ -7883,7 +7887,9 @@ Deno.test("Time-block follow-up: active booking maps afternoon variants to curre
   assert(source.includes("current_date"));
   assert(source.includes("time_preference: block"));
   assert(source.includes("last_offered_slots: offeredSlots"));
-  assert(source.includes("formatRequestedDayLabel(selectedDate).toLowerCase()"));
+  assert(
+    source.includes("formatRequestedDayLabel(selectedDate).toLowerCase()"),
+  );
   assert(source.includes("blockLabel"));
 });
 
@@ -8339,7 +8345,9 @@ Deno.test("BarberLine afternoon block remains explicit time-block only", async (
   assert(
     source.includes('if (normalizedAction.startsWith("booking_time_block:"))'),
   );
-  assert(source.includes("formatRequestedDayLabel(selectedDate).toLowerCase()"));
+  assert(
+    source.includes("formatRequestedDayLabel(selectedDate).toLowerCase()"),
+  );
   assert(source.includes("blockLabel"));
   assert(source.includes("time_block_followup_detected"));
 });
@@ -8459,7 +8467,7 @@ Deno.test("BarberLine WIMAEIL booking start sends guided service picker", async 
   );
   assert(
     source.includes(
-      "serviceSelectionList(\n        barbershopServices,\n        \"Perfecto 💈 Escogé el servicio:\",\n        true,\n      )",
+      'serviceSelectionList(\n        barbershopServices,\n        "Perfecto 💈 Escogé el servicio:",\n        true,\n      )',
     ),
   );
   assert(source.includes("interactiveButtons: servicesList"));
@@ -8599,7 +8607,8 @@ Deno.test("BarberLine controlled copy keeps stable critical booking phrases", as
   assert(source.includes('reply: "¿Qué día te queda mejor?"'));
   assert(source.includes("¿Tenés barbero preferido?"));
   assert(source.includes("formatBarbershopSlotOptionsBody"));
-  assert(source.includes("Más horas"));
+  assert(source.includes("formatBarbershopAvailabilityListBody"));
+  assert(source.includes("buildExpandedBarbershopTimeSlotsList"));
   assert(source.includes("¿A nombre de quién dejamos la cita?"));
   assert(source.includes("formatBarbershopConfirmationSummary"));
   assert(source.includes("Ya tenés una cita confirmada para"));
@@ -8722,7 +8731,11 @@ Deno.test("BarberLine provider text normalization supports any-provider phrases"
   assert(
     source.includes("const nextExpected = resolveBarbershopGuidedExpectedStep"),
   );
-  assert(source.includes("const providerOptionsForTurn = resolveProviderOptionsForTurn("));
+  assert(
+    source.includes(
+      "const providerOptionsForTurn = resolveProviderOptionsForTurn(",
+    ),
+  );
   assert(source.includes("barbershopProviders"));
   assert(source.includes("currentCollected"));
   assert(
@@ -8745,7 +8758,9 @@ Deno.test("BarberLine provider text normalization supports any-provider phrases"
   assert(source.includes("providerId === text"));
   assert(source.includes("isCloseTextMatch(providerName, text)"));
   assert(source.includes("normalizedAction = `select_provider:${"));
-  assert(source.includes('provider.preference === "any" ? "any" : provider.id'));
+  assert(
+    source.includes('provider.preference === "any" ? "any" : provider.id'),
+  );
   assert(source.includes("resolveProviderFromActionOrText("));
   assert(source.includes("providerOptionsForTurn"));
   assert(source.includes("inboundText"));
@@ -8917,28 +8932,23 @@ Deno.test("BarberLine guided handoff and post-booking state remain explicit", as
   assert(source.includes("clearActiveBookingState"));
 });
 
-Deno.test("BarberLine slot list copy clarifies first slots and full list button", async () => {
+Deno.test("BarberLine slot selection prefers grouped WhatsApp list for larger availability", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
-  const slotCopyBlock = source.slice(
-    source.indexOf("function formatBarbershopSlotOptionsBody"),
-    source.indexOf("async function buildAvailableProviderOptions"),
+  const composer = await Deno.readTextFile(
+    "supabase/functions/run-replies/domain/barbershopResponseComposer.ts",
   );
   assert(source.includes("function formatBarbershopSlotOptionsBody"));
-  assert(
-    slotCopyBlock.includes(
-      "Estos son algunos horarios disponibles con *${provider}*",
-    ),
-  );
-  assert(slotCopyBlock.includes("Estos son algunos horarios disponibles"));
-  assert(
-    slotCopyBlock.includes(
-      "Tocá *Más horas* para ver más opciones.",
-    ),
-  );
-  assert(slotCopyBlock.includes("Escogé el horario que querés reservar."));
-  assert(source.includes('"Más horas"'));
+  assert(source.includes("formatBarbershopAvailabilityListBody"));
+  assert(source.includes("interactiveList: useSlotList"));
+  assert(source.includes("interactiveList: hasMore"));
+  assert(composer.includes('title: "Horarios disponibles"'));
+  assert(composer.includes('buttonText: "Ver horarios disponibles"'));
+  assert(composer.includes('"Mañana"'));
+  assert(composer.includes('"Tarde"'));
+  assert(composer.includes("Escogé una hora para continuar."));
+  assert(!composer.includes('"booking_more_hours"'));
   assert(!source.includes('buttonText: "Ver horarios"'));
 });
 
@@ -8950,7 +8960,11 @@ Deno.test("BarberLine future appointment guard filters same-day past appointment
   assert(source.includes("startsAtMs > now.getTime()"));
   assert(source.includes("appointmentTime > currentTime"));
   assert(source.includes(".filter((appointment) =>"));
-  assert(source.includes("isFutureActiveAppointmentForTimezone(appointment, timezone)"));
+  assert(
+    source.includes(
+      "isFutureActiveAppointmentForTimezone(appointment, timezone)",
+    ),
+  );
 });
 
 Deno.test("BarberLine future appointment conflict uses matching action buttons", async () => {
@@ -9038,13 +9052,13 @@ Deno.test("DentalConnect guided greeting and service list use dental copy and ac
       "Estos son los servicios disponibles en ${brandName} 🦷",
     ),
   );
-	  assert(source.includes("Escogé uno para ver disponibilidad y agendar."));
-	  assert(source.includes('{ id: "booking_start", title: "Agendar cita" }'));
-	  assert(source.includes('{ id: "view_prices", title: "Servicios" }'));
-	  assert(source.includes('{ id: "dental_info", title: "Info clínica" }'));
-	  const greetingButtonsBlock = source.slice(
-	    source.indexOf("function dentalGreetingButtons"),
-	    source.indexOf("function getDentalServiceMenuEmoji"),
+  assert(source.includes("Escogé uno para ver disponibilidad y agendar."));
+  assert(source.includes('{ id: "booking_start", title: "Agendar cita" }'));
+  assert(source.includes('{ id: "view_prices", title: "Servicios" }'));
+  assert(source.includes('{ id: "dental_info", title: "Info clínica" }'));
+  const greetingButtonsBlock = source.slice(
+    source.indexOf("function dentalGreetingButtons"),
+    source.indexOf("function getDentalServiceMenuEmoji"),
   );
   assert(!greetingButtonsBlock.includes("Hablar con recepción"));
   assert(source.includes("select_service:${service.id}"));
@@ -9052,8 +9066,8 @@ Deno.test("DentalConnect guided greeting and service list use dental copy and ac
   assert(
     !source.includes('{ id: "view_prices", title: "Ver servicios/precios" }'),
   );
-	  assert(!source.includes("Estos son los servicios de ${brandName} 🦷"));
-	});
+  assert(!source.includes("Estos son los servicios de ${brandName} 🦷"));
+});
 
 Deno.test("DentalConnect clinic info submenu exposes hours location and reception", async () => {
   const source = await Deno.readTextFile(
@@ -9064,7 +9078,9 @@ Deno.test("DentalConnect clinic info submenu exposes hours location and receptio
   assert(source.includes("Claro 🦷 ¿Qué querés consultar?"));
   assert(source.includes('{ id: "dental_hours", title: "Horarios" }'));
   assert(source.includes('{ id: "dental_location", title: "Ubicación" }'));
-  assert(source.includes('{ id: "talk_to_human", title: "Hablar con recepción" }'));
+  assert(
+    source.includes('{ id: "talk_to_human", title: "Hablar con recepción" }'),
+  );
   assert(source.includes('debugNote: "dental_guided_clinic_info_menu"'));
 });
 
@@ -9139,8 +9155,12 @@ Deno.test("DentalConnect guided date provider slot and confirmation UX exists", 
   assert(source.includes("¿Tenés doctor preferido?"));
   assert(source.includes("formatDentalPeriodSelectorBody"));
   assert(source.includes("¿qué horario preferís? 🦷"));
-  assert(source.includes('{ id: "dental_period:morning", title: "Por la mañana" }'));
-  assert(source.includes('{ id: "dental_period:afternoon", title: "Por la tarde" }'));
+  assert(
+    source.includes('{ id: "dental_period:morning", title: "Por la mañana" }'),
+  );
+  assert(
+    source.includes('{ id: "dental_period:afternoon", title: "Por la tarde" }'),
+  );
   assert(source.includes("¿A nombre de quién dejamos la cita?"));
   assert(source.includes("¿Confirmamos?"));
   assert(
@@ -9186,28 +9206,50 @@ Deno.test("DentalConnect date picker hides Hoy when today has no future slots", 
   assert(source.includes("const todaySlots = await getAvailableSlotsForDay"));
   assert(source.includes("if (todaySlots.length > 0)"));
   assert(source.includes('{ id: todayAction, title: "Hoy" }'));
-  assert(source.includes("const tomorrowSlots = await getAvailableSlotsForDay"));
+  assert(
+    source.includes("const tomorrowSlots = await getAvailableSlotsForDay"),
+  );
   assert(source.includes("if (tomorrowSlots.length > 0)"));
   assert(source.includes('{ id: otherDateAction, title: "Otra fecha" }'));
-  assert(!source.includes('return withKeepExisting([\\n    { id: otherDateAction, title: "Otra fecha" },\\n    { id: "talk_to_human", title: "Hablar con recepción" }'));
-  assert(source.includes("interactiveButtons: await dentalDatePreferenceButtons({"));
+  assert(
+    !source.includes(
+      'return withKeepExisting([\\n    { id: otherDateAction, title: "Otra fecha" },\\n    { id: "talk_to_human", title: "Hablar con recepción" }',
+    ),
+  );
+  assert(
+    source.includes("interactiveButtons: await dentalDatePreferenceButtons({"),
+  );
 });
 
 Deno.test("DentalConnect manual hoy no-slots recovery excludes reception from primary recovery", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
-  const branch = source.slice(source.indexOf('debugNote: isToday'));
-  const buttonBranch = branch.slice(branch.indexOf('interactiveButtons: isToday'));
+  const branch = source.slice(source.indexOf("debugNote: isToday"));
+  const buttonBranch = branch.slice(
+    branch.indexOf("interactiveButtons: isToday"),
+  );
   const todayButtons = buttonBranch.slice(
-    buttonBranch.indexOf('? ['),
-    buttonBranch.indexOf(']\n        :'),
+    buttonBranch.indexOf("? ["),
+    buttonBranch.indexOf("]\n        :"),
   );
 
   assert(branch.includes('"dental_guided_today_no_future_slots"'));
-  assert(todayButtons.includes('{ id: "booking_date_pref:tomorrow", title: "Mañana" }'));
-  assert(todayButtons.includes('{ id: "booking_date_pref:week", title: "Otra fecha" }'));
-  assert(!todayButtons.includes('{ id: "talk_to_human", title: "Hablar con recepción" }'));
+  assert(
+    todayButtons.includes(
+      '{ id: "booking_date_pref:tomorrow", title: "Mañana" }',
+    ),
+  );
+  assert(
+    todayButtons.includes(
+      '{ id: "booking_date_pref:week", title: "Otra fecha" }',
+    ),
+  );
+  assert(
+    !todayButtons.includes(
+      '{ id: "talk_to_human", title: "Hablar con recepción" }',
+    ),
+  );
 });
 
 Deno.test("DentalConnect period slot lists only include the selected valid period", async () => {
@@ -9216,7 +9258,11 @@ Deno.test("DentalConnect period slot lists only include the selected valid perio
   );
 
   assert(source.includes("function filterDentalSlotsByPeriod"));
-  assert(source.includes('period === "morning" ? minutes < 12 * 60 : minutes >= 13 * 60'));
+  assert(
+    source.includes(
+      'period === "morning" ? minutes < 12 * 60 : minutes >= 13 * 60',
+    ),
+  );
   assert(source.includes('normalizedAction.startsWith("dental_period:")'));
   assert(source.includes('"dental_guided_morning_slots"'));
   assert(source.includes('"dental_guided_afternoon_slots"'));
@@ -9233,15 +9279,17 @@ Deno.test("DentalConnect Horarios info stays business-hours only", async () => {
   assert(
     source.indexOf('normalizedAction === "dental_hours"') <
       source.indexOf("handleDentalDirectBookingRequest({"),
-	  );
-	});
+  );
+});
 
 Deno.test("DentalConnect active appointment guard runs before booking service picker", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
 
-  const guidedStart = source.indexOf("async function handleDentalGuidedRuntimeTurn");
+  const guidedStart = source.indexOf(
+    "async function handleDentalGuidedRuntimeTurn",
+  );
   const guardIndex = source.indexOf(
     'debugNote: "dental_guided_booking_start_active_appointment_guard"',
     guidedStart,
@@ -9254,9 +9302,17 @@ Deno.test("DentalConnect active appointment guard runs before booking service pi
   assert(guardIndex > guidedStart);
   assert(servicePickerIndex > guidedStart);
   assert(guardIndex < servicePickerIndex);
-  assert(source.includes("formatDentalActiveAppointmentGuardReply(activeState)"));
-  assert(source.includes('{ id: "additional_booking", title: "Agendar otra cita" }'));
-  assert(source.includes('{ id: "keep_existing_booking", title: "Mantener mi cita" }'));
+  assert(
+    source.includes("formatDentalActiveAppointmentGuardReply(activeState)"),
+  );
+  assert(
+    source.includes('{ id: "additional_booking", title: "Agendar otra cita" }'),
+  );
+  assert(
+    source.includes(
+      '{ id: "keep_existing_booking", title: "Mantener mi cita" }',
+    ),
+  );
 });
 
 Deno.test("DentalConnect additional booking explicitly bypasses active appointment guard", async () => {
@@ -9264,7 +9320,9 @@ Deno.test("DentalConnect additional booking explicitly bypasses active appointme
     "supabase/functions/run-replies/index.ts",
   );
 
-  const guidedStart = source.indexOf("async function handleDentalGuidedRuntimeTurn");
+  const guidedStart = source.indexOf(
+    "async function handleDentalGuidedRuntimeTurn",
+  );
   const additionalIndex = source.indexOf(
     'if (normalizedAction === "additional_booking")',
     guidedStart,
@@ -9290,7 +9348,9 @@ Deno.test("DentalConnect service selection checks active appointment before date
     "supabase/functions/run-replies/index.ts",
   );
 
-  const serviceBranch = source.indexOf('if (normalizedAction.startsWith("select_service:"))');
+  const serviceBranch = source.indexOf(
+    'if (normalizedAction.startsWith("select_service:"))',
+  );
   const guardIndex = source.indexOf(
     'debugNote: "dental_guided_service_selection_active_appointment_guard"',
     serviceBranch,
@@ -9304,10 +9364,17 @@ Deno.test("DentalConnect service selection checks active appointment before date
   assert(guardIndex > serviceBranch);
   assert(datePromptIndex > serviceBranch);
   assert(guardIndex < datePromptIndex);
-  assert(source.includes("const allowAdditionalBooking = Boolean((collected as any).allow_additional_booking);"));
+  assert(source.includes("const allowAdditionalBooking = Boolean("));
+  assert(source.includes("(collected as any).allow_additional_booking"));
   assert(source.includes("clearDentalAttemptedBookingState(collected, {"));
-  assert(source.includes("formatDentalActiveAppointmentGuardReply(activeState)"));
-  assert(source.includes('debugNote: "dental_guided_service_selection_active_appointment_guard"'));
+  assert(
+    source.includes("formatDentalActiveAppointmentGuardReply(activeState)"),
+  );
+  assert(
+    source.includes(
+      'debugNote: "dental_guided_service_selection_active_appointment_guard"',
+    ),
+  );
   assert(source.includes("pending_booking: null"));
   assert(source.includes("selected_slot: null"));
   assert(source.includes('current_service_key: ""'));
@@ -9321,12 +9388,16 @@ Deno.test("DentalConnect services info remains before service-selection guard", 
     "supabase/functions/run-replies/index.ts",
   );
 
-  const pricingIndex = source.indexOf('debugNote: "dental_guided_services_pricing"');
+  const pricingIndex = source.indexOf(
+    'debugNote: "dental_guided_services_pricing"',
+  );
   const serviceGuardIndex = source.indexOf(
     'debugNote: "dental_guided_service_selection_active_appointment_guard"',
   );
   const hoursIndex = source.indexOf('debugNote: "dental_guided_hours_info"');
-  const locationIndex = source.indexOf('debugNote: "dental_guided_location_missing"');
+  const locationIndex = source.indexOf(
+    'debugNote: "dental_guided_location_missing"',
+  );
 
   assert(pricingIndex > 0);
   assert(serviceGuardIndex > 0);
@@ -9342,10 +9413,18 @@ Deno.test("DentalConnect Servicio singular is service info and clears stale book
     "supabase/functions/run-replies/index.ts",
   );
 
-  const pricingIndex = source.indexOf('debugNote: "dental_guided_services_pricing"');
+  const pricingIndex = source.indexOf(
+    'debugNote: "dental_guided_services_pricing"',
+  );
   assert(pricingIndex > 0);
-  assert(source.includes("/\\b(precio|precios|servicio|servicios|cuanto cuesta|cuánto cuesta|cuesta|vale)\\b/"));
-  assert(source.includes("collected: clearDentalAttemptedBookingState(collected)"));
+  assert(
+    source.includes(
+      "/\\b(precio|precios|servicio|servicios|cuanto cuesta|cuánto cuesta|cuesta|vale)\\b/",
+    ),
+  );
+  assert(
+    source.includes("collected: clearDentalAttemptedBookingState(collected)"),
+  );
 });
 
 Deno.test("DentalConnect date intelligence handles ambiguous weekdays and future ranges", async () => {
@@ -9354,16 +9433,18 @@ Deno.test("DentalConnect date intelligence handles ambiguous weekdays and future
   );
 
   assert(source.includes("function getDentalAmbiguousWeekdayOptions"));
-  assert(source.includes('normalizedAction = `dental_weekday_clarify:${'));
-  assert(source.includes('normalizedAction.startsWith("dental_weekday_clarify:")'));
+  assert(source.includes("normalizedAction = `dental_weekday_clarify:${"));
+  assert(
+    source.includes('normalizedAction.startsWith("dental_weekday_clarify:")'),
+  );
   assert(source.includes("¿Te referís a"));
   assert(source.includes('debugNote: "dental_guided_weekday_clarification"'));
   assert(source.includes("function parseDentalFutureRangeFromText"));
-  assert(source.includes('normalizedAction = `dental_date_range:${'));
+  assert(source.includes("normalizedAction = `dental_date_range:${"));
   assert(source.includes('normalizedAction.startsWith("dental_date_range:")'));
   assert(source.includes("function buildDentalDateOptionsInRange"));
   assert(source.includes("Tengo estas fechas disponibles esa semana 🦷"));
-  assert(source.includes('debugNote: days.length'));
+  assert(source.includes("debugNote: days.length"));
   assert(source.includes('"dental_guided_future_range_dates"'));
 });
 
@@ -9480,7 +9561,9 @@ Deno.test("DentalConnect guided change time keeps selected date and cancel clear
       "Listo, no confirmé esa cita 🦷",
     ),
   );
-  assert(source.includes("¿Querés buscar otro horario o empezar una cita nueva?"));
+  assert(
+    source.includes("¿Querés buscar otro horario o empezar una cita nueva?"),
+  );
   assert(source.includes('nextExpected: "dental_cancel_recovery"'));
   assert(source.includes('id: "dental_recovery:search_other_time"'));
   assert(source.includes("const selectedDate = safeStr("));
@@ -9501,7 +9584,7 @@ Deno.test("DentalConnect date-only text stays date-only and does not become time
       "if (parsedDate && !parseDentalExplicitTimeFromText(inboundText))",
     ),
   );
-  assert(source.includes('normalizedAction = `select_date:${parsedDate}`'));
+  assert(source.includes("normalizedAction = `select_date:${parsedDate}`"));
   assert(
     source.includes(
       "const match = n.match(/\\b(?:a las|alas)\\s*(\\d{1,2})",
@@ -9520,7 +9603,11 @@ Deno.test("DentalConnect direct booking extracts service date time before servic
   assert(source.includes("parseDentalDateFromText("));
   assert(source.includes("parseDentalExplicitTimeFromText("));
   assert(source.includes('debugNote: "dental_direct_booking_confirmation"'));
-  assert(source.includes('debugNote: "dental_direct_booking_date_only_period_selector"'));
+  assert(
+    source.includes(
+      'debugNote: "dental_direct_booking_date_only_period_selector"',
+    ),
+  );
   assert(source.includes("dental_direct_booking_alternatives"));
   assert(
     source.indexOf("handleDentalDirectBookingRequest({") <
@@ -9533,7 +9620,9 @@ Deno.test("DentalConnect partial direct booking preserves date time while asking
     "supabase/functions/run-replies/index.ts",
   );
 
-  assert(source.includes("dental_direct_booking_missing_service_preserved_datetime"));
+  assert(
+    source.includes("dental_direct_booking_missing_service_preserved_datetime"),
+  );
   assert(source.includes("Perfecto 🦷 ¿Qué servicio necesitás?"));
   assert(source.includes("appointment_date: requestedDate ||"));
   assert(source.includes("appointment_time: requestedTime ||"));
@@ -9568,8 +9657,12 @@ Deno.test("DentalConnect post-cancel short affirmative routes to recovery", asyn
 
   assert(source.includes('expected === "dental_cancel_recovery"'));
   assert(source.includes("isAffirmativeDentalText(inboundText)"));
-  assert(source.includes('normalizedAction = "dental_recovery:search_other_time"'));
-  assert(source.includes('debugNote: "dental_cancel_recovery_period_selector"'));
+  assert(
+    source.includes('normalizedAction = "dental_recovery:search_other_time"'),
+  );
+  assert(
+    source.includes('debugNote: "dental_cancel_recovery_period_selector"'),
+  );
   assert(source.includes('debugNote: "dental_cancel_recovery_date_prompt"'));
   assert(source.includes('debugNote: "dental_cancel_recovery_service_picker"'));
 });
@@ -9580,9 +9673,19 @@ Deno.test("DentalConnect active appointment reschedule uses guided hour choices"
   );
 
   assert(source.includes("dentalRescheduleChoiceButtons"));
-  assert(source.includes('{ id: "change_booking_slot", title: "Cambiar hora" }'));
-  assert(source.includes('{ id: "dental_reschedule_change_date", title: "Cambiar día" }'));
-  assert(source.includes('{ id: "keep_existing_booking", title: "Cancelar cambio" }'));
+  assert(
+    source.includes('{ id: "change_booking_slot", title: "Cambiar hora" }'),
+  );
+  assert(
+    source.includes(
+      '{ id: "dental_reschedule_change_date", title: "Cambiar día" }',
+    ),
+  );
+  assert(
+    source.includes(
+      '{ id: "keep_existing_booking", title: "Cancelar cambio" }',
+    ),
+  );
   assert(source.includes("Claro 🦷 ¿Qué querés cambiar de tu cita?"));
   assert(source.includes("Servicio: *${service}*"));
   assert(source.includes("Fecha actual: *${"));
@@ -9598,12 +9701,24 @@ Deno.test("DentalConnect active appointment reschedule fallback does not use old
   );
 
   assert(indexSource.includes("dental_guided_reschedule_prompt_from_fallback"));
-  assert(indexSource.includes("fallbackInteractiveButtons = dentalRescheduleChoiceButtons()"));
+  assert(
+    indexSource.includes(
+      "fallbackInteractiveButtons = dentalRescheduleChoiceButtons()",
+    ),
+  );
   assert(indexSource.includes("Claro 🦷 ¿Qué querés cambiar de tu cita?"));
   assert(!indexSource.includes("¿Qué nueva fecha y hora preferís?"));
-  assert(!indexSource.includes("Perfecto. Decime la nueva fecha y hora para cambiar tu cita."));
+  assert(
+    !indexSource.includes(
+      "Perfecto. Decime la nueva fecha y hora para cambiar tu cita.",
+    ),
+  );
   assert(engineSource.includes("dental_reschedule_datetime_guided_fallback"));
-  assert(engineSource.includes('replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__"'));
+  assert(
+    engineSource.includes(
+      'replyText: "__CHECK_ACTIVE_APPOINTMENT_FOR_RESCHEDULE__"',
+    ),
+  );
 });
 
 Deno.test("DentalConnect same-day reschedule opens clean hour list", async () => {
@@ -9615,10 +9730,18 @@ Deno.test("DentalConnect same-day reschedule opens clean hour list", async () =>
   assert(source.includes("dental_reschedule_time:"));
   assert(source.includes('buttonText: "Horas disponibles"'));
   assert(source.includes('title: "Horas disponibles"'));
-  assert(source.includes("title: formatHourLabel(safeStr(slot.time, \"\")).slice(0, 24)"));
+  assert(
+    source.includes(
+      'title: formatHourLabel(safeStr(slot.time, "")).slice(0, 20)',
+    ) ||
+      source.includes(
+        'title: formatHourLabel(safeStr(slot.time, "")).slice(0, 24)',
+      ),
+  );
   assert(!source.includes("Doctor disponible · Limpieza dental"));
   assert(!source.includes("Horario disponible"));
-  assert(source.includes("Perfecto 🦷 Mantengo tu cita para *${formatRequestedDayLabel(date)}*."));
+  assert(source.includes("Perfecto 🦷 Mantengo tu cita para *"));
+  assert(source.includes("formatRequestedDayLabel(date)"));
   assert(source.includes("Escogé la nueva hora:"));
   assert(source.includes('normalizedAction = "dental_reschedule_show_hours"'));
 });
@@ -9642,10 +9765,16 @@ Deno.test("DentalConnect date selection opens direct hour list when only one per
   );
 
   assert(source.includes("async function showDentalAllSlotsForDate"));
-  assert(source.includes("if (!morningSlots.length || !afternoonSlots.length)"));
-  assert(source.includes('debugNote: `${args.debugNote}_single_period_hour_list`'));
-  assert(source.includes("Para *${formatRequestedDayLabel(args.selectedDate)}*, estos son los horarios disponibles 🦷"));
-  assert(source.includes('buttonText,'));
+  assert(
+    source.includes("if (!morningSlots.length || !afternoonSlots.length)"),
+  );
+  assert(
+    source.includes("debugNote: `${args.debugNote}_single_period_hour_list`"),
+  );
+  assert(
+    source.includes("estos son los horarios disponibles 🦷"),
+  );
+  assert(source.includes("buttonText,"));
   assert(source.includes('"Horas disponibles"'));
 });
 
@@ -9657,9 +9786,13 @@ Deno.test("DentalConnect date buttons hide Hoy when today has no future slots", 
   assert(source.includes("async function dentalDatePreferenceButtons"));
   assert(source.includes("const todaySlots = await getAvailableSlotsForDay({"));
   assert(source.includes("if (todaySlots.length > 0)"));
-  assert(source.includes('const todayAction = args.actionMode === "reschedule"'));
-  assert(source.includes('const tomorrowAction = args.actionMode === "reschedule"'));
-  assert(source.includes('return withKeepExisting(['));
+  assert(
+    source.includes('const todayAction = args.actionMode === "reschedule"'),
+  );
+  assert(
+    source.includes('const tomorrowAction = args.actionMode === "reschedule"'),
+  );
+  assert(source.includes("return withKeepExisting(["));
   assert(source.includes('{ id: todayAction, title: "Hoy" }'));
   assert(source.includes('{ id: tomorrowAction, title: "Mañana" }'));
   assert(source.includes('{ id: otherDateAction, title: "Otra fecha" }'));
@@ -9671,14 +9804,31 @@ Deno.test("DentalConnect explicit hoy with no slots does not set pending today",
   );
 
   assert(source.includes('normalizedAction === "booking_date_pref:today"'));
-  assert(source.includes('debugNote: "dental_guided_today_no_future_slots_from_action"'));
+  assert(
+    source.includes(
+      'debugNote: "dental_guided_today_no_future_slots_from_action"',
+    ),
+  );
   assert(source.includes("Ya no tengo horarios disponibles para hoy 🦷"));
-  const guardStart = source.indexOf('debugNote: "dental_guided_today_no_future_slots_from_action"');
-  const guardBlock = source.slice(Math.max(0, guardStart - 1800), guardStart + 300);
+  const guardStart = source.indexOf(
+    'debugNote: "dental_guided_today_no_future_slots_from_action"',
+  );
+  const guardBlock = source.slice(
+    Math.max(0, guardStart - 1800),
+    guardStart + 300,
+  );
   assert(!guardBlock.includes("appointment_date: todayIso"));
   assert(!guardBlock.includes("current_date: todayIso"));
-  assert(guardBlock.includes('{ id: "booking_date_pref:tomorrow", title: "Mañana" }'));
-  assert(guardBlock.includes('{ id: "booking_date_pref:week", title: "Otra fecha" }'));
+  assert(
+    guardBlock.includes(
+      '{ id: "booking_date_pref:tomorrow", title: "Mañana" }',
+    ),
+  );
+  assert(
+    guardBlock.includes(
+      '{ id: "booking_date_pref:week", title: "Otra fecha" }',
+    ),
+  );
 });
 
 Deno.test("DentalConnect current booking change-hour text opens interactive hour list", async () => {
@@ -9688,7 +9838,9 @@ Deno.test("DentalConnect current booking change-hour text opens interactive hour
 
   assert(source.includes("function isDentalChangeHourText"));
   assert(source.includes("quiero cambiar la hora"));
-  assert(source.includes('normalizedAction = "dental_show_current_date_hours"'));
+  assert(
+    source.includes('normalizedAction = "dental_show_current_date_hours"'),
+  );
   assert(source.includes('debugNote: "dental_current_date_hour_list"'));
   assert(source.includes("interactiveList: dentalPeriodSlotsList("));
 });
@@ -9699,7 +9851,11 @@ Deno.test("DentalConnect no-change action is reschedule-only and clears stale ch
   );
 
   assert(source.includes("function dentalSameDayRescheduleButtons"));
-  assert(source.includes('{ id: "keep_existing_booking", title: "No hacer cambios" }'));
+  assert(
+    source.includes(
+      '{ id: "keep_existing_booking", title: "No hacer cambios" }',
+    ),
+  );
   assert(source.includes("function clearDentalTemporaryChangeState"));
   assert(source.includes("pending_reschedule: _pendingReschedule"));
   assert(source.includes("pending_booking: _pendingBooking"));
@@ -9708,7 +9864,9 @@ Deno.test("DentalConnect no-change action is reschedule-only and clears stale ch
   assert(source.includes("preferred_date: _preferredDate"));
   assert(source.includes("preferred_time: _preferredTime"));
   assert(source.includes("last_offered_slots: _lastOfferedSlots"));
-  assert(source.includes("collected: clearDentalTemporaryChangeState(collected)"));
+  assert(
+    source.includes("collected: clearDentalTemporaryChangeState(collected)"),
+  );
   assert(source.includes("Perfecto, dejamos tu cita igual 🦷"));
   assert(source.includes("nextExpected: undefined"));
 });
@@ -9722,7 +9880,11 @@ Deno.test("DentalConnect no-change cleanup prevents stale reschedule follow-up r
   assert(source.includes("activeBookingFlow: false"));
   assert(source.includes("pending_cancel: null"));
   assert(source.includes("pending_cancel_appointment: null"));
-  assert(source.includes('(!normalizedAction && /\\b(horario|horarios|abren|atienden|atiende)\\b/.test(text))'));
+  assert(
+    source.includes(
+      "(!normalizedAction && /\\b(horario|horarios|abren|atienden|atiende)\\b/.test(text))",
+    ),
+  );
   assert(source.includes('lastIntent: "business_hours_question"'));
 });
 
@@ -9735,8 +9897,12 @@ Deno.test("DentalConnect same-date text keeps selected date instead of parsing a
   assert(source.includes("deja la misma fecha"));
   assert(source.includes("dejar igual la fecha"));
   assert(source.includes("parseDentalCurrentTimeSelectionFromText"));
-  const availabilityBranch = source.indexOf('expected === "availability_slot_selection"');
-  const keepSameDateCheck = source.lastIndexOf("isDentalKeepSelectedDateText(text)");
+  const availabilityBranch = source.indexOf(
+    'expected === "availability_slot_selection"',
+  );
+  const keepSameDateCheck = source.lastIndexOf(
+    "isDentalKeepSelectedDateText(text)",
+  );
   const dateParserAfterCheck = source.indexOf(
     "parseDentalDateFromText(inboundText, nowLocal)",
     keepSameDateCheck,
@@ -9753,11 +9919,21 @@ Deno.test("DentalConnect direct typed time uses current selected date and clean 
     "supabase/functions/run-replies/index.ts",
   );
 
-  assert(source.includes('normalizedAction = `dental_current_date_time:${parsedTime}`'));
-  assert(source.includes('normalizedAction.startsWith("dental_current_date_time:")'));
+  assert(
+    source.includes(
+      "normalizedAction = `dental_current_date_time:${parsedTime}`",
+    ),
+  );
+  assert(
+    source.includes('normalizedAction.startsWith("dental_current_date_time:")'),
+  );
   assert(source.includes('debugNote: "dental_current_date_time_confirmation"'));
   assert(source.includes('"dental_current_date_time_alternatives"'));
-  assert(source.includes('dentalPeriodSlotsList(offeredSlots, body, "Horas disponibles")'));
+  assert(
+    source.includes(
+      'dentalPeriodSlotsList(offeredSlots, body, "Horas disponibles")',
+    ),
+  );
 });
 
 Deno.test("DentalConnect hour and alternative lists keep rows time-only", async () => {
@@ -9765,8 +9941,16 @@ Deno.test("DentalConnect hour and alternative lists keep rows time-only", async 
     "supabase/functions/run-replies/index.ts",
   );
 
-  assert(source.includes("title: formatHourLabel(safeStr(slot.time, \"\")).slice(0, 24)"));
-  assert(source.includes("interactiveList: dentalPeriodSlotsList(offeredSlots, body, \"Más horas\")"));
+  assert(
+    source.includes(
+      'title: formatHourLabel(safeStr(slot.time, "")).slice(0, 24)',
+    ),
+  );
+  assert(
+    source.includes(
+      'interactiveList: dentalPeriodSlotsList(offeredSlots, body, "Más horas")',
+    ),
+  );
   assert(!source.includes("Doctor disponible · Limpieza dental"));
   assert(!source.includes("Equipo DICAN ·"));
   assert(!source.includes("Horario disponible"));
@@ -9778,9 +9962,17 @@ Deno.test("DentalConnect cancel confirmation is explicit and keeps appointment o
   );
 
   assert(source.includes("dentalCancelConfirmationButtons"));
-  assert(source.includes('{ id: "confirm_cancel_appointment", title: "Confirmar cancelación" }'));
-  assert(source.includes('{ id: "keep_existing_booking", title: "Mantener cita" }'));
-  assert(source.includes('{ id: "reschedule_booking", title: "Cambiar hora" }'));
+  assert(
+    source.includes(
+      '{ id: "confirm_cancel_appointment", title: "Confirmar cancelación" }',
+    ),
+  );
+  assert(
+    source.includes('{ id: "keep_existing_booking", title: "Mantener cita" }'),
+  );
+  assert(
+    source.includes('{ id: "reschedule_booking", title: "Cambiar hora" }'),
+  );
   assert(source.includes("¿Seguro que querés cancelarla?"));
   assert(source.includes("Perfecto, mantenemos tu cita 🦷"));
   assert(source.includes("Tu cita de *${service}*${"));
@@ -9803,15 +9995,15 @@ Deno.test("DentalConnect appointment insert allows dental appointments without b
   assert(source.includes("!appointmentFields.provider_id"));
   assert(source.includes("!appointmentFields.provider_name"));
   assert(source.includes("start_at: startIso"));
-	  assert(source.includes("starts_at: startIso"));
-	  assert(source.includes("function isValidUuid"));
-	  assert(source.includes("dental_guided_invalid_provider_id_sanitized"));
-	  assert(source.includes("formatDentalAppointmentProviderName"));
-	  assert(source.includes('return "Equipo DICAN"'));
-	  assert(source.includes("provider_id: payloadProviderId || null"));
-	  assert(
-	    source.includes(
-	      "appointment_date: appointmentDate || startIso.slice(0, 10)",
+  assert(source.includes("starts_at: startIso"));
+  assert(source.includes("function isValidUuid"));
+  assert(source.includes("dental_guided_invalid_provider_id_sanitized"));
+  assert(source.includes("formatDentalAppointmentProviderName"));
+  assert(source.includes('return "Equipo DICAN"'));
+  assert(source.includes("provider_id: payloadProviderId || null"));
+  assert(
+    source.includes(
+      "appointment_date: appointmentDate || startIso.slice(0, 10)",
     ),
   );
   assert(
@@ -9949,8 +10141,10 @@ Deno.test("DentalConnect final demo hours formatter groups identical weekdays", 
   );
 
   assert(source.includes("const groupedRows: string[] = []"));
-  assert(source.includes("`${current.name} a ${rows[end].name.toLowerCase()}`"));
-  assert(source.includes("groupedRows.join(\"\\n\")"));
+  assert(
+    source.includes("`${current.name} a ${rows[end].name.toLowerCase()}`"),
+  );
+  assert(source.includes('groupedRows.join("\\n")'));
   assert(source.includes("Lunes a viernes: 8:00 AM – 5:00 PM"));
   assert(source.includes("Sábado: 9:00 AM – 1:00 PM"));
   assert(source.includes("Domingo: cerrado"));
@@ -9962,9 +10156,17 @@ Deno.test("DentalConnect selected-service date time text preserves both date and
   );
 
   assert(source.includes("parseDentalExplicitTimeFromText(inboundText)"));
-  assert(source.includes("normalizedAction = `dental_date_time:${parsedDate}|${parsedTime}`"));
+  assert(
+    source.includes(
+      "normalizedAction = `dental_date_time:${parsedDate}|${parsedTime}`",
+    ),
+  );
   assert(source.includes('normalizedAction.startsWith("dental_date_time:")'));
-  assert(source.includes("const explicitDateTime = normalizedAction.startsWith(\"dental_date_time:\")"));
+  assert(
+    source.includes(
+      'const explicitDateTime = normalizedAction.startsWith("dental_date_time:")',
+    ),
+  );
   assert(source.includes("const selectedDate = explicitDateTime"));
   assert(source.includes('debugNote: "dental_current_date_time_confirmation"'));
 });
@@ -9993,9 +10195,15 @@ Deno.test("DentalConnect final demo confirmation and success include real patien
   assert(indexSource.includes("Nombre: *${patientName}*"));
   assert(indexSource.includes("👤 Nombre: *${patientName}*"));
   assert(indexSource.includes("patient_name: safeStr("));
-  assert(actionSource.includes("payload.patient_name ?? (activeAppt as any).patient_name"));
+  assert(
+    actionSource.includes(
+      "payload.patient_name ?? (activeAppt as any).patient_name",
+    ),
+  );
   assert(actionSource.includes("a nombre de *${patientName}*"));
-  assert(actionSource.includes("Cuando querás, puedo ayudarte a agendar otra."));
+  assert(
+    actionSource.includes("Cuando querás, puedo ayudarte a agendar otra."),
+  );
 });
 
 Deno.test("DentalConnect final demo no-change cleanup stays reschedule scoped", async () => {
@@ -10008,7 +10216,13 @@ Deno.test("DentalConnect final demo no-change cleanup stays reschedule scoped", 
   assert(source.includes("pending_booking: _pendingBooking"));
   assert(source.includes("pending_offered_slot: _pendingOfferedSlot"));
   assert(source.includes("last_offered_slots: _lastOfferedSlots"));
-  assert(source.includes("expected === \"reschedule_datetime\""));
-  assert(source.includes("safeStr((collected as any).active_flow, \"\") === \"reschedule\""));
-  assert(source.includes("collected: clearDentalTemporaryChangeState(collected)"));
+  assert(source.includes('expected === "reschedule_datetime"'));
+  assert(
+    source.includes(
+      'safeStr((collected as any).active_flow, "") === "reschedule"',
+    ),
+  );
+  assert(
+    source.includes("collected: clearDentalTemporaryChangeState(collected)"),
+  );
 });

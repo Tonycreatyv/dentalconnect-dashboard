@@ -64,6 +64,11 @@ import {
 } from "./domain/kbResolver.ts";
 import { formatBookingSuccessCopy } from "./domain/bookingSuccessCopy.ts";
 import { formatBarberLineReply } from "./domain/barberLinePersonality.ts";
+import {
+  buildBarbershopAvailabilityButtons,
+  buildExpandedBarbershopTimeSlotsList,
+  formatBarbershopAvailabilityListBody,
+} from "./domain/barbershopResponseComposer.ts";
 import { normalizeLeadStateForBusinessType } from "./domain/stateNormalization.ts";
 import {
   activateHumanTakeoverState,
@@ -593,16 +598,20 @@ function getBarbershopBrandName(
   clinicSettings: Record<string, unknown>,
   orgSettings?: Record<string, unknown> | null,
 ): string {
-  const location = clinicSettings.location && typeof clinicSettings.location === "object"
-    ? (clinicSettings.location as Record<string, unknown>)
-    : {};
+  const location =
+    clinicSettings.location && typeof clinicSettings.location === "object"
+      ? (clinicSettings.location as Record<string, unknown>)
+      : {};
   const configuredBrand = safeStr(
     location.name,
     safeStr(
       clinicSettings.brand_name,
       safeStr(
         clinicSettings.display_name,
-        safeStr(orgSettings?.brand_name, safeStr(orgSettings?.display_name, "")),
+        safeStr(
+          orgSettings?.brand_name,
+          safeStr(orgSettings?.display_name, ""),
+        ),
       ),
     ),
   ).trim();
@@ -2277,7 +2286,9 @@ async function showDentalAllSlotsForDate(args: {
         ],
     };
   }
-  const body = `Para *${formatRequestedDayLabel(args.selectedDate)}*, estos son los horarios disponibles 🦷`;
+  const body = `Para *${
+    formatRequestedDayLabel(args.selectedDate)
+  }*, estos son los horarios disponibles 🦷`;
   return {
     reply: body,
     statePatch: {
@@ -3353,11 +3364,12 @@ async function handleDentalGuidedRuntimeTurn(args: {
     const appointmentId = normalizePayloadActionValue(normalizedAction)
       .replace(/^select_active_appointment:/, "")
       .trim();
-    const options = Array.isArray((collected as any).active_appointments_options)
-      ? ((collected as any).active_appointments_options as Array<
-        Record<string, unknown>
-      >)
-      : [];
+    const options =
+      Array.isArray((collected as any).active_appointments_options)
+        ? ((collected as any).active_appointments_options as Array<
+          Record<string, unknown>
+        >)
+        : [];
     const selected = options.find((appointment) =>
       safeStr(appointment.id, "") === appointmentId
     );
@@ -3530,7 +3542,9 @@ async function handleDentalGuidedRuntimeTurn(args: {
     /\b(agendar cita|quiero agendar|necesito una cita|necesito cita|quiero cita|agendar|reservar)\b/
       .test(text)
   ) {
-    const allowAdditionalBooking = Boolean((collected as any).allow_additional_booking);
+    const allowAdditionalBooking = Boolean(
+      (collected as any).allow_additional_booking,
+    );
     if (!allowAdditionalBooking) {
       const active = await loadActiveAppointmentForLead({
         supabase,
@@ -4209,7 +4223,9 @@ async function handleDentalGuidedRuntimeTurn(args: {
     const available = (slots as Array<Record<string, unknown>>).filter((slot) =>
       safeStr(slot.time, "") !== currentTime
     );
-    const body = `Perfecto 🦷 Mantengo tu cita para *${formatRequestedDayLabel(date)}*.\n\nEscogé la nueva hora:`;
+    const body = `Perfecto 🦷 Mantengo tu cita para *${
+      formatRequestedDayLabel(date)
+    }*.\n\nEscogé la nueva hora:`;
     return {
       reply: body,
       statePatch: {
@@ -5921,7 +5937,10 @@ async function handleDentalGuidedRuntimeTurn(args: {
             },
             patient_name: safeStr(
               pending.patient_name,
-              resolveReliableDentalPatientName(leadState, confirmationCollected),
+              resolveReliableDentalPatientName(
+                leadState,
+                confirmationCollected,
+              ),
             ),
             patient_phone: safeStr(
               (leadState as any)?.phone,
@@ -6669,11 +6688,11 @@ function formatBarbershopSlotOptionsBody(args: {
   if (args.providerPreference === "specific") {
     const provider = args.providerName || "tu barbero";
     return args.hasMore
-      ? `Estos son algunos horarios disponibles con *${provider}* 💈\n\n${args.lines}\n\nTocá *Más horas* para ver más opciones.`
+      ? `Estos son algunos horarios disponibles con *${provider}* 💈\n\n${args.lines}\n\nEscogé una hora o mirá más opciones.`
       : `Estos espacios están disponibles con ${provider} 💈\n\n${args.lines}\n\nEscogé el horario que querés reservar.`;
   }
   return args.hasMore
-    ? `Estos son algunos horarios disponibles 💈\n\n${args.lines}\n\nTocá *Más horas* para ver más opciones.`
+    ? `Estos son algunos horarios disponibles 💈\n\n${args.lines}\n\nEscogé una hora o mirá más opciones.`
     : `Estos espacios están disponibles 💈\n\n${args.lines}\n\nEscogé el horario que querés reservar.`;
 }
 
@@ -9086,8 +9105,8 @@ async function executeToolCalls(args: {
 
     try {
       if (toolName === "book_appointment") {
-        const collectedForTool = ((leadState as any)?.collected ?? {}) as
-          Record<string, unknown>;
+        const collectedForTool =
+          ((leadState as any)?.collected ?? {}) as Record<string, unknown>;
         const currentFlow = (collectedForTool as any).current_flow;
         const allowAdditionalBooking = Boolean(
           (collectedForTool as any).allow_additional_booking ||
@@ -9377,12 +9396,14 @@ async function resolveEngineReply(args: {
       leadState,
       clinicSettings,
     );
-    const dentalAppointments = isBarbershopConversation ? [] : await loadFutureActiveAppointmentsForLead({
-      supabase,
-      organizationId,
-      leadId,
-      timezone: safeStr((clinicSettings as any)?.timezone, DEFAULT_TIMEZONE),
-    });
+    const dentalAppointments = isBarbershopConversation
+      ? []
+      : await loadFutureActiveAppointmentsForLead({
+        supabase,
+        organizationId,
+        leadId,
+        timezone: safeStr((clinicSettings as any)?.timezone, DEFAULT_TIMEZONE),
+      });
     if (!isBarbershopConversation && dentalAppointments.length > 1) {
       return buildDentalMultipleAppointmentsReviewResult({
         appointments: dentalAppointments,
@@ -13299,15 +13320,20 @@ export async function generateReply(
         });
         const shown = slots.slice(0, maxVisibleSlots);
         const visibleForList = slots.length > 3 ? slots.slice(0, 10) : shown;
+        const useSlotList = slots.length > 3;
         const lines = shown.map((slot) =>
           `• ${formatHourLabel(safeStr(slot.time, ""))}`
         ).join("\n");
-        const body = formatBarbershopSlotOptionsBody({
-          providerPreference: "specific",
-          providerName: soloProvider.name,
-          lines,
-          hasMore: slots.length > shown.length,
-        });
+        const body = useSlotList
+          ? formatBarbershopAvailabilityListBody(
+            visibleForList as Array<Record<string, unknown>>,
+          )
+          : formatBarbershopSlotOptionsBody({
+            providerPreference: "specific",
+            providerName: soloProvider.name,
+            lines,
+            hasMore: false,
+          });
         const offeredSlots = visibleForList.map((slot) =>
           toBarbershopOfferedSlot(
             slot as Record<string, unknown>,
@@ -13376,21 +13402,20 @@ export async function generateReply(
           },
           leadPatch: {},
           debugNote: "booking_solo_provider_auto_assigned_slots_for_day",
-          interactiveButtons: shown.length <= 3
-            ? shown.map((slot) => ({
-              id: `select_time:${safeStr(slot.date, "")}|${
-                safeStr(slot.time, "")
-              }|${safeStr(slot.provider_id, "")}`,
-              title: formatHourLabel(safeStr(slot.time, "")).slice(0, 20),
-            }))
-            : [],
-          interactiveList: timeSlotsList(
-            visibleForList as Array<Record<string, unknown>>,
-            body,
-            serviceName,
-            "specific",
-            "Más horas",
-          ),
+          interactiveButtons: useSlotList
+            ? []
+            : buildBarbershopAvailabilityButtons(
+              shown as Array<Record<string, unknown>>,
+              false,
+            ),
+          interactiveList: useSlotList
+            ? buildExpandedBarbershopTimeSlotsList({
+              slots: visibleForList as Array<Record<string, unknown>>,
+              body,
+              serviceName,
+              providerPreference: "specific",
+            })
+            : undefined,
         };
       }
       const providersList = providerSelectionList(availableProviders);
@@ -14254,6 +14279,7 @@ export async function generateReply(
             };
           }
           const visibleForList = slots.length > 3 ? slots.slice(0, 10) : shown;
+          const useSlotList = slots.length > 3;
           const lines = providerPreference === "specific"
             ? shown.map((slot) =>
               `• ${formatHourLabel(safeStr(slot.time, ""))}`
@@ -14263,14 +14289,18 @@ export async function generateReply(
                 safeStr(slot.provider_name, "Barbero")
               }`
             ).join("\n");
-          const body = formatBarbershopSlotOptionsBody({
-            providerPreference,
-            providerName: providerPreference === "specific"
-              ? selectedProvider.name
-              : undefined,
-            lines,
-            hasMore: slots.length > shown.length,
-          });
+          const body = useSlotList
+            ? formatBarbershopAvailabilityListBody(
+              visibleForList as Array<Record<string, unknown>>,
+            )
+            : formatBarbershopSlotOptionsBody({
+              providerPreference,
+              providerName: providerPreference === "specific"
+                ? selectedProvider.name
+                : undefined,
+              lines,
+              hasMore: false,
+            });
           const offeredSlots = visibleForList.map((slot) =>
             toBarbershopOfferedSlot(
               slot as Record<string, unknown>,
@@ -14335,21 +14365,20 @@ export async function generateReply(
             debugNote: providerPreference === "specific"
               ? "booking_provider_specific_slots_for_day"
               : "booking_provider_any_slots_for_day",
-            interactiveButtons: shown.length <= 3
-              ? shown.map((slot) => ({
-                id: `select_time:${safeStr(slot.date, "")}|${
-                  safeStr(slot.time, "")
-                }|${safeStr(slot.provider_id, "")}`,
-                title: formatHourLabel(safeStr(slot.time, "")).slice(0, 20),
-              }))
-              : [],
-            interactiveList: timeSlotsList(
-              visibleForList as Array<Record<string, unknown>>,
-              body,
-              resolvedServiceName,
-              providerPreference,
-              "Más horas",
-            ),
+            interactiveButtons: useSlotList
+              ? []
+              : buildBarbershopAvailabilityButtons(
+                shown as Array<Record<string, unknown>>,
+                false,
+              ),
+            interactiveList: useSlotList
+              ? buildExpandedBarbershopTimeSlotsList({
+                slots: visibleForList as Array<Record<string, unknown>>,
+                body,
+                serviceName: resolvedServiceName,
+                providerPreference,
+              })
+              : undefined,
           };
         }
         const { buttons, offeredDates } = await buildQuickDateOptions({
@@ -14641,10 +14670,6 @@ export async function generateReply(
               interactiveButtons: dateButtons,
             };
           }
-          const timeButtons: InteractiveButton[] = shown.map((slot) => ({
-            id: `select_time:${slot.date}|${slot.time}|${slot.provider_id}`,
-            title: formatHourLabel(slot.time).slice(0, 20),
-          }));
           const uniqueProviders = Array.from(
             new Set(
               shown.map((s) => safeStr(s.provider_name, "").trim()).filter(
@@ -14667,6 +14692,22 @@ export async function generateReply(
                 )
             );
           const listSlots = slots.length > 3 ? slots.slice(0, 10) : shown;
+          const timeButtons = buildBarbershopAvailabilityButtons(
+            shown as Array<Record<string, unknown>>,
+            hasMore,
+          );
+          const body = hasMore
+            ? formatBarbershopAvailabilityListBody(
+              listSlots as Array<Record<string, unknown>>,
+            )
+            : formatBarbershopSlotOptionsBody({
+              providerPreference: uniqueProviders.length === 1
+                ? "specific"
+                : "any",
+              providerName: uniqueProviders[0],
+              lines: timeLines,
+              hasMore: false,
+            }) + (hasLater ? "\nTambién tengo espacios más tarde." : "");
           const offeredSlots = listSlots.map((slot) =>
             toBarbershopOfferedSlot(
               slot as Record<string, unknown>,
@@ -14682,16 +14723,7 @@ export async function generateReply(
             slots_count: offeredSlots.length,
           });
           return {
-            reply: formatBarbershopSlotOptionsBody({
-              providerPreference: uniqueProviders.length === 1
-                ? "specific"
-                : "any",
-              providerName: uniqueProviders[0],
-              lines: timeLines,
-              hasMore,
-            }) + (!hasMore && hasLater
-              ? "\nTambién tengo espacios más tarde."
-              : ""),
+            reply: body,
             statePatch: {
               stage: "BOOKING",
               nextExpected: "availability_slot_selection",
@@ -14719,20 +14751,16 @@ export async function generateReply(
             leadPatch: {},
             debugNote: "booking_pref_time_menu",
             interactiveButtons: timeButtons,
-            interactiveList: timeSlotsList(
-              listSlots as Array<Record<string, unknown>>,
-              formatBarbershopSlotOptionsBody({
+            interactiveList: hasMore
+              ? buildExpandedBarbershopTimeSlotsList({
+                slots: listSlots as Array<Record<string, unknown>>,
+                body,
+                serviceName: serviceName || safeStr(selectedService?.name, ""),
                 providerPreference: uniqueProviders.length === 1
                   ? "specific"
                   : "any",
-                providerName: uniqueProviders[0],
-                lines: timeLines,
-                hasMore,
-              }),
-              serviceName || safeStr(selectedService?.name, ""),
-              uniqueProviders.length === 1 ? "specific" : "any",
-              "Más horas",
-            ),
+              })
+              : undefined,
           };
         }
 
@@ -14959,10 +14987,6 @@ export async function generateReply(
             interactiveButtons: barberlineMenuButtons,
           };
         }
-        const timeButtons: InteractiveButton[] = shown.map((slot) => ({
-          id: `select_time:${slot.date}|${slot.time}|${slot.provider_id}`,
-          title: formatHourLabel(slot.time).slice(0, 20),
-        }));
         const uniqueProviders = Array.from(
           new Set(
             shown.map((s) => safeStr(s.provider_name, "").trim()).filter(
@@ -14976,7 +15000,24 @@ export async function generateReply(
             `• ${formatHourLabel(s.time)} · ${s.provider_name}`
           ).join("\n");
         const hasMore = slots.length > shown.length;
-        const offeredSlots = shown.map((slot) =>
+        const timeButtons = buildBarbershopAvailabilityButtons(
+          shown as Array<Record<string, unknown>>,
+          hasMore,
+        );
+        const listSlots = slots.length > 3 ? slots.slice(0, 10) : shown;
+        const body = hasMore
+          ? formatBarbershopAvailabilityListBody(
+            listSlots as Array<Record<string, unknown>>,
+          )
+          : formatBarbershopSlotOptionsBody({
+            providerPreference: uniqueProviders.length === 1
+              ? "specific"
+              : "any",
+            providerName: uniqueProviders[0],
+            lines: timeLines,
+            hasMore: false,
+          });
+        const offeredSlots = listSlots.map((slot) =>
           toBarbershopOfferedSlot(
             slot as Record<string, unknown>,
             selectedService,
@@ -14991,14 +15032,7 @@ export async function generateReply(
           slots_count: offeredSlots.length,
         });
         return {
-          reply: formatBarbershopSlotOptionsBody({
-            providerPreference: uniqueProviders.length === 1
-              ? "specific"
-              : "any",
-            providerName: uniqueProviders[0],
-            lines: timeLines,
-            hasMore,
-          }),
+          reply: body,
           statePatch: {
             stage: "BOOKING",
             nextExpected: "availability_slot_selection",
@@ -15028,6 +15062,16 @@ export async function generateReply(
           leadPatch: {},
           debugNote: "booking_interactive_time_menu",
           interactiveButtons: timeButtons,
+          interactiveList: hasMore
+            ? buildExpandedBarbershopTimeSlotsList({
+              slots: listSlots as Array<Record<string, unknown>>,
+              body,
+              serviceName: serviceName || safeStr(selectedService?.name, ""),
+              providerPreference: uniqueProviders.length === 1
+                ? "specific"
+                : "any",
+            })
+            : undefined,
         };
       }
     }
@@ -15564,8 +15608,9 @@ export async function generateReply(
         const shownOffset = Number(
           (collected as any).availability_shown_offset ?? 0,
         );
-        const nextOffset = Math.max(0, shownOffset + 3);
-        const shown = allSlots.slice(nextOffset, nextOffset + 3);
+        const nextOffset = Math.max(0, shownOffset + 2);
+        const remainingSlots = allSlots.slice(nextOffset);
+        const shown = remainingSlots.slice(0, 6);
         if (!shown.length) {
           return {
             reply:
@@ -15589,7 +15634,7 @@ export async function generateReply(
               safeStr(s.provider_name, "Barbero")
             }`
           ).join("\n");
-        const offeredSlots = shown.map((slot) =>
+        const offeredSlots = remainingSlots.slice(0, 10).map((slot) =>
           toBarbershopOfferedSlot(
             slot as Record<string, unknown>,
             selectedService,
@@ -15630,15 +15675,14 @@ export async function generateReply(
           },
           leadPatch: {},
           debugNote: "booking_more_hours_shown",
-          interactiveList: timeSlotsList(
-            shown as Array<Record<string, unknown>>,
-            `Tengo estos otros horarios para ${
+          interactiveList: buildExpandedBarbershopTimeSlotsList({
+            slots: remainingSlots as Array<Record<string, unknown>>,
+            body: `Tengo estos otros horarios para ${
               formatRequestedDayLabel(selectedDate)
-            }:\n\n${lines}\n\nTambién podés decirme otra hora.`,
-            serviceName || safeStr(selectedService?.name, ""),
+            }:\n\n${lines}\n\nEscogé una hora de la lista.`,
+            serviceName: serviceName || safeStr(selectedService?.name, ""),
             providerPreference,
-            "Más horas",
-          ),
+          }),
         };
       }
     }

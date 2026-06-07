@@ -4,15 +4,27 @@ export type MetaSendResult = {
   data: any;
 };
 
-export type InteractiveButtonId =
-  | "confirm_booking"
-  | "reschedule"
-  | "cancel"
-  | "see_slots";
-
 export type InteractiveButton = {
-  id: InteractiveButtonId;
+  id: string;
   title: string;
+};
+
+export type WhatsAppInteractiveListRow = {
+  id: string;
+  title: string;
+  description?: string;
+};
+
+export type WhatsAppInteractiveListSection = {
+  title: string;
+  rows: WhatsAppInteractiveListRow[];
+};
+
+export type WhatsAppInteractiveListSpec = {
+  title?: string;
+  body: string;
+  buttonText: string;
+  sections: WhatsAppInteractiveListSection[];
 };
 
 export type TemplateSendSpec = {
@@ -21,13 +33,79 @@ export type TemplateSendSpec = {
   components?: Array<Record<string, unknown>>;
 };
 
+export type WhatsAppFlowCtaSpec = {
+  bodyText: string;
+  ctaText: string;
+  flowId: string;
+  flowToken?: string;
+  flowAction?: "navigate" | "data_exchange";
+  flowActionPayload?: Record<string, unknown>;
+};
+
+export function buildWhatsAppFlowCtaMessage(args: {
+  to: string;
+  flow_id: string;
+  flow_token?: string;
+  cta_text?: string;
+  body_text?: string;
+  header_text?: string;
+  mode?: "published" | "draft";
+  flow_action?: "navigate" | "data_exchange";
+  flow_action_payload?: Record<string, unknown>;
+  organization_id?: string;
+  lead_id?: string;
+}): Record<string, unknown> {
+  const bodyText = String(
+    args.body_text ?? "Tocá aquí para elegir servicio, fecha y hora.",
+  ).trim();
+  const ctaText = String(args.cta_text ?? "Agendar cita").trim();
+  const headerText = String(args.header_text ?? "Agendá tu cita").trim();
+  const flowId = String(args.flow_id ?? "").trim();
+  const flowToken = String(args.flow_token ?? "").trim();
+  const flowMode = args.mode ?? "published";
+  const flowAction = args.flow_action ?? "navigate";
+  const flowActionPayload = args.flow_action_payload ?? {
+    screen: "SERVICE",
+    data: {
+      organization_id: String(args.organization_id ?? "").trim(),
+      lead_id: String(args.lead_id ?? "").trim(),
+    },
+  };
+  return {
+    messaging_product: "whatsapp",
+    to: String(args.to ?? "").trim(),
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      header: { type: "text", text: headerText || "Agendá tu cita" },
+      body: {
+        text: bodyText || "Tocá aquí para elegir servicio, fecha y hora.",
+      },
+      action: {
+        name: "flow",
+        parameters: {
+          mode: flowMode,
+          flow_message_version: "3",
+          flow_id: flowId,
+          flow_cta: ctaText || "Agendar cita",
+          ...(flowToken ? { flow_token: flowToken } : {}),
+          flow_action: flowAction,
+          flow_action_payload: flowActionPayload,
+        },
+      },
+    },
+  };
+}
+
 export async function sendViaMetaAdapter(args: {
   channel: "messenger" | "whatsapp";
   graphVersion: string;
   recipientId: string;
   text?: string;
   buttons?: InteractiveButton[];
+  interactiveList?: WhatsAppInteractiveListSpec;
   template?: TemplateSendSpec;
+  flowCta?: WhatsAppFlowCtaSpec;
   pageAccessToken?: string;
   whatsappPhoneNumberId?: string;
   whatsappAccessToken?: string;
@@ -45,10 +123,13 @@ async function sendViaMessenger(args: {
   buttons?: InteractiveButton[];
   pageAccessToken?: string;
   template?: TemplateSendSpec;
+  interactiveList?: WhatsAppInteractiveListSpec;
 }): Promise<MetaSendResult> {
   const token = String(args.pageAccessToken ?? "").trim();
   if (!token) throw new Error("missing_messenger_page_access_token");
-  const url = new URL(`https://graph.facebook.com/${args.graphVersion}/me/messages`);
+  const url = new URL(
+    `https://graph.facebook.com/${args.graphVersion}/me/messages`,
+  );
   url.searchParams.set("access_token", token);
 
   const text = String(args.text ?? "").trim() || "Gracias por escribirnos.";
@@ -83,7 +164,9 @@ async function sendViaWhatsApp(args: {
   recipientId: string;
   text?: string;
   buttons?: InteractiveButton[];
+  interactiveList?: WhatsAppInteractiveListSpec;
   template?: TemplateSendSpec;
+  flowCta?: WhatsAppFlowCtaSpec;
   whatsappPhoneNumberId?: string;
   whatsappAccessToken?: string;
 }): Promise<MetaSendResult> {
@@ -98,7 +181,38 @@ async function sendViaWhatsApp(args: {
   );
 
   let body: Record<string, unknown>;
-  if (args.template?.name) {
+  if (args.flowCta?.flowId) {
+    body = buildWhatsAppFlowCtaMessage({
+      to: args.recipientId,
+      flow_id: String(args.flowCta.flowId ?? "").trim(),
+      flow_token: String(args.flowCta.flowToken ?? "").trim() || undefined,
+      cta_text: String(args.flowCta.ctaText ?? "").trim() || "Agendar cita",
+      body_text: String(args.flowCta.bodyText ?? "").trim() ||
+        "Tocá aquí para elegir servicio, fecha y hora.",
+      header_text: "Agendá tu cita",
+      mode: "published",
+      flow_action: args.flowCta.flowAction ?? "navigate",
+      flow_action_payload: args.flowCta.flowActionPayload ??
+        { screen: "SERVICE" },
+    });
+    const interactive = (body as any)?.interactive ?? {};
+    const parameters = (interactive?.action?.parameters ?? {}) as Record<
+      string,
+      unknown
+    >;
+    console.log(JSON.stringify({
+      event: "flow_payload_before_send",
+      has_flow_id: Boolean(String(parameters.flow_id ?? "").trim()),
+      flow_id: String(parameters.flow_id ?? "").trim(),
+      flow_id_length: String(parameters.flow_id ?? "").trim().length,
+      mode: String(parameters.mode ?? ""),
+      flow_action: String(parameters.flow_action ?? ""),
+      screen: String((parameters.flow_action_payload as any)?.screen ?? ""),
+      phone_number_id: phoneNumberId,
+      interactive_type: String(interactive?.type ?? ""),
+      flow_cta: String(parameters.flow_cta ?? ""),
+    }));
+  } else if (args.template?.name) {
     body = {
       messaging_product: "whatsapp",
       to: args.recipientId,
@@ -110,6 +224,55 @@ async function sendViaWhatsApp(args: {
             args.template.components.length > 0
           ? { components: args.template.components }
           : {}),
+      },
+    };
+  } else if (args.interactiveList?.sections?.length) {
+    body = {
+      messaging_product: "whatsapp",
+      to: args.recipientId,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        ...(String(args.interactiveList.title ?? "").trim()
+          ? {
+            header: {
+              type: "text",
+              text: String(args.interactiveList.title).trim().slice(0, 60),
+            },
+          }
+          : {}),
+        body: {
+          text: String(args.interactiveList.body ?? args.text ?? "").trim() ||
+            "Elegí una opción:",
+        },
+        action: {
+          button:
+            String(args.interactiveList.buttonText ?? "Ver opciones").trim()
+              .slice(0, 20) || "Ver opciones",
+          sections: args.interactiveList.sections
+            .filter((section) =>
+              Array.isArray(section.rows) && section.rows.length > 0
+            )
+            .slice(0, 10)
+            .map((section) => ({
+              title: String(section.title ?? "Opciones").trim().slice(0, 24) ||
+                "Opciones",
+              rows: section.rows
+                .filter((row) =>
+                  String(row.id ?? "").trim() && String(row.title ?? "").trim()
+                )
+                .slice(0, 10)
+                .map((row) => ({
+                  id: `action:${String(row.id).trim()}`.slice(0, 200),
+                  title: String(row.title).trim().slice(0, 24),
+                  ...(String(row.description ?? "").trim()
+                    ? {
+                      description: String(row.description).trim().slice(0, 72),
+                    }
+                    : {}),
+                })),
+            })),
+        },
       },
     };
   } else if (Array.isArray(args.buttons) && args.buttons.length > 0) {
@@ -135,7 +298,9 @@ async function sendViaWhatsApp(args: {
       messaging_product: "whatsapp",
       to: args.recipientId,
       type: "text",
-      text: { body: String(args.text ?? "").trim() || "Gracias por escribirnos." },
+      text: {
+        body: String(args.text ?? "").trim() || "Gracias por escribirnos.",
+      },
     };
   }
 

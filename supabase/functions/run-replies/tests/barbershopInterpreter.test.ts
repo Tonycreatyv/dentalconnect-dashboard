@@ -1,5 +1,17 @@
-import { assert, assertEquals } from "https://deno.land/std@0.223.0/assert/mod.ts";
-import { interpretBarbershopTurn } from "../domain/barbershopInterpreter.ts";
+import {
+  assert,
+  assertEquals,
+} from "https://deno.land/std@0.223.0/assert/mod.ts";
+import {
+  getBarbershopInterpreterRuntimeStatus,
+  interpretBarbershopSemanticFallback,
+  interpretBarbershopTurn,
+} from "../domain/barbershopInterpreter.ts";
+import {
+  buildBarbershopAvailabilityButtons,
+  buildExpandedBarbershopTimeSlotsList,
+  formatBarbershopAvailabilityListBody,
+} from "../domain/barbershopResponseComposer.ts";
 
 const baseArgs = {
   timezone: "America/Tegucigalpa",
@@ -106,7 +118,10 @@ Deno.test("8) andan atendiendo por llegada o solo cita", async () => {
   });
   assert(["availability_request", "unknown"].includes(r.intent));
   assertEquals(r.tool_needed, "none");
-  assert(r.user_facing_summary.toLowerCase().includes("llegada") || r.user_facing_summary.toLowerCase().includes("cita"));
+  assert(
+    r.user_facing_summary.toLowerCase().includes("llegada") ||
+      r.user_facing_summary.toLowerCase().includes("cita"),
+  );
 });
 
 Deno.test("9) se me hizo tarde, llego en 10", async () => {
@@ -116,7 +131,10 @@ Deno.test("9) se me hizo tarde, llego en 10", async () => {
   });
   assert(["unknown", "reschedule_request"].includes(r.intent));
   assertEquals(r.tool_needed, "none");
-  assert(r.user_facing_summary.toLowerCase().includes("tarde") || r.user_facing_summary.toLowerCase().includes("retraso"));
+  assert(
+    r.user_facing_summary.toLowerCase().includes("tarde") ||
+      r.user_facing_summary.toLowerCase().includes("retraso"),
+  );
 });
 
 Deno.test("10) me cambias la cita para mas tarde", async () => {
@@ -341,4 +359,340 @@ Deno.test("LLM: si no hay API keys usa fallback stub", async () => {
     if (originalGroq === undefined) Deno.env.delete("GROQ_API_KEY");
     else Deno.env.set("GROQ_API_KEY", originalGroq);
   }
+});
+
+Deno.test("LLM runtime status: GROQ preferred when LLM_PROVIDER=groq and GROQ key exists", () => {
+  const originalProvider = Deno.env.get("LLM_PROVIDER");
+  const originalOpenAi = Deno.env.get("OPENAI_API_KEY");
+  const originalGroq = Deno.env.get("GROQ_API_KEY");
+  try {
+    Deno.env.set("LLM_PROVIDER", "groq");
+    Deno.env.set("GROQ_API_KEY", "groq-test");
+    Deno.env.set("OPENAI_API_KEY", "openai-test");
+    const status = getBarbershopInterpreterRuntimeStatus();
+    assertEquals(status.provider, "groq");
+    assertEquals(status.llm_available, true);
+  } finally {
+    if (originalProvider === undefined) Deno.env.delete("LLM_PROVIDER");
+    else Deno.env.set("LLM_PROVIDER", originalProvider);
+    if (originalOpenAi === undefined) Deno.env.delete("OPENAI_API_KEY");
+    else Deno.env.set("OPENAI_API_KEY", originalOpenAi);
+    if (originalGroq === undefined) Deno.env.delete("GROQ_API_KEY");
+    else Deno.env.set("GROQ_API_KEY", originalGroq);
+  }
+});
+
+Deno.test("LLM runtime status: OpenAI selected when GROQ missing and OpenAI present", () => {
+  const originalProvider = Deno.env.get("LLM_PROVIDER");
+  const originalOpenAi = Deno.env.get("OPENAI_API_KEY");
+  const originalGroq = Deno.env.get("GROQ_API_KEY");
+  try {
+    Deno.env.delete("LLM_PROVIDER");
+    Deno.env.delete("GROQ_API_KEY");
+    Deno.env.set("OPENAI_API_KEY", "openai-test");
+    const status = getBarbershopInterpreterRuntimeStatus();
+    assertEquals(status.provider, "openai");
+    assertEquals(status.llm_available, true);
+  } finally {
+    if (originalProvider === undefined) Deno.env.delete("LLM_PROVIDER");
+    else Deno.env.set("LLM_PROVIDER", originalProvider);
+    if (originalOpenAi === undefined) Deno.env.delete("OPENAI_API_KEY");
+    else Deno.env.set("OPENAI_API_KEY", originalOpenAi);
+    if (originalGroq === undefined) Deno.env.delete("GROQ_API_KEY");
+    else Deno.env.set("GROQ_API_KEY", originalGroq);
+  }
+});
+
+Deno.test("LLM runtime status: none when no keys", () => {
+  const originalProvider = Deno.env.get("LLM_PROVIDER");
+  const originalOpenAi = Deno.env.get("OPENAI_API_KEY");
+  const originalGroq = Deno.env.get("GROQ_API_KEY");
+  try {
+    Deno.env.delete("LLM_PROVIDER");
+    Deno.env.delete("GROQ_API_KEY");
+    Deno.env.delete("OPENAI_API_KEY");
+    const status = getBarbershopInterpreterRuntimeStatus();
+    assertEquals(status.provider, "none");
+    assertEquals(status.llm_available, false);
+  } finally {
+    if (originalProvider === undefined) Deno.env.delete("LLM_PROVIDER");
+    else Deno.env.set("LLM_PROVIDER", originalProvider);
+    if (originalOpenAi === undefined) Deno.env.delete("OPENAI_API_KEY");
+    else Deno.env.set("OPENAI_API_KEY", originalOpenAi);
+    if (originalGroq === undefined) Deno.env.delete("GROQ_API_KEY");
+    else Deno.env.set("GROQ_API_KEY", originalGroq);
+  }
+});
+
+Deno.test("LLM interpreter runs with Groq key even when OpenAI key is missing", async () => {
+  const originalProvider = Deno.env.get("LLM_PROVIDER");
+  const originalOpenAi = Deno.env.get("OPENAI_API_KEY");
+  const originalGroq = Deno.env.get("GROQ_API_KEY");
+  try {
+    Deno.env.set("LLM_PROVIDER", "groq");
+    Deno.env.delete("OPENAI_API_KEY");
+    Deno.env.set("GROQ_API_KEY", "groq-test");
+    const r = await interpretBarbershopTurn({
+      ...baseArgs,
+      inboundText: "texto ambiguo",
+      llmClient: async (args) => {
+        assertEquals(args.provider, "groq");
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                intent: "pricing_question",
+                confidence: 0.9,
+                entities: { service_name: "Corte + barba" },
+                should_use_previous_info: false,
+                needs_tool: "get_service_price",
+                user_facing_summary: "Precio",
+              }),
+            },
+          }],
+        };
+      },
+    });
+    assertEquals(r.intent, "pricing_request");
+    assertEquals(r.entities.service_name, "Corte + barba");
+  } finally {
+    if (originalProvider === undefined) Deno.env.delete("LLM_PROVIDER");
+    else Deno.env.set("LLM_PROVIDER", originalProvider);
+    if (originalOpenAi === undefined) Deno.env.delete("OPENAI_API_KEY");
+    else Deno.env.set("OPENAI_API_KEY", originalOpenAi);
+    if (originalGroq === undefined) Deno.env.delete("GROQ_API_KEY");
+    else Deno.env.set("GROQ_API_KEY", originalGroq);
+  }
+});
+
+Deno.test("Intent category: availability_discovery variants map consistently", async () => {
+  const variants = [
+    "que dia estas disponible",
+    "cual esta disponible",
+    "cuando tenes cupo",
+    "hay chance esta semana",
+    "para cuando hay",
+    "que horarios tienen",
+    "que dia puedo llegar",
+  ];
+  for (const inboundText of variants) {
+    const r = await interpretBarbershopTurn({
+      ...baseArgs,
+      inboundText,
+    });
+    assertEquals(
+      r.intent,
+      "availability_request",
+      `variant failed: ${inboundText}`,
+    );
+  }
+});
+
+Deno.test("Intent category: booking_request variants keep booking intent with entities when present", async () => {
+  const withDateTime = await interpretBarbershopTurn({
+    ...baseArgs,
+    inboundText: "quiero corte mañana a las 10",
+  });
+  assertEquals(withDateTime.intent, "booking_request");
+  assertEquals(withDateTime.entities.service_name, "Corte clásico");
+  assertEquals(withDateTime.entities.date_text, "manana");
+  assertEquals(withDateTime.entities.time_text, "10");
+
+  const withServiceOnly = await interpretBarbershopTurn({
+    ...baseArgs,
+    inboundText: "quiero corte mañana",
+  });
+  assertEquals(withServiceOnly.intent, "booking_request");
+  assertEquals(withServiceOnly.entities.service_name, "Corte clásico");
+  assertEquals(withServiceOnly.entities.date_text, "manana");
+});
+
+Deno.test("Semantic fallback maps cancel typo cncelar to cancel_appointment", () => {
+  const r = interpretBarbershopSemanticFallback({
+    ...baseArgs,
+    inboundText: "quiero cncelar la cita",
+  });
+  assertEquals(r.intent, "cancel_appointment");
+  assert(r.confidence >= 0.75);
+  assertEquals(r.normalized_user_message.includes("cancelar"), true);
+});
+
+Deno.test("Semantic fallback maps cancel typo canselar to cancel_appointment", () => {
+  const r = interpretBarbershopSemanticFallback({
+    ...baseArgs,
+    inboundText: "quiero canselar mi cita",
+  });
+  assertEquals(r.intent, "cancel_appointment");
+  assert(r.confidence >= 0.75);
+});
+
+Deno.test("Semantic fallback maps natural move request to reschedule_appointment", () => {
+  const r = interpretBarbershopSemanticFallback({
+    ...baseArgs,
+    inboundText: "me la podes mover para mañana a la 1",
+  });
+  assertEquals(r.intent, "reschedule_appointment");
+  assertEquals(r.entities.date_text, "manana");
+  assertEquals(r.entities.time_text, "1");
+});
+
+Deno.test("Semantic fallback maps active booking time-block correction to availability", () => {
+  const r = interpretBarbershopSemanticFallback({
+    ...baseArgs,
+    inboundText: "y si mejor en la tarde",
+    state: { nextExpected: "select_time" },
+    collected: {
+      activeBookingFlow: true,
+      current_service_key: "corte_clasico",
+      current_date: "2026-05-23",
+    },
+  });
+  assertEquals(r.intent, "availability_question");
+  assertEquals(r.entities.time_block, "afternoon");
+});
+
+Deno.test("Semantic fallback maps mixed greeting availability to booking/availability", () => {
+  const r = interpretBarbershopSemanticFallback({
+    ...baseArgs,
+    inboundText: "hola tenes disponible a las 2 mañana para corte",
+  });
+  assert(["availability_question", "booking_request"].includes(r.intent));
+  assertEquals(r.entities.service_name, "Corte clásico");
+  assertEquals(r.entities.date_text, "manana");
+  assertEquals(r.entities.time_text, "2");
+});
+
+Deno.test("Semantic fallback keeps unsupported low confidence", () => {
+  const r = interpretBarbershopSemanticFallback({
+    ...baseArgs,
+    inboundText: "quien gano el partido de ayer",
+  });
+  assertEquals(r.intent, "unknown");
+  assert(r.confidence < 0.75);
+});
+
+Deno.test("Semantic fallback maps cancelalal typo to cancel_appointment", () => {
+  const r = interpretBarbershopSemanticFallback({
+    ...baseArgs,
+    inboundText: "cancelalal",
+  });
+  assertEquals(r.intent, "cancel_appointment");
+  assert(r.confidence >= 0.75);
+});
+
+Deno.test("BarberLine availability with more than 3 slots uses list instead of time buttons", () => {
+  const buttons = buildBarbershopAvailabilityButtons([
+    { date: "2026-06-08", time: "09:00", provider_id: "allan" },
+    { date: "2026-06-08", time: "09:30", provider_id: "edgar" },
+    { date: "2026-06-08", time: "10:00", provider_id: "juan" },
+    { date: "2026-06-08", time: "10:30", provider_id: "allan" },
+  ], true);
+
+  assertEquals(buttons, []);
+});
+
+Deno.test("BarberLine availability with 3 or fewer slots uses all time buttons", () => {
+  const buttons = buildBarbershopAvailabilityButtons([
+    { date: "2026-06-08", time: "09:00", provider_id: "allan" },
+    { date: "2026-06-08", time: "09:30", provider_id: "edgar" },
+    { date: "2026-06-08", time: "10:00", provider_id: "juan" },
+  ], false);
+
+  assertEquals(buttons.map((button) => button.title), [
+    "9:00 AM",
+    "9:30 AM",
+    "10:00 AM",
+  ]);
+  assertEquals(buttons.some((button) => button.title === "Más horas"), false);
+});
+
+Deno.test("BarberLine availability list builds morning and afternoon WhatsApp sections", () => {
+  const list = buildExpandedBarbershopTimeSlotsList({
+    slots: [
+      {
+        date: "2026-06-08",
+        time: "10:00",
+        provider_id: "juan",
+        provider_name: "Juan",
+      },
+      {
+        date: "2026-06-08",
+        time: "10:30",
+        provider_id: "allan",
+        provider_name: "Allan",
+      },
+      {
+        date: "2026-06-08",
+        time: "13:00",
+        provider_id: "juan",
+        provider_name: "Juan",
+      },
+      {
+        date: "2026-06-08",
+        time: "14:00",
+        provider_id: "allan",
+        provider_name: "Allan",
+      },
+    ],
+    serviceName: "Corte clásico",
+    providerPreference: "any",
+  });
+
+  assert(list);
+  assertEquals(list.title, "Horarios disponibles");
+  assertEquals(list.buttonText, "Ver horarios disponibles");
+  assert(!list.body.includes("Más horas"));
+  assertEquals(list.sections.map((section) => section.title), [
+    "Mañana",
+    "Tarde",
+  ]);
+  assertEquals(list.sections[0].rows.map((row) => row.title), [
+    "10:00 AM · Juan",
+    "10:30 AM · Allan",
+  ]);
+  assertEquals(list.sections[1].rows.map((row) => row.title), [
+    "1:00 PM · Juan",
+    "2:00 PM · Allan",
+  ]);
+});
+
+Deno.test("BarberLine availability list body groups visible slots by morning and afternoon", () => {
+  const body = formatBarbershopAvailabilityListBody([
+    { time: "09:00", provider_name: "Allan" },
+    { time: "09:30", provider_name: "Edgar" },
+    { time: "10:00", provider_name: "Juan" },
+    { time: "13:00", provider_name: "Allan" },
+    { time: "14:00", provider_name: "Edgar" },
+    { time: "15:00", provider_name: "Juan" },
+  ]);
+
+  assert(body.includes("Estos son algunos horarios disponibles 💈"));
+  assert(body.includes("Mañana:"));
+  assert(body.includes("• 9:00 AM · Allan"));
+  assert(body.includes("Tarde:"));
+  assert(body.includes("• 3:00 PM · Juan"));
+  assert(body.includes("Escogé una hora para continuar."));
+  assertEquals(body.includes("Más horas"), false);
+});
+
+Deno.test("BarberLine expanded time selection keeps date time and barber in select_slot payload", () => {
+  const list = buildExpandedBarbershopTimeSlotsList({
+    slots: [
+      {
+        date: "2026-06-08",
+        time: "14:00",
+        provider_id: "allan",
+        provider_name: "Allan",
+      },
+    ],
+    body: "Escogé una hora de la lista.",
+    serviceName: "Corte clásico",
+    providerPreference: "any",
+  });
+
+  assert(list);
+  const selectedRow = list.sections[0].rows[0];
+  assertEquals(selectedRow.id, "select_slot:2026-06-08|14:00|allan");
+  assertEquals(selectedRow.title, "2:00 PM · Allan");
+  assertEquals(selectedRow.description, "Corte clásico");
 });
