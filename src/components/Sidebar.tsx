@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, CreditCard, Shield, Scissors, Clock } from "lucide-react";
+import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, CreditCard, Shield, Scissors, Clock, LogOut } from "lucide-react";
 import { useClinic } from "../context/ClinicContext";
+import { useAuth } from "../context/AuthContext";
 import { resolveFrontendBusinessType, resolveFrontendOrgName, useActiveOrg } from "../hooks/useActiveOrg";
 import { getVerticalConfig } from "../config/verticalConfig";
 import { MobileStatusPill } from "./mobile/MobilePrimitives";
@@ -63,6 +64,7 @@ function NavItem({
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const { isAdmin, availableOrgs, activeOrgId, setActiveOrgId } = useClinic();
+  const { signOut, user } = useAuth();
   const { resolvedOrgId, resolvedBusinessType, resolvedOrgName } = useActiveOrg();
   const vertical = getVerticalConfig(resolvedBusinessType);
 
@@ -85,9 +87,28 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const isActivePlainPath = (target: string) => location.pathname === target && !location.search;
 
   return (
-    <aside className="h-full overflow-y-auto rounded-none border-r border-[#25384A] bg-[#0B1620] p-4 text-[#F8FAFC] shadow-none lg:h-auto lg:overflow-hidden lg:rounded-3xl lg:border lg:border-white/10 lg:bg-[#0B0D12] lg:text-white lg:shadow-[0_20px_60px_rgba(0,0,0,0.28)]">
-      <div className="rounded-3xl border border-[#25384A] bg-[#111F2B] p-4 lg:border-white/10 lg:bg-white/5">
+    <aside className={[
+      "h-full overflow-y-auto rounded-none border-r p-4 text-[#F8FAFC] shadow-none lg:h-auto lg:overflow-hidden lg:rounded-3xl lg:border lg:text-white",
+      isBarbershop
+        ? "border-[#1E2227] bg-[#07090B] lg:border-[#1E2227] lg:bg-[#0B0D0F] lg:shadow-[0_20px_60px_rgba(0,0,0,0.34)]"
+        : "border-[#25384A] bg-[#0B1620] lg:border-white/10 lg:bg-[#0B0D12] lg:shadow-[0_20px_60px_rgba(0,0,0,0.28)]",
+    ].join(" ")}>
+      <div className={[
+        "rounded-3xl border p-4",
+        isBarbershop ? "border-[#1E2227] bg-[#0E1014]" : "border-[#25384A] bg-[#111F2B] lg:border-white/10 lg:bg-white/5",
+      ].join(" ")}>
         <div className="min-w-0">
+          {isBarbershop ? (
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/12">
+                <Scissors className="h-4 w-4 text-[#18C37E]" />
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-black tracking-tight text-[#F5F7FA]">BarberLine</div>
+                <div className="text-[10px] text-[#6F7680]">by Creatyv</div>
+              </div>
+            </div>
+          ) : null}
           <div className="truncate text-lg font-black tracking-[-0.03em]">{shopName || vertical.organizationLabel}</div>
           <div className="mt-1 flex items-center justify-between gap-2">
             <span className="truncate text-xs text-[#9CAAB8]">{isBarbershop ? "Operación de barbería" : vertical.productName}</span>
@@ -145,6 +166,28 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <NavItem to="/settings" icon={Settings} label={isBarbershop ? "Configuración" : vertical.settingsLabel} active={isBarbershop ? isActivePlainPath("/settings") : location.pathname === "/settings"} onNavigate={onNavigate} />
         {isAdmin ? <NavItem to="/billing" icon={CreditCard} label={isBarbershop ? "Plan" : "Billing"} active={isActivePlainPath("/billing")} onNavigate={onNavigate} /> : null}
       </div>
+
+      {isBarbershop ? (
+        <div className="mt-4 border-t border-[#1E2227] pt-4">
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="flex w-full min-w-0 items-center gap-3 rounded-2xl border border-transparent px-3 py-3 text-sm font-semibold text-[#6F7680] transition hover:border-rose-400/10 hover:bg-rose-500/[0.06] hover:text-rose-300"
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 truncate">Salir</span>
+          </button>
+          <div className="mt-2 flex min-w-0 items-center gap-3 rounded-2xl px-2 py-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#18C37E]/20 bg-[#18C37E]/15 text-xs font-black text-[#18C37E]">
+              {(shopName || "BB").slice(0, 2).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-[#F5F7FA]">{shopName || "BarberLine"}</p>
+              <p className="truncate text-[10px] text-[#6F7680]">{user?.email ?? "panel@barberline.com"}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 hidden rounded-2xl border border-white/10 bg-white/5 p-3 lg:block">
         <div className="text-xs font-semibold text-white/95">Tip de hoy</div>

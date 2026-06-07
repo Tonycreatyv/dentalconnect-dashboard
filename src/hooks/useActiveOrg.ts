@@ -27,6 +27,8 @@ export const ORG_NAME_FALLBACK: Record<string, string> = {
   "irvin-mazariegos-clinic": "Irvin Mazariegos Clinic",
 };
 const BARBERSHOP_GENERIC_NAME_RE = /\b(cl[ií]nica|dentalconnect|dental demo|pacientes?|doctores?|dental)\b/i;
+const PREFERRED_BARBERSHOP_ORGS = ["barber-demo", "testing-mxp0snq", "testing-mnxp0snq", "barber-demo-wimaeil"];
+const PREFERRED_DENTAL_ORGS = ["clinic-demo", "creatyv-product", "org-359ba3c4", "irvin-mazariegos-clinic"];
 
 function readDevOverride() {
   try {
@@ -80,7 +82,7 @@ export function resolveFrontendOrgName(
 }
 
 export function useActiveOrg() {
-  const { clinic, activeOrgId, activeBusinessType, activeOrgName, isAdmin } = useClinic();
+  const { clinic, activeOrgId, activeBusinessType, activeOrgName, isAdmin, availableOrgs } = useClinic();
   const detectedVertical = useMemo(() => getDetectedVerticalConfig(), []);
   const [override, setOverride] = useState(readDevOverride);
   const [settingsMeta, setSettingsMeta] = useState<{
@@ -102,9 +104,25 @@ export function useActiveOrg() {
   }, []);
 
   const resolvedOrgId = useMemo(() => {
-    if (isAdmin && override.orgId) return override.orgId;
-    return activeOrgId ?? clinic?.organization_id ?? "clinic-demo";
-  }, [isAdmin, override.orgId, activeOrgId, clinic?.organization_id]);
+    const verticalType = detectedVertical.businessType;
+    const matchesVertical = (orgId: string | null | undefined) => {
+      if (!verticalType) return Boolean(orgId);
+      const id = String(orgId ?? "").trim();
+      if (!id) return false;
+      const meta = availableOrgs.find((org) => org.organization_id === id);
+      const businessType = meta?.business_type ?? resolveFrontendBusinessType(id);
+      return businessType === verticalType;
+    };
+    const preferred = (verticalType === "barbershop" ? PREFERRED_BARBERSHOP_ORGS : PREFERRED_DENTAL_ORGS)
+      .find((id) => availableOrgs.some((org) => org.organization_id === id && (!verticalType || org.business_type === verticalType)));
+    const firstMatching = availableOrgs.find((org) => !verticalType || org.business_type === verticalType)?.organization_id;
+    const fallback = verticalType === "barbershop" ? "barber-demo" : "clinic-demo";
+
+    if (isAdmin && matchesVertical(override.orgId)) return override.orgId;
+    if (matchesVertical(activeOrgId)) return activeOrgId;
+    if (matchesVertical(clinic?.organization_id)) return clinic?.organization_id ?? fallback;
+    return preferred || firstMatching || fallback;
+  }, [detectedVertical.businessType, isAdmin, override.orgId, activeOrgId, clinic?.organization_id, availableOrgs]);
 
   useEffect(() => {
     let mounted = true;
@@ -141,6 +159,7 @@ export function useActiveOrg() {
   }, [resolvedOrgId]);
 
   const resolvedBusinessType = useMemo<"dental" | "barbershop">(() => {
+    if (detectedVertical.businessType) return detectedVertical.businessType;
     const settingsBusinessType = settingsMeta.organizationId === resolvedOrgId ? settingsMeta.businessType : "";
     if (settingsBusinessType) return settingsBusinessType;
     const raw = (isAdmin ? override.businessType : "") || activeBusinessType || "";

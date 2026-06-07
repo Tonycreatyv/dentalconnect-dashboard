@@ -28,6 +28,8 @@ const ORG_NAME_FALLBACK: Record<string, string> = {
   "irvin-mazariegos-clinic": "Irvin Mazariegos Clinic",
 };
 const BARBERSHOP_GENERIC_NAME_RE = /\b(cl[ií]nica|dentalconnect|dental demo|pacientes?|doctores?|dental)\b/i;
+const PREFERRED_BARBERSHOP_ORGS = ["barber-demo", "testing-mxp0snq", "testing-mnxp0snq", "barber-demo-wimaeil"];
+const PREFERRED_DENTAL_ORGS = ["clinic-demo", "creatyv-product", "org-359ba3c4", "irvin-mazariegos-clinic"];
 
 export type ClinicProfile = {
   id: string;
@@ -142,6 +144,16 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const setActiveOrgId = async (organizationId: string) => {
     const org = String(organizationId ?? "").trim();
     if (!org) return;
+    const selectedMeta = availableOrgs.find((item) => item.organization_id === org);
+    const selectedBusinessType = selectedMeta?.business_type ?? fallbackBusinessType(org);
+    if (detectedVertical.businessType && selectedBusinessType !== detectedVertical.businessType) {
+      console.warn("[ClinicContext] blocked cross-vertical org selection", {
+        organizationId: org,
+        selectedBusinessType,
+        verticalBusinessType: detectedVertical.businessType,
+      });
+      return;
+    }
 
     if (import.meta.env.DEV) {
       try {
@@ -160,17 +172,10 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     if (!clinicForOrg) return;
 
     setClinic(clinicForOrg);
-    const selectedMeta = availableOrgs.find((item) => item.organization_id === org);
-    if (detectedVertical.businessType && selectedMeta?.business_type && selectedMeta.business_type !== detectedVertical.businessType) {
-      return;
-    }
-    const selectedBusinessType = selectedMeta?.business_type ?? fallbackBusinessType(org);
     setActiveBusinessType(selectedBusinessType);
     setActiveOrgName(safeOrgName(org, selectedBusinessType, selectedMeta?.name ?? clinicForOrg.name ?? null));
     try {
-      if (selectedMeta?.business_type) {
-        localStorage.setItem(SELECTED_BUSINESS_TYPE_STORAGE_KEY, selectedMeta.business_type);
-      }
+      localStorage.setItem(SELECTED_BUSINESS_TYPE_STORAGE_KEY, selectedBusinessType);
       window.dispatchEvent(new Event("active-org-changed"));
       window.dispatchEvent(new Event("dev-org-changed"));
     } catch {
@@ -259,6 +264,12 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           "irvin-mazariegos-clinic",
         );
       }
+      if ((import.meta.env.DEV || isPlatformAdmin) && detectedVertical.businessType === "barbershop") {
+        orgCandidates.push(...PREFERRED_BARBERSHOP_ORGS);
+      }
+      if ((import.meta.env.DEV || isPlatformAdmin) && detectedVertical.businessType === "dental") {
+        orgCandidates.push(...PREFERRED_DENTAL_ORGS);
+      }
 
       const uniqOrgIds = Array.from(new Set(orgCandidates.filter(Boolean)));
       const [orgRowsRes, orgSettingsRes, organizationSettingsRes] = uniqOrgIds.length
@@ -300,6 +311,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const visibleOrgOptions = detectedVertical.businessType
         ? allOrgOptions.filter((org) => org.business_type === detectedVertical.businessType)
         : allOrgOptions;
+      const preferredIds = detectedVertical.businessType === "barbershop" ? PREFERRED_BARBERSHOP_ORGS : PREFERRED_DENTAL_ORGS;
+      visibleOrgOptions.sort((a, b) => {
+        const ai = preferredIds.indexOf(a.organization_id);
+        const bi = preferredIds.indexOf(b.organization_id);
+        const ar = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+        const br = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+        if (ar !== br) return ar - br;
+        return String(a.name ?? a.organization_id).localeCompare(String(b.name ?? b.organization_id));
+      });
       const visibleOrgIds = visibleOrgOptions.map((org) => org.organization_id);
       const resolvedOrgId =
         (storedOrgId && visibleOrgIds.includes(storedOrgId) ? storedOrgId : "") ||
@@ -323,6 +343,16 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           safeOrgName(resolvedOrgId, fallbackBusinessType(resolvedOrgId), orgNameById.get(resolvedOrgId) ?? clinicForOrg?.name ?? null)
       );
       setLoading(false);
+      try {
+        if (resolvedOrgId) {
+          localStorage.setItem(SELECTED_ORG_STORAGE_KEY, resolvedOrgId);
+          localStorage.setItem(SELECTED_BUSINESS_TYPE_STORAGE_KEY, orgMetaById.get(resolvedOrgId)?.business_type ?? detectedVertical.businessType ?? fallbackBusinessType(resolvedOrgId));
+          window.dispatchEvent(new Event("active-org-changed"));
+          window.dispatchEvent(new Event("dev-org-changed"));
+        }
+      } catch {
+        // ignore
+      }
 
       if (!clinicForOrg) return;
 

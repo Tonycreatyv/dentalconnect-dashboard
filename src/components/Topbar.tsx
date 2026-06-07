@@ -92,7 +92,8 @@ export function Topbar({
       });
     }
     const active = selectedOrgId || resolvedOrgId || activeOrgId || "";
-    if (active && !map.has(active)) {
+    const activeBusinessType = active ? fallbackOrgBusinessType(active) : null;
+    if (active && !map.has(active) && (!detectedVertical.businessType || activeBusinessType === detectedVertical.businessType)) {
       map.set(active, {
         organizationId: active,
         businessType: resolvedBusinessType,
@@ -180,14 +181,14 @@ export function Topbar({
 
         {import.meta.env.DEV && isAdmin ? (
           <label className="min-w-[240px] shrink-0">
-            <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-white/50">Dev Organization</span>
+            <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-white/50">{resolvedBusinessType === "barbershop" ? "Cambiar barbería" : "Dev Organization"}</span>
             <select
               value={selectedOrgId || resolvedOrgId || activeOrgId || orgOptions[0]?.organizationId || DEV_ORG_OPTIONS[0].organizationId}
               onChange={(e) => void handleDevOrgChange(e.target.value)}
               className="w-full truncate rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2 text-sm text-white outline-none"
             >
               {operatorOrgOptions.length > 0 ? (
-                <optgroup label="Demos activos">
+                <optgroup label={resolvedBusinessType === "barbershop" ? "Barberías" : "Demos activos"}>
                   {operatorOrgOptions.map((opt) => (
                     <option key={opt.organizationId} value={opt.organizationId}>
                       {opt.label} · {opt.businessType === "barbershop" ? "BarberLine" : "DentalConnect"}
@@ -196,7 +197,7 @@ export function Topbar({
                 </optgroup>
               ) : null}
               {devOrgOptions.length > 0 ? (
-                <optgroup label="Admin / Dev">
+                <optgroup label={resolvedBusinessType === "barbershop" ? "Otras cuentas" : "Admin / Dev"}>
                   {devOrgOptions.map((opt) => (
                     <option key={opt.organizationId} value={opt.organizationId}>
                       {opt.label}

@@ -4,12 +4,14 @@ import {
   Bell, Calendar, MessageCircle, Clock3,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   SendHorizonal, CheckCircle2, XCircle, Scissors, UserPlus, Users, X,
+  LogIn, RotateCcw, Zap, Wifi,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useActiveOrg } from "../hooks/useActiveOrg";
 import { getVerticalConfig } from "../config/verticalConfig";
 import { BarberStatusCard, type BarberAppointment } from "../components/BarberStatusCard";
 import { AppointmentCard as BusinessAppointmentCard } from "../components/AppointmentCard";
+import { BARBER_DEMO_ORG_ID, buildBarberDemoAppointments } from "../barber-app/mock-data";
 import {
   MobileActionButton,
   MobileCard,
@@ -295,6 +297,235 @@ function WeekCalendar({ weekAppts, selectedDate, onDayClick, docFilter }: {
   );
 }
 
+function CommandHeroAction({ icon, label, tone, onClick }: {
+  icon: React.ReactNode;
+  label: string;
+  tone: "sky" | "emerald" | "muted" | "whatsapp" | "done";
+  onClick: () => void;
+}) {
+  const toneClass = {
+    sky: "text-sky-400 hover:bg-sky-400/[0.08]",
+    emerald: "text-[#18C37E] hover:bg-[#18C37E]/[0.08]",
+    muted: "text-[#8A9299] hover:bg-white/[0.05] hover:text-[#F0F4F8]",
+    whatsapp: "text-[#25D366] hover:bg-[#25D366]/[0.08]",
+    done: "text-[#353D4A]",
+  }[tone];
+  return (
+    <button type="button" onClick={onClick} className={`flex min-w-0 items-center justify-center gap-1 border-r border-[#18C37E]/[0.08] py-3 text-[11px] font-semibold transition last:border-r-0 ${toneClass}`}>
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+function CommandMetric({ label, value, alert, highlight }: { label: string; value: string; alert?: boolean; highlight?: boolean }) {
+  return (
+    <div className={`flex flex-col items-center justify-center gap-1 rounded-xl border py-4 ${alert ? "border-amber-800/[0.18] bg-amber-950/[0.15]" : "border-[#1E2228] bg-[#0E1014]"}`}>
+      <span className={`text-2xl font-extrabold leading-none ${alert ? "text-amber-400" : highlight ? "text-[#18C37E]" : "text-[#F0F4F8]"}`}>{value}</span>
+      <span className="text-[10px] font-medium text-[#4A5260]">{label}</span>
+    </div>
+  );
+}
+
+function CommandQuickTile({ icon, label, badge, onClick }: { icon: React.ReactNode; label: string; badge?: number; onClick?: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="relative flex min-w-0 flex-col items-center gap-1.5 rounded-xl border border-[#1E2228] bg-[#0E1014] py-3.5 transition hover:border-white/[0.10] hover:bg-[#131820] active:scale-[0.97]">
+      <span className="text-[#5A6270]">{icon}</span>
+      <span className="text-center text-[10px] font-semibold leading-tight text-[#4A5260]">{label}</span>
+      {!!badge && badge > 0 ? (
+        <span className="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#18C37E] text-[8px] font-bold leading-none text-white">
+          {badge}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function DrawerShell({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/55 backdrop-blur-sm">
+      <button type="button" aria-label="Cerrar" onClick={onClose} className="absolute inset-0 cursor-default" />
+      <aside className="relative z-10 flex h-full w-full max-w-[410px] flex-col overflow-y-auto border-l border-[#1E2227] bg-[#0B0D0F] shadow-2xl">
+        {children}
+      </aside>
+    </div>
+  );
+}
+
+function DrawerField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#4A5260]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+const drawerInputClass = "w-full rounded-lg border border-white/[0.08] bg-[#05060A] px-3 py-2.5 text-sm text-[#E8ECF2] outline-none transition placeholder:text-[#2A303A] focus:border-white/[0.16]";
+
+function BarberWalkInDrawer({
+  open,
+  client,
+  service,
+  provider,
+  services,
+  providers,
+  onClientChange,
+  onServiceChange,
+  onProviderChange,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  client: string;
+  service: string;
+  provider: string;
+  services: string[];
+  providers: string[];
+  onClientChange: (value: string) => void;
+  onServiceChange: (value: string) => void;
+  onProviderChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <DrawerShell open={open} onClose={onClose}>
+      <div className="flex items-center gap-3 border-b border-[#1E2227] px-5 py-5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/[0.12]">
+          <UserPlus className="h-4 w-4 text-[#18C37E]" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-base font-bold text-[#F0F4F8]">Walk-in rápido</h2>
+          <p className="mt-0.5 text-xs text-[#4A5260]">Visual-only por ahora, sin guardar en base de datos.</p>
+        </div>
+        <button type="button" onClick={onClose} className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] text-[#8A9299] hover:bg-white/[0.05]">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 space-y-4 p-5">
+        <DrawerField label="Nombre del cliente">
+          <input value={client} onChange={(event) => onClientChange(event.target.value)} placeholder="Ej: Pedro López" className={drawerInputClass} />
+        </DrawerField>
+        <div className="grid grid-cols-2 gap-3">
+          <DrawerField label="Servicio">
+            <select value={service} onChange={(event) => onServiceChange(event.target.value)} className={drawerInputClass}>
+              {services.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </DrawerField>
+          <DrawerField label="Barbero">
+            <select value={provider} onChange={(event) => onProviderChange(event.target.value)} className={drawerInputClass}>
+              {providers.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </DrawerField>
+        </div>
+        <DrawerField label="Hora estimada">
+          <input value={new Date().toLocaleTimeString("es-HN", { hour: "numeric", minute: "2-digit" })} readOnly className={drawerInputClass} />
+        </DrawerField>
+        <DrawerField label="Notas">
+          <textarea rows={3} placeholder="Preferencias, observaciones..." className={`${drawerInputClass} resize-none`} />
+        </DrawerField>
+        <div className="flex gap-2 pt-2">
+          <button type="button" onClick={onClose} className="min-h-11 flex-1 rounded-xl border border-white/[0.08] text-sm font-semibold text-[#8A9299] transition hover:bg-white/[0.05]">
+            Cancelar
+          </button>
+          <button type="button" onClick={onSubmit} className="min-h-11 flex-[2] rounded-xl bg-[#18C37E] text-sm font-bold text-white transition hover:bg-[#15AE6F]">
+            Crear walk-in
+          </button>
+        </div>
+      </div>
+    </DrawerShell>
+  );
+}
+
+function BarberAppointmentPreviewDrawer({
+  appointment,
+  checkedIn,
+  onClose,
+  onCheckIn,
+  onMessage,
+}: {
+  appointment: AppointmentRow | null;
+  checkedIn: boolean;
+  onClose: () => void;
+  onCheckIn: () => void;
+  onMessage: () => void;
+}) {
+  const open = Boolean(appointment);
+  const time = appointment ? ((appointment as any).appointment_time || fmtTime(apptISO(appointment))) : "";
+  const initials = String(appointment?.patient_name || "Cliente").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  return (
+    <DrawerShell open={open} onClose={onClose}>
+      {appointment ? (
+        <>
+          <div className="flex items-center gap-4 border-b border-[#1E2227] px-5 py-5">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#18C37E]/[0.12] bg-[#131A17]">
+              <span className="text-lg font-bold text-[#8A9A94]">{initials}</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-[17px] font-bold leading-tight text-[#F0F4F8]">{appointment.patient_name || "Cliente"}</h2>
+              <p className="mt-0.5 font-mono text-xs text-[#5A6270]">{appointment.lead_id ? "Cliente por WhatsApp" : "Sin lead vinculado"}</p>
+              <div className="mt-2">
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[getStatus(appointment.status)].chip}`}>{checkedIn ? "En espera" : STATUS_STYLES[getStatus(appointment.status)].label}</span>
+              </div>
+            </div>
+            <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] text-[#8A9299] hover:bg-white/[0.05]">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 space-y-4 p-5">
+            <div className="rounded-xl border border-[#1E2228] bg-[#0E1014] p-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#353D4A]">Cita</p>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <PreviewInfo icon={<Clock3 className="h-3.5 w-3.5" />} label="Hora" value={time} />
+                <PreviewInfo icon={<Users className="h-3.5 w-3.5" />} label="Barbero" value={appointment.provider_name || "Barbero"} />
+                <PreviewInfo icon={<Scissors className="h-3.5 w-3.5" />} label="Servicio" value={appointment.reason || appointment.title || "Cita"} />
+                <PreviewInfo icon={<MessageCircle className="h-3.5 w-3.5" />} label="Canal" value={String(appointment.channel ?? "WhatsApp")} />
+              </div>
+            </div>
+            <div className="rounded-xl border border-[#25D366]/[0.12] bg-[#25D366]/[0.03] p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <MessageCircle className="h-3.5 w-3.5 text-[#25D366]" />
+                <p className="text-[10px] font-bold uppercase tracking-[0.10em] text-[#25D366]">Último mensaje</p>
+              </div>
+              <p className="text-xs italic leading-relaxed text-[#7A8290]">"Listo, tu cita quedó confirmada para hoy a las {time}."</p>
+            </div>
+            <div className="space-y-2">
+              <p className="pb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#353D4A]">Acciones</p>
+              <button type="button" onClick={onCheckIn} className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-[#18C37E]/[0.22] bg-[#18C37E]/[0.12] py-3 text-sm font-bold text-[#18C37E] transition hover:bg-[#18C37E]/[0.20]">
+                <LogIn className="h-4 w-4" />
+                {checkedIn ? "En espera · Check-in realizado" : "Check-in · Llegó"}
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 text-sm font-semibold text-[#8A9299] transition hover:bg-white/[0.07] hover:text-[#F0F4F8]">
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Reagendar
+                </button>
+                <button type="button" onClick={onMessage} className="flex items-center justify-center gap-2 rounded-xl border border-[#25D366]/[0.14] bg-[#25D366]/[0.07] py-2.5 text-sm font-semibold text-[#25D366] transition hover:bg-[#25D366]/[0.14]">
+                  <MessageCircle className="h-3.5 w-3.5" />
+                  Mensaje
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </DrawerShell>
+  );
+}
+
+function PreviewInfo({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 shrink-0 text-[#4A5260]">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-[10px] text-[#353D4A]">{label}</p>
+        <p className="mt-0.5 break-words text-xs font-semibold text-[#C8D0DC]">{value}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Hoy() {
   const navigate = useNavigate();
   const { activeOrgId, activeBusinessType, activeOrgName } = useActiveOrg();
@@ -327,6 +558,8 @@ export default function Hoy() {
   const [walkInClient, setWalkInClient] = useState("");
   const [walkInService, setWalkInService] = useState("");
   const [walkInProvider, setWalkInProvider] = useState("");
+  const [previewAppointment, setPreviewAppointment] = useState<AppointmentRow | null>(null);
+  const [checkedInIds, setCheckedInIds] = useState<Record<string, boolean>>({});
 
   const isToday = useMemo(
     () => startOfDay(selectedDate).getTime() === startOfDay(new Date()).getTime(),
@@ -422,6 +655,26 @@ export default function Hoy() {
 
   async function load() {
     setLoading(true);
+    if (activeBusinessType === "barbershop" && orgId === BARBER_DEMO_ORG_ID) {
+      const demoAppointments = buildBarberDemoAppointments(selectedDate) as unknown as AppointmentRow[];
+      const demoWeekAppointments = buildBarberDemoAppointments(selectedDate) as unknown as WeekAppt[];
+      setAppointments(demoAppointments);
+      setWeekAppts(demoWeekAppointments);
+      setLeadChannelById({
+        "barber-demo-luis-mejia": "whatsapp",
+        "barber-demo-juan-perez": "whatsapp",
+        "barber-demo-andres-castro": "whatsapp",
+        "barber-demo-marco-rodriguez": "whatsapp",
+      });
+      setNewMessages(1);
+      setPendingOutbox(0);
+      setAlerts([]);
+      setTomorrowCount(0);
+      setWeekCount(demoWeekAppointments.length);
+      setHumanHandoffCount(0);
+      setLoading(false);
+      return;
+    }
     const todayStartDate = startOfDay(selectedDate);
     const todayEndDate   = endOfDay(selectedDate);
     const todayStart = todayStartDate.toISOString();
@@ -549,7 +802,7 @@ export default function Hoy() {
     setLoading(false);
   }
 
-  useEffect(() => { void load(); }, [orgId, selectedDate]);
+  useEffect(() => { void load(); }, [activeBusinessType, orgId, selectedDate]);
 
   async function confirmAppointment(id: string) {
     await supabase.from("appointments").update({ status: "confirmed" }).eq("id", id);
@@ -577,6 +830,242 @@ export default function Hoy() {
     setWalkInOpen(false);
     setWalkInNotice("Walk-in listo para conectar");
     window.setTimeout(() => setWalkInNotice(""), 3000);
+  }
+
+  function markVisualCheckIn(appt?: AppointmentRow | null) {
+    if (!appt) return;
+    setCheckedInIds((prev) => ({ ...prev, [appt.id]: true }));
+    setWalkInNotice(`${appt.patient_name || "Cliente"} marcado en espera`);
+    window.setTimeout(() => setWalkInNotice(""), 3000);
+  }
+
+  const commandAppointments = useMemo(() => {
+    return filteredAppts
+      .filter((appt) => getStatus(appt.status) !== "cancelled")
+      .sort((a, b) => new Date(apptISO(a) ?? 0).getTime() - new Date(apptISO(b) ?? 0).getTime());
+  }, [filteredAppts]);
+  const commandNextAppointment = commandAppointments[0] ?? nextAppointment ?? null;
+  const waitingCount = Object.values(checkedInIds).filter(Boolean).length;
+  const initialsFor = (name: string | null | undefined) => String(name || "Cliente").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+
+  if (activeBusinessType === "barbershop") {
+    return (
+      <div className="app-page bg-[#050608] text-[#F0F4F8]">
+        <section className="mx-auto max-w-6xl space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-[22px] font-black leading-tight tracking-tight text-[#F0F4F8]">Recepción BarberLine</h1>
+              <p className="mt-1 text-xs text-[#5A6270]">
+                {fmtWeekday(new Date())}, {fmtDate(new Date())} · {visibleBusinessName}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#25D366]/14 bg-[#25D366]/[0.08] px-2.5 py-1 text-[11px] font-semibold text-[#25D366]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#25D366]" />
+                WhatsApp
+              </span>
+              <button onClick={() => markVisualCheckIn(commandNextAppointment)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-sky-400/15 bg-sky-400/[0.08] px-3 text-xs font-bold text-sky-300 transition hover:bg-sky-400/[0.12]">
+                <LogIn className="h-3.5 w-3.5" />
+                Check-in
+              </button>
+              <button onClick={openWalkInSheet} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/12 px-3 text-xs font-bold text-[#18C37E] transition hover:bg-[#18C37E]/18">
+                <Zap className="h-3.5 w-3.5" />
+                Walk-in
+              </button>
+              <button onClick={() => navigate("/agenda")} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/[0.10] bg-white/[0.05] px-3 text-xs font-bold text-[#E8ECF2] transition hover:bg-white/[0.08]">
+                <Calendar className="h-3.5 w-3.5" />
+                Nueva cita
+              </button>
+              <button onClick={() => navigate("/inbox")} className="relative inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#25D366]/14 bg-[#25D366]/[0.07] px-3 text-xs font-bold text-[#25D366] transition hover:bg-[#25D366]/[0.12]">
+                <MessageCircle className="h-3.5 w-3.5" />
+                Inbox
+                {newMessages > 0 ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#18C37E] px-1 text-[9px] text-white">{newMessages}</span> : null}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-5 lg:items-start">
+            <div className="space-y-3 lg:col-span-3">
+              <section className="overflow-hidden rounded-2xl border border-[#18C37E]/[0.16] bg-[#0B1210]">
+                <div className="flex items-center gap-2 border-b border-[#18C37E]/[0.08] px-4 py-3">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#18C37E]" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#18C37E]">Próximo turno</span>
+                  <span className="ml-auto font-mono text-xs text-[#3A4248]">{commandNextAppointment ? ((commandNextAppointment as any).appointment_time || fmtTime(apptISO(commandNextAppointment))) : "Libre"}</span>
+                </div>
+                {loading ? (
+                  <div className="p-6 text-sm text-[#5A6270]">Cargando operación...</div>
+                ) : commandNextAppointment ? (
+                  <>
+                    <button onClick={() => setPreviewAppointment(commandNextAppointment)} className="w-full px-4 py-4 text-left transition hover:bg-white/[0.015]">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#18C37E]/[0.12] bg-[#131A17]">
+                            <span className="text-base font-bold text-[#8A9A94]">{initialsFor(commandNextAppointment.patient_name)}</span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-lg font-bold text-[#F0F4F8]">{commandNextAppointment.patient_name || "Cliente"}</p>
+                            <p className="mt-0.5 truncate text-sm text-[#6A7880]">{commandNextAppointment.reason || commandNextAppointment.title || "Cita"} · {commandNextAppointment.provider_name || "Barbero"}</p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[getStatus(commandNextAppointment.status)].chip}`}>{checkedInIds[commandNextAppointment.id] ? "En espera" : STATUS_STYLES[getStatus(commandNextAppointment.status)].label}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-4xl font-extrabold leading-none text-[#F0F4F8] tabular-nums">{(((commandNextAppointment as any).appointment_time || fmtTime(apptISO(commandNextAppointment))).split(" ")[0])}</p>
+                          <p className="mt-1 text-sm font-semibold text-[#4A5260]">{(((commandNextAppointment as any).appointment_time || fmtTime(apptISO(commandNextAppointment))).split(" ")[1] || "")}</p>
+                        </div>
+                      </div>
+                    </button>
+                    <div className="grid grid-cols-4 border-t border-[#18C37E]/[0.08]">
+                      <CommandHeroAction icon={<LogIn className="h-3.5 w-3.5" />} label="Check-in" tone={checkedInIds[commandNextAppointment.id] ? "done" : "sky"} onClick={() => markVisualCheckIn(commandNextAppointment)} />
+                      <CommandHeroAction icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Atendida" tone="emerald" onClick={() => setPreviewAppointment(commandNextAppointment)} />
+                      <CommandHeroAction icon={<RotateCcw className="h-3.5 w-3.5" />} label="Reagendar" tone="muted" onClick={() => setPreviewAppointment(commandNextAppointment)} />
+                      <CommandHeroAction icon={<MessageCircle className="h-3.5 w-3.5" />} label="Mensaje" tone="whatsapp" onClick={() => commandNextAppointment.lead_id ? navigate(`/inbox/${commandNextAppointment.lead_id}`) : navigate("/inbox")} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-6 text-sm text-[#5A6270]">Todavía no hay citas para hoy.</div>
+                )}
+              </section>
+
+              <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
+                <CommandMetric label="Citas hoy" value={String(appointments.length)} />
+                <CommandMetric label="Pendientes" value={String(pendingCount)} alert={pendingCount > 0} />
+                <CommandMetric label="En espera" value={String(waitingCount)} highlight={waitingCount > 0} />
+                <CommandMetric label="Mensajes" value={String(newMessages)} highlight={newMessages > 0} />
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                <CommandQuickTile icon={<LogIn className="h-4 w-4" />} label="Check-in" onClick={() => markVisualCheckIn(commandNextAppointment)} />
+                <CommandQuickTile icon={<Zap className="h-4 w-4" />} label="Walk-in" onClick={openWalkInSheet} />
+                <CommandQuickTile icon={<Calendar className="h-4 w-4" />} label="Nueva cita" onClick={() => navigate("/agenda")} />
+                <CommandQuickTile icon={<MessageCircle className="h-4 w-4" />} label="Inbox" badge={newMessages} onClick={() => navigate("/inbox")} />
+              </div>
+
+              <section>
+                <div className="mb-2.5 flex items-center justify-between">
+                  <p className="text-xs font-bold text-[#F0F4F8]">Agenda de hoy</p>
+                  <button onClick={() => navigate("/agenda")} className="text-[11px] font-semibold text-[#18C37E] hover:underline">Ver todas</button>
+                </div>
+                <div className="space-y-2">
+                  {commandAppointments.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-[#1E2228] bg-[#0E1014] p-5 text-center text-sm text-[#5A6270]">Todavía no hay citas para hoy.</div>
+                  ) : commandAppointments.slice(0, 5).map((appt) => (
+                    <button key={appt.id} onClick={() => setPreviewAppointment(appt)} className="flex w-full items-center gap-3 rounded-xl border border-[#181C22] bg-[#0E1014] px-3.5 py-3 text-left transition hover:border-[#252A30] hover:bg-[#111820]">
+                      <span className="w-16 shrink-0 font-mono text-xs text-[#4A5260]">{(appt as any).appointment_time || fmtTime(apptISO(appt))}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-[#E8ECF2]">{appt.patient_name || "Cliente"}</p>
+                        <p className="truncate text-[11px] text-[#4A5260]">{appt.reason || appt.title || "Cita"} · {appt.provider_name || "Barbero"}</p>
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[getStatus(appt.status)].chip}`}>{checkedInIds[appt.id] ? "En espera" : STATUS_STYLES[getStatus(appt.status)].label}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <aside className="space-y-3 lg:col-span-2">
+              <section className="rounded-xl border border-[#25D366]/[0.12] bg-[#25D366]/[0.03] p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#25D366]/[0.10]">
+                    <MessageCircle className="h-4 w-4 text-[#25D366]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-[#F0F4F8]">WhatsApp activo</p>
+                      <span className="rounded-full border border-[#25D366]/[0.14] bg-[#25D366]/[0.10] px-1.5 py-0.5 text-[9px] font-bold text-[#25D366]">EN VIVO</span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-[#5A6270]">{newMessages} mensajes hoy · Bot activo</p>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-white/[0.05] bg-white/[0.03] px-3 py-2">
+                    <p className="text-[10px] text-[#4A5260]">Citas por bot</p>
+                    <p className="mt-0.5 text-xs font-semibold text-[#E8ECF2]">{confirmedCount} hoy</p>
+                  </div>
+                  <div className="rounded-lg border border-white/[0.05] bg-white/[0.03] px-3 py-2">
+                    <p className="text-[10px] text-[#4A5260]">Cola</p>
+                    <p className="mt-0.5 text-xs font-semibold text-[#E8ECF2]">{pendingOutbox} envíos</p>
+                  </div>
+                </div>
+                <button onClick={() => navigate("/inbox")} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[#25D366]/[0.14] bg-[#25D366]/[0.08] py-2 text-xs font-bold text-[#25D366] transition hover:bg-[#25D366]/[0.14]">
+                  <Wifi className="h-3.5 w-3.5" />
+                  Abrir inbox
+                </button>
+              </section>
+
+              <section className="rounded-xl border border-[#1E2228] bg-[#0E1014] p-4">
+                <p className="text-xs font-bold text-[#F0F4F8]">Citas por barbero</p>
+                <div className="mt-3 space-y-3">
+                  {(doctors.length ? doctors : ["Barbero disponible"]).slice(0, 4).map((barber) => {
+                    const count = appointments.filter((appt) => (appt.provider_name || "Barbero disponible") === barber).length;
+                    const width = appointments.length ? `${Math.max(8, (count / appointments.length) * 100)}%` : "8%";
+                    return (
+                      <div key={barber} className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-[#8A9299]">{barber}</span>
+                          <span className="font-bold text-[#F0F4F8]">{count} citas</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[#181C22]">
+                          <div className="h-full rounded-full bg-[#18C37E]/55" style={{ width }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-[#1E2228] bg-[#0E1014] p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-[#F0F4F8]">Pendientes</p>
+                  <span className="rounded-full bg-[#18C37E]/[0.08] px-2 py-0.5 text-[10px] font-bold text-[#18C37E]">{pendingCount}</span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {commandAppointments.filter((appt) => getStatus(appt.status) === "pending").slice(0, 3).map((appt) => (
+                    <button key={appt.id} onClick={() => setPreviewAppointment(appt)} className="flex w-full items-center gap-3 rounded-lg border border-[#181C22] bg-black/20 px-3 py-2 text-left">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#18C37E]" />
+                      <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#F0F4F8]">{appt.patient_name || "Cliente"}</span>
+                      <span className="text-[10px] text-[#4A5260]">{(appt as any).appointment_time || fmtTime(apptISO(appt))}</span>
+                    </button>
+                  ))}
+                  {pendingCount === 0 ? <p className="text-xs text-[#5A6270]">Sin citas pendientes por ahora.</p> : null}
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        {walkInNotice ? (
+          <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-2xl border border-[#25D366]/35 bg-[#07110C] px-4 py-2 text-xs font-bold text-[#BDF8D1] shadow-2xl">
+            {walkInNotice}
+          </div>
+        ) : null}
+
+        <BarberWalkInDrawer
+          open={walkInOpen}
+          client={walkInClient}
+          service={walkInService}
+          provider={walkInProvider}
+          services={walkInServices}
+          providers={doctors.length ? doctors : ["Barbero disponible"]}
+          onClientChange={setWalkInClient}
+          onServiceChange={setWalkInService}
+          onProviderChange={setWalkInProvider}
+          onClose={() => setWalkInOpen(false)}
+          onSubmit={submitWalkIn}
+        />
+        <BarberAppointmentPreviewDrawer
+          appointment={previewAppointment}
+          checkedIn={previewAppointment ? Boolean(checkedInIds[previewAppointment.id]) : false}
+          onClose={() => setPreviewAppointment(null)}
+          onCheckIn={() => markVisualCheckIn(previewAppointment)}
+          onMessage={() => {
+            const leadId = previewAppointment?.lead_id;
+            navigate(leadId ? `/inbox/${leadId}` : "/inbox");
+          }}
+        />
+      </div>
+    );
   }
 
   return (

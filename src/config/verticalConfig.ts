@@ -208,6 +208,8 @@ export function getVerticalConfigById(id: VerticalId): VerticalConfig {
 
 export function detectVerticalFromHostname(hostname: string): VerticalConfig {
   const normalized = String(hostname ?? "").trim().toLowerCase();
+  const forced = getForcedDevVerticalConfig();
+  if (forced) return forced;
 
   // Vertical routing lives here. Hosting should point every product subdomain
   // at the same React bundle; this function decides which experience to load.
@@ -218,6 +220,37 @@ export function detectVerticalFromHostname(hostname: string): VerticalConfig {
   }
 
   return DENTAL_CONFIG;
+}
+
+export function getForcedDevVerticalConfig(): VerticalConfig | null {
+  if (typeof window === "undefined") return null;
+  const normalize = (value: unknown): VerticalConfig | null => {
+    const raw = String(value ?? "").trim().toLowerCase();
+    if (raw === "barbershop" || raw === "barberline") return BARBERSHOP_CONFIG;
+    if (raw === "dental" || raw === "dentalconnect") return DENTAL_CONFIG;
+    if (raw === "creatyv") return CREATYV_CONFIG;
+    return null;
+  };
+
+  const fromEnv = normalize(import.meta.env.VITE_FORCE_VERTICAL);
+  if (fromEnv) return fromEnv;
+
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = normalize(params.get("vertical"));
+  if (fromQuery) {
+    try {
+      localStorage.setItem("creatyv:devVertical", fromQuery.businessType ?? fromQuery.id);
+    } catch {
+      // ignore
+    }
+    return fromQuery;
+  }
+
+  try {
+    return normalize(localStorage.getItem("creatyv:devVertical"));
+  } catch {
+    return null;
+  }
 }
 
 export function getDetectedVerticalConfig(): VerticalConfig {
