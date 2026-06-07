@@ -643,8 +643,8 @@ Deno.test("BarberLine availability list builds morning and afternoon WhatsApp se
   assertEquals(list.buttonText, "Ver horarios disponibles");
   assert(!list.body.includes("Más horas"));
   assertEquals(list.sections.map((section) => section.title), [
-    "Mañana",
-    "Tarde",
+    "Por la mañana",
+    "Por la tarde",
   ]);
   assertEquals(list.sections[0].rows.map((row) => row.title), [
     "10:00 AM · Juan",
@@ -654,6 +654,88 @@ Deno.test("BarberLine availability list builds morning and afternoon WhatsApp se
     "1:00 PM · Juan",
     "2:00 PM · Allan",
   ]);
+});
+
+Deno.test("BarberLine multi-provider availability shows barber names in text and list rows", () => {
+  const slots = [
+    {
+      date: "2026-06-08",
+      time: "09:00",
+      provider_id: "allan",
+      provider_name: "Allan",
+    },
+    {
+      date: "2026-06-08",
+      time: "09:30",
+      provider_id: "edgar",
+      provider_name: "Edgar",
+    },
+    {
+      date: "2026-06-08",
+      time: "13:00",
+      provider_id: "juan",
+      provider_name: "Juan",
+    },
+  ];
+  const body = formatBarbershopAvailabilityListBody(slots);
+  const list = buildExpandedBarbershopTimeSlotsList({
+    slots,
+    serviceName: "Corte clásico",
+    providerPreference: "any",
+  });
+
+  assert(body.includes("• 9:00 AM · Allan"));
+  assert(body.includes("• 9:30 AM · Edgar"));
+  assert(body.includes("• 1:00 PM · Juan"));
+  assert(list);
+  assertEquals(list.sections[0].rows.map((row) => row.title), [
+    "9:00 AM · Allan",
+    "9:30 AM · Edgar",
+  ]);
+  assertEquals(list.sections[1].rows[0].title, "1:00 PM · Juan");
+});
+
+Deno.test("BarberLine single-provider availability omits barber names in text and list rows", () => {
+  const slots = [
+    {
+      date: "2026-06-08",
+      time: "09:00",
+      provider_id: "edgar",
+      provider_name: "Edgar",
+    },
+    {
+      date: "2026-06-08",
+      time: "09:30",
+      provider_id: "edgar",
+      provider_name: "Edgar",
+    },
+    {
+      date: "2026-06-08",
+      time: "13:00",
+      provider_id: "edgar",
+      provider_name: "Edgar",
+    },
+  ];
+  const body = formatBarbershopAvailabilityListBody(slots);
+  const list = buildExpandedBarbershopTimeSlotsList({
+    slots,
+    serviceName: "Corte clásico",
+    providerPreference: "any",
+  });
+
+  assert(body.includes("Por la mañana:\n• 9:00 AM\n• 9:30 AM"));
+  assert(body.includes("Por la tarde:\n• 1:00 PM"));
+  assertEquals(body.includes("Edgar"), false);
+  assert(list);
+  assertEquals(list.sections[0].rows.map((row) => row.title), [
+    "9:00 AM",
+    "9:30 AM",
+  ]);
+  assertEquals(list.sections[1].rows[0].title, "1:00 PM");
+  assertEquals(
+    list.sections[0].rows[0].id,
+    "select_slot:2026-06-08|09:00|edgar",
+  );
 });
 
 Deno.test("BarberLine availability list body groups visible slots by morning and afternoon", () => {
@@ -666,13 +748,32 @@ Deno.test("BarberLine availability list body groups visible slots by morning and
     { time: "15:00", provider_name: "Juan" },
   ]);
 
-  assert(body.includes("Estos son algunos horarios disponibles 💈"));
-  assert(body.includes("Mañana:"));
+  assert(body.includes("Horarios disponibles 💈"));
+  assert(body.includes("Estos son algunos horarios disponibles:"));
+  assert(body.includes("Por la mañana:"));
   assert(body.includes("• 9:00 AM · Allan"));
-  assert(body.includes("Tarde:"));
+  assert(body.includes("Por la tarde:"));
   assert(body.includes("• 3:00 PM · Juan"));
   assert(body.includes("Escogé una hora para continuar."));
   assertEquals(body.includes("Más horas"), false);
+  assertEquals(body.includes("Mañana:"), false);
+  assertEquals(body.includes("Tarde:"), false);
+});
+
+Deno.test("BarberLine availability list body only shows periods that have slots", () => {
+  const morningOnly = formatBarbershopAvailabilityListBody([
+    { time: "09:00", provider_name: "Allan" },
+    { time: "10:00", provider_name: "Juan" },
+  ]);
+  assert(morningOnly.includes("Por la mañana:"));
+  assertEquals(morningOnly.includes("Por la tarde:"), false);
+
+  const afternoonOnly = formatBarbershopAvailabilityListBody([
+    { time: "13:00", provider_name: "Allan" },
+    { time: "15:00", provider_name: "Juan" },
+  ]);
+  assert(afternoonOnly.includes("Por la tarde:"));
+  assertEquals(afternoonOnly.includes("Por la mañana:"), false);
 });
 
 Deno.test("BarberLine expanded time selection keeps date time and barber in select_slot payload", () => {
@@ -693,6 +794,6 @@ Deno.test("BarberLine expanded time selection keeps date time and barber in sele
   assert(list);
   const selectedRow = list.sections[0].rows[0];
   assertEquals(selectedRow.id, "select_slot:2026-06-08|14:00|allan");
-  assertEquals(selectedRow.title, "2:00 PM · Allan");
+  assertEquals(selectedRow.title, "2:00 PM");
   assertEquals(selectedRow.description, "Corte clásico");
 });

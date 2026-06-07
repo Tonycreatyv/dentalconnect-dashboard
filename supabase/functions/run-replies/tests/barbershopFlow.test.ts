@@ -8945,10 +8945,17 @@ Deno.test("BarberLine slot selection prefers grouped WhatsApp list for larger av
   assert(source.includes("interactiveList: hasMore"));
   assert(composer.includes('title: "Horarios disponibles"'));
   assert(composer.includes('buttonText: "Ver horarios disponibles"'));
-  assert(composer.includes('"Mañana"'));
-  assert(composer.includes('"Tarde"'));
+  assert(composer.includes('"Por la mañana"'));
+  assert(composer.includes('"Por la tarde"'));
+  assert(composer.includes("hasMultipleProviders"));
+  assert(!composer.includes('"Mañana"'));
+  assert(!composer.includes('"Tarde"'));
+  assert(!composer.includes("Mañana:"));
+  assert(!composer.includes("Tarde:"));
   assert(composer.includes("Escogé una hora para continuar."));
   assert(!composer.includes('"booking_more_hours"'));
+  assert(source.includes("function formatBarbershopConfirmationSummary"));
+  assert(source.includes("Barbero: *${provider}*"));
   assert(!source.includes('buttonText: "Ver horarios"'));
 });
 

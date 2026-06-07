@@ -26,9 +26,23 @@ function groupSlotsByPeriod(slots: Array<Record<string, unknown>>) {
   return { morning, afternoon };
 }
 
-function formatSlotLine(slot: Record<string, unknown>): string {
+function hasMultipleProviders(slots: Array<Record<string, unknown>>): boolean {
+  const providers = new Set(
+    slots
+      .map((slot) => safeStr(slot.provider_id, safeStr(slot.provider_name, "")))
+      .filter(Boolean),
+  );
+  return providers.size > 1;
+}
+
+function formatSlotLine(
+  slot: Record<string, unknown>,
+  showProvider: boolean,
+): string {
+  const time = formatBarbershopHourLabel(safeStr(slot.time));
+  if (!showProvider) return `• ${time}`;
   const provider = safeStr(slot.provider_name, "Barbero");
-  return `• ${formatBarbershopHourLabel(safeStr(slot.time))} · ${provider}`;
+  return `• ${time} · ${provider}`;
 }
 
 export function formatBarbershopHourLabel(time: string): string {
@@ -60,21 +74,29 @@ export function formatBarbershopAvailabilityListBody(
 ): string {
   const validSlots = slots.filter((slot) => safeStr(slot.time));
   const { morning, afternoon } = groupSlotsByPeriod(validSlots);
+  const showProvider = hasMultipleProviders(validSlots);
   const sections: string[] = [];
   if (morning.length) {
     sections.push(
-      `Mañana:\n${morning.slice(0, 4).map(formatSlotLine).join("\n")}`,
+      `Por la mañana:\n${
+        morning.slice(0, 4).map((slot) => formatSlotLine(slot, showProvider))
+          .join("\n")
+      }`,
     );
   }
   if (afternoon.length) {
     sections.push(
-      `Tarde:\n${afternoon.slice(0, 4).map(formatSlotLine).join("\n")}`,
+      `Por la tarde:\n${
+        afternoon.slice(0, 4).map((slot) => formatSlotLine(slot, showProvider))
+          .join("\n")
+      }`,
     );
   }
   const slotText = sections.length
     ? sections.join("\n\n")
-    : validSlots.slice(0, 6).map(formatSlotLine).join("\n");
-  return `Estos son algunos horarios disponibles 💈\n\n${slotText}\n\nEscogé una hora para continuar.`;
+    : validSlots.slice(0, 6).map((slot) => formatSlotLine(slot, showProvider))
+      .join("\n");
+  return `Horarios disponibles 💈\n\nEstos son algunos horarios disponibles:\n\n${slotText}\n\nEscogé una hora para continuar.`;
 }
 
 export function buildExpandedBarbershopTimeSlotsList(args: {
@@ -88,17 +110,25 @@ export function buildExpandedBarbershopTimeSlotsList(args: {
     .slice(0, 10);
   if (!validSlots.length) return undefined;
 
-  const grouped = new Map<"Mañana" | "Tarde", Array<Record<string, unknown>>>();
+  const grouped = new Map<
+    "Por la mañana" | "Por la tarde",
+    Array<Record<string, unknown>>
+  >();
   for (const slot of validSlots) {
     const section = parseTimeToMinutes(safeStr(slot.time), 0) < 12 * 60
-      ? "Mañana"
-      : "Tarde";
+      ? "Por la mañana"
+      : "Por la tarde";
     grouped.set(section, [...(grouped.get(section) ?? []), slot]);
   }
 
   const providerPreference = args.providerPreference ?? "any";
   const serviceName = safeStr(args.serviceName, "Servicio");
-  const sectionOrder: Array<"Mañana" | "Tarde"> = ["Mañana", "Tarde"];
+  const showProvider = providerPreference === "any" &&
+    hasMultipleProviders(validSlots);
+  const sectionOrder: Array<"Por la mañana" | "Por la tarde"> = [
+    "Por la mañana",
+    "Por la tarde",
+  ];
   return {
     title: "Horarios disponibles",
     body: safeStr(args.body, formatBarbershopAvailabilityListBody(validSlots)),
@@ -111,7 +141,7 @@ export function buildExpandedBarbershopTimeSlotsList(args: {
           id: `select_slot:${safeStr(slot.date)}|${safeStr(slot.time)}|${
             safeStr(slot.provider_id)
           }`,
-          title: providerPreference === "any"
+          title: showProvider
             ? `${formatBarbershopHourLabel(safeStr(slot.time))} · ${
               safeStr(slot.provider_name, "Barbero")
             }`.slice(0, 24)
