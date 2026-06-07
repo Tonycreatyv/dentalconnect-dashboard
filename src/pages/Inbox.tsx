@@ -176,7 +176,7 @@ function cleanBarberInboxText(value: string | null | undefined): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return "Perfecto, confirmamos tu cita";
-  return cleaned.length > 140 ? `${cleaned.slice(0, 137).trim()}...` : cleaned;
+  return cleaned.length > 90 ? `${cleaned.slice(0, 87).trim()}...` : cleaned;
 }
 
 const LEAD_SELECT =
@@ -776,42 +776,54 @@ export default function Inbox() {
                 : "Recepción dental para Messenger y WhatsApp"}
             </p>
           </div>
-          <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:w-[720px] max-sm:hidden">
-            <label className="text-xs text-white/50">
-              Organización
-              <select
-                value={selectedOrg}
-                onChange={(e) => {
-                  const nextOrg = e.target.value;
-                  setSelectedOrg(nextOrg);
-                  void setActiveOrgId(nextOrg);
-                  navigate("/inbox");
-                }}
-                className={inboxIsBarbershop ? "mt-1 h-10 w-full truncate rounded-xl border border-white/[0.08] bg-[#05060A] px-3 text-xs text-[#E8ECF2] outline-none sm:text-sm" : "mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none"}
-              >
-                {(inboxIsBarbershop ? orgOptions.filter((org) => org.businessType === "barbershop") : orgOptions).map((org) => (
-                  <option key={org.organizationId} value={org.organizationId}>
-                    {org.label} · {productLabelForBusinessType(org.businessType)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-white/50">
-              Canal
-              <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value as ChannelFilter)} className={inboxIsBarbershop ? "mt-1 h-10 w-full truncate rounded-xl border border-white/[0.08] bg-[#05060A] px-3 text-xs text-[#E8ECF2] outline-none sm:text-sm" : "mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none"}>
-                <option value="all">All</option>
-                <option value="messenger">Messenger</option>
-                <option value="whatsapp">WhatsApp</option>
-              </select>
-            </label>
-            <label className="text-xs text-white/50">
-              Buscar
-              <div className={`mt-1 flex h-10 min-w-0 items-center gap-2 rounded-xl border px-3 ${inboxIsBarbershop ? "border-white/[0.08] bg-[#05060A]" : "border-white/10 bg-[#111923]"}`}>
-                <Search className="h-4 w-4 shrink-0 text-white/40" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="9595, nombre, mensaje..." className="min-w-0 flex-1 bg-transparent text-xs sm:text-sm text-white outline-none placeholder:text-white/30" />
+          {inboxIsBarbershop ? (
+            <div className="hidden min-w-0 items-center gap-2 lg:flex lg:w-[420px]">
+              <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#1E2228] bg-[#05060A] px-3">
+                <Search className="h-4 w-4 shrink-0 text-[#4A5260]" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente o mensaje..." className="min-w-0 flex-1 bg-transparent text-sm text-[#F0F4F8] outline-none placeholder:text-[#4A5260]" />
               </div>
-            </label>
-          </div>
+              <button onClick={() => setChannelFilter(channelFilter === "whatsapp" ? "all" : "whatsapp")} className={`h-10 rounded-xl border px-3 text-xs font-bold transition ${channelFilter === "whatsapp" ? "border-[#18C37E]/25 bg-[#18C37E]/10 text-[#18C37E]" : "border-[#1E2228] bg-[#0E1014] text-[#8A9299] hover:text-[#F0F4F8]"}`}>
+                WhatsApp
+              </button>
+            </div>
+          ) : (
+            <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:w-[720px] max-sm:hidden">
+              <label className="text-xs text-white/50">
+                Organización
+                <select
+                  value={selectedOrg}
+                  onChange={(e) => {
+                    const nextOrg = e.target.value;
+                    setSelectedOrg(nextOrg);
+                    void setActiveOrgId(nextOrg);
+                    navigate("/inbox");
+                  }}
+                  className="mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none"
+                >
+                  {orgOptions.map((org) => (
+                    <option key={org.organizationId} value={org.organizationId}>
+                      {org.label} · {productLabelForBusinessType(org.businessType)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-white/50">
+                Canal
+                <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value as ChannelFilter)} className="mt-1 h-10 w-full truncate rounded-xl border border-white/10 bg-[#111923] px-3 text-xs sm:text-sm text-white outline-none">
+                  <option value="all">All</option>
+                  <option value="messenger">Messenger</option>
+                  <option value="whatsapp">WhatsApp</option>
+                </select>
+              </label>
+              <label className="text-xs text-white/50">
+                Buscar
+                <div className="mt-1 flex h-10 min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-[#111923] px-3">
+                  <Search className="h-4 w-4 shrink-0 text-white/40" />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="9595, nombre, mensaje..." className="min-w-0 flex-1 bg-transparent text-xs sm:text-sm text-white outline-none placeholder:text-white/30" />
+                </div>
+              </label>
+            </div>
+          )}
           {import.meta.env.DEV && DEV_DEBUG_UI ? (
             <div className="text-safe rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-white/45">
               activeOrganizationId: {selectedLead?.organization_id ?? selectedOrg ?? resolvedOrgId} / business_type: {resolvedBusinessType} / channel: {selectedLead?.channel ?? channelFilter}
@@ -936,8 +948,8 @@ export default function Inbox() {
                     </button>
                     {inboxIsBarbershop ? (
                       <>
-                        <button onClick={() => addLocalOutgoingMessage("Hoy tenemos horarios disponibles. Te puedo ofrecer 9:00 AM, 10:30 AM o 2:00 PM.")} className="min-h-10 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-2 text-xs font-semibold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar horarios</button>
-                        <button onClick={() => addLocalOutgoingMessage("Corte clásico desde HNL 250, Corte + barba desde HNL 400 y Barba desde HNL 180.")} className="min-h-10 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-2 text-xs font-semibold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar precios</button>
+                        <button onClick={() => addLocalOutgoingMessage("Tenemos espacios disponibles hoy. ¿Qué hora te queda mejor?")} className="min-h-10 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-2 text-xs font-semibold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar horarios</button>
+                        <button onClick={() => addLocalOutgoingMessage("Corte clásico desde L 150. Corte + barba desde L 220.")} className="min-h-10 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-2 text-xs font-semibold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar precios</button>
                         <button onClick={() => setVisualAppointmentOpen(true)} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/10 px-3 py-2 text-xs font-semibold text-[#18C37E] transition hover:bg-[#18C37E]/15"><CalendarPlus className="h-4 w-4" /> Agendar cita</button>
                         <button onClick={toggleLocalStaffTaken} className={`min-h-10 rounded-xl border px-3 py-2 text-xs font-semibold transition ${staffTaken ? "border-[#18C37E]/25 bg-[#18C37E]/10 text-[#BDF8D1]" : "border-amber-400/20 bg-amber-500/10 text-amber-300"}`}>{staffTaken ? "Tomada por staff" : "Tomar conversación"}</button>
                       </>
@@ -1008,8 +1020,8 @@ export default function Inbox() {
                 <div className={`border-t p-2.5 sm:p-3 ${inboxIsBarbershop ? "border-[#1E2228] bg-[#0B0D0F]" : "border-white/10 bg-white/5"}`} style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}>
                   {inboxIsBarbershop ? (
                     <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-4">
-                      <button onClick={() => addLocalOutgoingMessage("Hoy tenemos horarios disponibles. Te puedo ofrecer 9:00 AM, 10:30 AM o 2:00 PM.")} className="min-h-9 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-1.5 text-xs font-bold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar horarios</button>
-                      <button onClick={() => addLocalOutgoingMessage("Corte clásico desde HNL 250, Corte + barba desde HNL 400 y Barba desde HNL 180.")} className="min-h-9 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-1.5 text-xs font-bold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar precios</button>
+                      <button onClick={() => addLocalOutgoingMessage("Tenemos espacios disponibles hoy. ¿Qué hora te queda mejor?")} className="min-h-9 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-1.5 text-xs font-bold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar horarios</button>
+                      <button onClick={() => addLocalOutgoingMessage("Corte clásico desde L 150. Corte + barba desde L 220.")} className="min-h-9 rounded-xl border border-[#252A30] bg-[#121417] px-3 py-1.5 text-xs font-bold text-[#A4AAB3] transition hover:text-[#F5F7FA]">Enviar precios</button>
                       <button onClick={() => setVisualAppointmentOpen(true)} className="min-h-9 rounded-xl border border-[#18C37E]/20 bg-[#18C37E]/10 px-3 py-1.5 text-xs font-bold text-[#18C37E] transition hover:bg-[#18C37E]/15">Agendar cita</button>
                       <button onClick={toggleLocalStaffTaken} className={`min-h-9 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${staffTaken ? "border-[#18C37E]/25 bg-[#18C37E]/10 text-[#BDF8D1]" : "border-amber-400/20 bg-amber-500/10 text-amber-300"}`}>{staffTaken ? "Tomada por staff" : "Tomar conversación"}</button>
                     </div>

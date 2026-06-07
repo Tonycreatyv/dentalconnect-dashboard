@@ -121,6 +121,24 @@ function barberDisplayName(value: string): string {
   return raw;
 }
 
+function barberServiceDisplayLabel(value: string): string {
+  const raw = String(value ?? "").trim();
+  const map: Record<string, string> = {
+    corte: "Corte",
+    corte_barba: "Corte y barba",
+    corte_solo: "Corte de pelo",
+    limpieza_facial: "Limpieza facial",
+    corte_limpieza: "Corte y limpieza",
+    cejas: "Cejas",
+  };
+  if (map[raw]) return map[raw];
+  if (!raw) return "Servicio";
+  if (isLikelyDentalCatalog([{ name: raw }])) return "Servicio BarberLine";
+  return raw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 type TabKey = "integraciones" | "clinica" | "equipo" | "horario" | "servicios" | "faqs" | "cuenta";
 
 const INTEGRATIONS = [
@@ -164,6 +182,7 @@ export default function Settings() {
 
   const [doctors, setDoctors] = useState<any[]>([]);
   const [deletedProviderIds, setDeletedProviderIds] = useState<string[]>([]);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   async function loadDoctorsForOrg() {
     const { data } = await supabase.from("providers").select("*").eq("organization_id", ORG).eq("role", "doctor");
     return data ?? [];
@@ -207,6 +226,7 @@ export default function Settings() {
     setMapsUrl("");
     setDoctors([]);
     setDeletedProviderIds([]);
+    setEditingProviderId(null);
     setInitialSnapshot(null);
   }, [ORG, resolvedBusinessType, defaultServices, defaultFaqs, defaultSpecialties]);
 
@@ -654,30 +674,42 @@ export default function Settings() {
 
   const renderHorario = () => isBarbershop ? (
     <BarberLineCard className="p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-lg font-black text-[#F5F7FA]">Horarios</div>
           <p className="mt-1 text-sm text-[#6F7680]">Días y horas de atención para WhatsApp y agenda.</p>
         </div>
-        <BarberLineStatus label="Agenda activa" tone="success" />
+        <BarberLineStatus label="Disponibilidad BarberLine" tone="success" />
+      </div>
+      <div className="mb-4 rounded-2xl border border-[#1E2228] bg-[#0A0C0F] p-3 text-sm text-[#8A9299]">
+        Estos horarios se usan para mostrar disponibilidad en BarberLine.
       </div>
       <div className="space-y-2">
         {Object.entries(dayLabels).map(([k, label]) => {
           const d = hours[k] ?? { closed: true };
           return (
-            <div key={k} className="grid gap-3 rounded-2xl border border-[#1E2228] bg-[#0A0C0F] p-3 md:grid-cols-[180px_1fr] md:items-center">
+            <div key={k} className="grid gap-3 rounded-2xl border border-[#1E2228] bg-[#101317] p-3 md:grid-cols-[220px_1fr] md:items-center">
               <div className="flex items-center justify-between gap-3">
-                <span className="font-bold text-[#F5F7FA]">{label}</span>
+                <div>
+                  <span className="font-bold text-[#F5F7FA]">{label}</span>
+                  <div className={`mt-0.5 text-xs font-semibold ${d.closed ? "text-[#6F7680]" : "text-[#18C37E]"}`}>{d.closed ? "Cerrado" : "Abierto"}</div>
+                </div>
                 <Toggle enabled={!d.closed} onChange={(open) => setHours(prev => ({ ...prev, [k]: open ? { closed: false, open: d.open ?? "08:00", close: d.close ?? "17:00" } : { closed: true } }))} />
               </div>
               {!d.closed ? (
-                <div className="flex items-center gap-2">
-                  <BarberLineInput type="time" value={d.open ?? "08:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, open: e.target.value } }))} />
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <label className="min-w-0 text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">
+                    Abre
+                    <BarberLineInput className="mt-1" type="time" value={d.open ?? "08:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, open: e.target.value } }))} />
+                  </label>
                   <span className="text-xs font-bold text-[#4A5260]">a</span>
-                  <BarberLineInput type="time" value={d.close ?? "17:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, close: e.target.value } }))} />
+                  <label className="min-w-0 text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">
+                    Cierra
+                    <BarberLineInput className="mt-1" type="time" value={d.close ?? "17:00"} onChange={(e) => setHours(prev => ({ ...prev, [k]: { ...d, close: e.target.value } }))} />
+                  </label>
                 </div>
               ) : (
-                <div className="text-sm font-semibold text-[#4A5260]">Cerrado</div>
+                <div className="rounded-xl border border-[#1E2228] bg-[#0A0C0F] px-3 py-2 text-sm font-semibold text-[#4A5260]">No se muestran horarios este día.</div>
               )}
             </div>
           );
@@ -808,7 +840,7 @@ export default function Settings() {
               <div key={idx} className="rounded-2xl border border-white/10 bg-[#0B1620]/70 p-4">
                 <div className="flex min-w-0 items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-base font-black text-white">{s.name || "Servicio sin nombre"}</div>
+                    <div className="truncate text-base font-black text-white">{barberServiceDisplayLabel(s.name) || "Servicio sin nombre"}</div>
                     <div className="mt-2 flex flex-wrap gap-2 text-xs">
                       <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-white/72">{formatServicePrice(s)}</span>
                       <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-white/72">{s.duration_min ?? 30} min</span>
@@ -1035,6 +1067,12 @@ export default function Settings() {
                         </div>
                       </div>
                       <BarberLineButton
+                        variant="secondary"
+                        onClick={() => setEditingProviderId(editingProviderId === doc.id ? null : doc.id)}
+                      >
+                        {editingProviderId === doc.id ? "Cerrar" : "Editar"}
+                      </BarberLineButton>
+                      <BarberLineButton
                         variant="danger"
                         onClick={() => {
                           if (!confirm("¿Eliminar a " + doc.name + "?")) return;
@@ -1051,7 +1089,7 @@ export default function Settings() {
                       <div className="flex flex-wrap gap-2">
                         {svcs.map((s: string) => (
                           <span key={s} className="inline-flex items-center gap-2 rounded-full border border-[#18C37E]/20 bg-[#18C37E]/10 px-3 py-1 text-xs font-bold text-[#BDF8D1]">
-                            {s}
+                            {barberServiceDisplayLabel(s)}
                             <button onClick={() => updateDoctor(doc.id, (provider) => ({ ...provider, services: svcs.filter((x: string) => x !== s) }))} className="text-[#BDF8D1]/50 hover:text-red-300">×</button>
                           </span>
                         ))}
@@ -1071,6 +1109,14 @@ export default function Settings() {
 
                     <div className="mt-4">
                       <div className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-[#4A5260]">Horario</div>
+                      {editingProviderId !== doc.id ? (
+                        <div className="rounded-xl border border-[#1E2228] bg-[#0A0C0F] p-3 text-sm text-[#8A9299]">
+                          {Object.entries(dayNames).filter(([key]) => !(sched[key] || { closed: true }).closed).slice(0, 3).map(([key, label]) => {
+                            const day = sched[key] || {};
+                            return `${label} ${day.open || "09:00"}-${day.close || "18:00"}`;
+                          }).join(" · ") || "Sin horario activo"}
+                        </div>
+                      ) : (
                       <div className="grid gap-2 sm:grid-cols-2">
                         {Object.entries(dayNames).map(([key, label]) => {
                           const day = sched[key] || { closed: true };
@@ -1100,6 +1146,7 @@ export default function Settings() {
                           );
                         })}
                       </div>
+                      )}
                     </div>
                   </BarberLineCard>
                 );

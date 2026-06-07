@@ -8,6 +8,7 @@ import {
 import { supabase } from "../lib/supabaseClient";
 import { useActiveOrg } from "../hooks/useActiveOrg";
 import PageHeader from "../components/PageHeader";
+import { BarberLineButton, BarberLineCard, BarberLinePageShell, BarberLineStatus } from "../components/barberline/BarberLineUI";
 
 const DEFAULT_ORG = "clinic-demo";
 type BillingStatus = "trialing" | "active" | "past_due" | "canceled";
@@ -144,6 +145,7 @@ export default function Billing() {
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [planNotice, setPlanNotice] = useState("");
 
   const spotsLeft = TOTAL_SLOTS - CLAIMED_SLOTS;
   const progressPercent = (CLAIMED_SLOTS / TOTAL_SLOTS) * 100;
@@ -174,8 +176,114 @@ export default function Billing() {
     const plan = PLANS.find(p => p.id === planId);
     if ((plan as any)?.checkoutUrl) {
       window.location.href = (plan as any).checkoutUrl;
+      return;
     }
+    setPlanNotice("Plan listo para conectar");
+    window.setTimeout(() => setPlanNotice(""), 2600);
   }
+
+  if (activeBusinessType === "barbershop") {
+    return (
+      <BarberLinePageShell
+        title="Plan BarberLine"
+        subtitle="Elegí el plan según el tamaño de tu barbería."
+        eyebrow="PLAN · BARBERLINE"
+        className="max-w-6xl"
+      >
+        {status === "trialing" && trialDaysLeft !== null ? (
+          <BarberLineCard className="border-[#18C37E]/20 bg-[#18C37E]/10 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-[#BDF8D1]">Prueba activa</div>
+                <div className="mt-1 text-sm text-[#A4AAB3]">Te quedan <span className="font-bold text-[#F5F7FA]">{trialDaysLeft} días</span> de prueba gratuita.</div>
+              </div>
+              <BarberLineStatus label="Activo" tone="success" />
+            </div>
+          </BarberLineCard>
+        ) : null}
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          {PLANS.map((plan) => {
+            const isActive = currentPlan === plan.id && (status === "active" || status === "trialing");
+            return (
+              <BarberLineCard key={plan.id} className={`relative p-5 ${plan.highlight ? "border-[#18C37E]/35 bg-[#101A15]" : "bg-[#101317]"}`}>
+                {plan.highlight ? (
+                  <div className="absolute -top-3 left-5 rounded-full border border-[#18C37E]/25 bg-[#18C37E] px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#04100B]">
+                    Más popular
+                  </div>
+                ) : null}
+                <div className="mt-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-lg font-black text-[#F5F7FA]">{plan.name}</h2>
+                    {isActive ? <BarberLineStatus label="Plan activo" tone="success" /> : null}
+                  </div>
+                  <p className="mt-1 text-sm text-[#6F7680]">{plan.description}</p>
+                  <div className="mt-5 flex items-baseline gap-2">
+                    <span className="text-4xl font-black text-[#F5F7FA]">${plan.price}</span>
+                    <span className="text-sm font-semibold text-[#6F7680]">/mes</span>
+                  </div>
+                </div>
+                <div className="mt-5 space-y-2">
+                  {plan.features.map((feature) => (
+                    <div key={feature} className="flex items-start gap-2 text-sm text-[#A4AAB3]">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#18C37E]" />
+                      <span>{feature}</span>
+                    </div>
+                  ))}
+                </div>
+                <BarberLineButton
+                  className="mt-6 w-full"
+                  variant={plan.highlight ? "primary" : "secondary"}
+                  disabled={loading === plan.id}
+                  onClick={() => handleSubscribe(plan.id)}
+                >
+                  {isActive ? "Actualizar plan" : "Empezar 14 días gratis"}
+                </BarberLineButton>
+              </BarberLineCard>
+            );
+          })}
+        </div>
+
+        <BarberLineCard className="p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black text-[#F5F7FA]">Incluido en BarberLine</h2>
+              <p className="mt-1 text-sm text-[#6F7680]">Operación diaria para agenda, clientes y WhatsApp.</p>
+            </div>
+            <BarberLineStatus label="Sin contratos" tone="neutral" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {FEATURES.slice(0, 8).map((feature) => (
+              <div key={feature.text} className="rounded-2xl border border-[#1E2228] bg-[#0A0C0F] p-3">
+                <feature.icon className="mb-3 h-4 w-4 text-[#18C37E]" />
+                <div className="text-sm font-semibold leading-relaxed text-[#DDE4EC]">{feature.text}</div>
+              </div>
+            ))}
+          </div>
+        </BarberLineCard>
+
+        <BarberLineCard className="p-5">
+          <h2 className="text-lg font-black text-[#F5F7FA]">Preguntas frecuentes</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            {FAQ.map(({ q, a }) => (
+              <div key={q} className="rounded-2xl border border-[#1E2228] bg-[#0A0C0F] p-4">
+                <div className="text-sm font-black text-[#F5F7FA]">{q}</div>
+                <div className="mt-2 text-sm leading-relaxed text-[#8A9299]">{a}</div>
+              </div>
+            ))}
+          </div>
+        </BarberLineCard>
+
+        {planNotice ? (
+          <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-2xl border border-[#18C37E]/25 bg-[#07110C] px-4 py-2 text-xs font-bold text-[#BDF8D1] shadow-2xl">
+            {planNotice}
+          </div>
+        ) : null}
+        {error ? <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error}</div> : null}
+      </BarberLinePageShell>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
