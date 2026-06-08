@@ -1414,7 +1414,7 @@ function resolveReliableDentalPatientName(
 
 function formatDentalConfirmationSummary(
   pendingBooking: Record<string, unknown>,
-  patientName = "",
+  _patientName = "",
 ): string {
   const service = safeStr(
     pendingBooking.service_name,
@@ -1424,13 +1424,7 @@ function formatDentalConfirmationSummary(
     safeStr(pendingBooking.appointment_date, ""),
   );
   const time = formatHourLabel(safeStr(pendingBooking.appointment_time, ""));
-  const brandName = safeStr(pendingBooking.brand_name, "");
-  const provider = formatDentalProviderDisplayName(
-    safeStr(pendingBooking.provider_name, "Doctor disponible"),
-    brandName,
-  );
-  const nameLine = patientName ? `\nNombre: *${patientName}*` : "";
-  return `Perfecto 🦷\n\nServicio: *${service}*\nFecha: *${date}*\nHora: *${time}*\nDoctor: *${provider}*${nameLine}\n\n¿Confirmamos?`;
+  return `Perfecto 🦷 Tengo ${service} para ${date} a las ${time}. ¿Confirmamos la cita?`;
 }
 
 function formatDentalBookingSuccess(booking: BookingActionResult): string {
@@ -1850,8 +1844,9 @@ function dentalAlternativeSlotsList(
 ): WhatsAppInteractiveListSpec | undefined {
   if (slots.length <= 3) return undefined;
   return {
+    title: "Horarios disponibles",
     body,
-    buttonText: "Más horas",
+    buttonText: "Ver horarios disponibles",
     sections: [
       {
         title: "Próximos horarios",
@@ -1883,6 +1878,122 @@ function dentalPeriodButtons(options?: {
   return buttons;
 }
 
+function isDentalPastDate(
+  dateIso: string,
+  timezone = DEFAULT_TIMEZONE,
+): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateIso) &&
+    dateIso < formatLocalDateForAction(nowInTimezone(timezone));
+}
+
+function daysBetweenIsoDates(fromIso: string, toIso: string): number {
+  const from = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fromIso);
+  const to = /^(\d{4})-(\d{2})-(\d{2})$/.exec(toIso);
+  if (!from || !to) return 0;
+  const fromMs = Date.UTC(
+    Number(from[1]),
+    Number(from[2]) - 1,
+    Number(from[3]),
+  );
+  const toMs = Date.UTC(Number(to[1]), Number(to[2]) - 1, Number(to[3]));
+  return Math.floor((toMs - fromMs) / 86_400_000);
+}
+
+function hasDentalExplicitYearMarker(
+  ...records: Array<Record<string, unknown> | null | undefined>
+): boolean {
+  return records.some((record) =>
+    Boolean(
+      record?.date_year_explicit ||
+        record?.appointment_date_year_explicit ||
+        record?.explicit_year ||
+        record?.year_explicit,
+    )
+  );
+}
+
+function isDentalSuspiciousAmbiguousFutureDate(
+  dateIso: string,
+  timezone = DEFAULT_TIMEZONE,
+  dateYearExplicit = false,
+): boolean {
+  if (dateYearExplicit || !/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) return false;
+  const todayIso = formatLocalDateForAction(nowInTimezone(timezone));
+  return daysBetweenIsoDates(todayIso, dateIso) > 90;
+}
+
+function isDentalInvalidStaleBookingDate(
+  dateIso: string,
+  timezone = DEFAULT_TIMEZONE,
+  dateYearExplicit = false,
+): boolean {
+  return isDentalPastDate(dateIso, timezone) ||
+    isDentalSuspiciousAmbiguousFutureDate(dateIso, timezone, dateYearExplicit);
+}
+
+function dentalPastDateRejection(args: {
+  collected: Record<string, unknown>;
+  service?: DentalGuidedService | null;
+  pending?: Record<string, unknown>;
+  debugNote: string;
+}): GenerateReplyResult {
+  const {
+    pending_booking: _pendingBooking,
+    selected_slot: _selectedSlot,
+    pending_offered_slot: _pendingOfferedSlot,
+    current_date: _currentDate,
+    current_time: _currentTime,
+    preferred_date: _preferredDate,
+    preferred_time: _preferredTime,
+    requested_date: _requestedDate,
+    requested_time: _requestedTime,
+    last_offered_slots: _lastOfferedSlots,
+    last_offered_dates: _lastOfferedDates,
+    ...durableCollected
+  } = args.collected;
+  const pending = args.pending ?? {};
+  const service = args.service;
+  return {
+    reply: "Esa fecha ya pasó. ¿Qué otra fecha te queda mejor?",
+    statePatch: {
+      stage: "BOOKING",
+      nextExpected: "booking_date_preference",
+      collected: {
+        ...durableCollected,
+        activeBookingFlow: true,
+        lastBookingStep: "select_day",
+        expected_step: "day_selection",
+        current_service_key: service?.id ??
+          safeStr(
+            pending.service_key,
+            safeStr(args.collected.current_service_key, ""),
+          ),
+        current_service_name: service?.name ??
+          safeStr(
+            pending.service_name,
+            safeStr(args.collected.current_service_name, ""),
+          ),
+        pending_booking: null,
+        selected_slot: null,
+        pending_offered_slot: null,
+        current_date: null,
+        current_time: null,
+        preferred_date: null,
+        preferred_time: null,
+        last_offered_slots: null,
+        last_offered_dates: null,
+      },
+    },
+    leadPatch: {},
+    debugNote: args.debugNote,
+    interactiveButtons: [
+      { id: "booking_date_pref:today", title: "Hoy" },
+      { id: "booking_date_pref:tomorrow", title: "Mañana" },
+      { id: "booking_date_pref:week", title: "Otra fecha" },
+    ],
+  };
+}
+
 function formatDentalPeriodSelectorBody(
   dateIso: string,
   timezone = DEFAULT_TIMEZONE,
@@ -1908,7 +2019,7 @@ function filterDentalSlotsByPeriod(
   return slots.filter((slot) => {
     const minutes = getDentalSlotMinute(safeStr(slot.time, ""));
     if (minutes < 0) return false;
-    return period === "morning" ? minutes < 12 * 60 : minutes >= 13 * 60;
+    return period === "morning" ? minutes < 12 * 60 : minutes >= 12 * 60;
   });
 }
 
@@ -1936,24 +2047,94 @@ function parseDentalCurrentTimeSelectionFromText(input: string): string {
 function dentalPeriodSlotsList(
   slots: Array<Record<string, unknown>>,
   body: string,
-  buttonText = "Horarios",
+  buttonText = "Ver horarios disponibles",
 ): WhatsAppInteractiveListSpec | undefined {
-  if (!slots.length) return undefined;
+  if (slots.length <= 3) return undefined;
+  const providerNames = slots
+    .map((slot) =>
+      formatDentalProviderDisplayName(
+        safeStr(slot.provider_name, ""),
+        safeStr(slot.brand_name, ""),
+      )
+    )
+    .filter((name) =>
+      name &&
+      normalizeTextForMatch(name) !== "equipo dican" &&
+      normalizeTextForMatch(name) !== "doctor disponible"
+    );
+  const showProvider =
+    new Set(providerNames.map((name) => normalizeTextForMatch(name))).size > 1;
+  const toRowTitle = (slot: Record<string, unknown>) => {
+    const time = formatHourLabel(safeStr(slot.time, ""));
+    const provider = formatDentalProviderDisplayName(
+      safeStr(slot.provider_name, ""),
+      safeStr(slot.brand_name, ""),
+    );
+    if (!showProvider || !provider) return time.slice(0, 24);
+    return `${time} · ${provider}`.slice(0, 24);
+  };
+  const toRows = (periodSlots: Array<Record<string, unknown>>) =>
+    periodSlots.slice(0, 10).map((slot) => ({
+      id: `select_slot:${safeStr(slot.date, "")}|${safeStr(slot.time, "")}|${
+        safeStr(slot.provider_id, "")
+      }`,
+      title: toRowTitle(slot),
+    }));
+  const morningRows = toRows(filterDentalSlotsByPeriod(slots, "morning"));
+  const afternoonRows = toRows(filterDentalSlotsByPeriod(slots, "afternoon"));
+  const sections = [
+    morningRows.length ? { title: "Por la mañana", rows: morningRows } : null,
+    afternoonRows.length
+      ? { title: "Por la tarde", rows: afternoonRows }
+      : null,
+  ].filter(Boolean) as WhatsAppInteractiveListSpec["sections"];
+  if (!sections.length) return undefined;
   return {
+    title: "Horarios disponibles",
     body,
     buttonText,
-    sections: [
-      {
-        title: "Horarios",
-        rows: slots.slice(0, 10).map((slot) => ({
-          id: `select_slot:${safeStr(slot.date, "")}|${
-            safeStr(slot.time, "")
-          }|${safeStr(slot.provider_id, "")}`,
-          title: formatHourLabel(safeStr(slot.time, "")).slice(0, 24),
-        })),
-      },
-    ],
+    sections,
   };
+}
+
+function formatDentalAvailabilityListBody(
+  slots: Array<Record<string, unknown>>,
+  brandName = "",
+): string {
+  const providerNames = slots
+    .map((slot) =>
+      formatDentalProviderDisplayName(
+        safeStr(slot.provider_name, ""),
+        brandName || safeStr(slot.brand_name, ""),
+      )
+    )
+    .filter((name) =>
+      name &&
+      normalizeTextForMatch(name) !== "equipo dican" &&
+      normalizeTextForMatch(name) !== "doctor disponible"
+    );
+  const showProvider =
+    new Set(providerNames.map((name) => normalizeTextForMatch(name))).size > 1;
+  const row = (slot: Record<string, unknown>) => {
+    const time = formatHourLabel(safeStr(slot.time, ""));
+    const provider = formatDentalProviderDisplayName(
+      safeStr(slot.provider_name, ""),
+      brandName || safeStr(slot.brand_name, ""),
+    );
+    return showProvider && provider ? `• ${time} · ${provider}` : `• ${time}`;
+  };
+  const section = (
+    title: "Por la mañana" | "Por la tarde",
+    sectionSlots: Array<Record<string, unknown>>,
+  ) =>
+    sectionSlots.length
+      ? `${title}:\n${sectionSlots.slice(0, 4).map(row).join("\n")}`
+      : "";
+  const sections = [
+    section("Por la mañana", filterDentalSlotsByPeriod(slots, "morning")),
+    section("Por la tarde", filterDentalSlotsByPeriod(slots, "afternoon")),
+  ].filter(Boolean).join("\n\n");
+  return `Estos son algunos horarios disponibles 🦷\n\n${sections}\n\nEscogé una hora para continuar.`;
 }
 
 function resolveDentalSelectedDateFromCollected(
@@ -2074,6 +2255,13 @@ function buildDentalPeriodPending(args: {
     service_name: args.service.name,
     brand_name: getDentalBrandName(args.clinicSettings, null),
     appointment_date: args.selectedDate,
+    date_year_explicit: hasDentalExplicitYearMarker(
+      ((args.collected as any)?.pending_booking ?? {}) as Record<
+        string,
+        unknown
+      >,
+      args.collected,
+    ) || undefined,
     provider_id: args.providerPreference === "specific"
       ? args.providerId ?? ""
       : "",
@@ -2102,6 +2290,17 @@ async function showDentalPeriodSelector(args: {
   const timezone =
     safeStr((args.clinicSettings as any)?.timezone, DEFAULT_TIMEZONE) ||
     DEFAULT_TIMEZONE;
+  if (isDentalPastDate(args.selectedDate, timezone)) {
+    return dentalPastDateRejection({
+      collected: args.collected,
+      service: args.service,
+      pending: ((args.collected as any)?.pending_booking ?? {}) as Record<
+        string,
+        unknown
+      >,
+      debugNote: `${args.debugNote}_past_date_rejected`,
+    });
+  }
   const slots = await getAvailableSlotsForDay({
     supabase: args.supabase,
     organization_id: args.organizationId,
@@ -2163,51 +2362,20 @@ async function showDentalPeriodSelector(args: {
         ],
     };
   }
-  if (!morningSlots.length || !afternoonSlots.length) {
-    return await showDentalAllSlotsForDate({
-      supabase: args.supabase,
-      organizationId: args.organizationId,
-      clinicSettings: args.clinicSettings,
-      collected: args.collected,
-      service: args.service,
-      selectedDate: args.selectedDate,
-      providerPreference: args.providerPreference,
-      providerId: args.providerId,
-      providerName: args.providerName,
-      debugNote: `${args.debugNote}_single_period_hour_list`,
-    });
-  }
-  return {
-    reply: formatDentalPeriodSelectorBody(args.selectedDate, timezone),
-    statePatch: {
-      stage: "BOOKING",
-      nextExpected: "dental_time_period",
-      collected: {
-        ...args.collected,
-        activeBookingFlow: true,
-        lastBookingStep: "select_time_period",
-        expected_step: "time_period_selection",
-        current_service_key: args.service.id,
-        current_service_name: args.service.name,
-        current_date: args.selectedDate,
-        preferred_date: args.selectedDate,
-        provider_preference: args.providerPreference,
-        preferred_provider_id: args.providerPreference === "specific"
-          ? args.providerId ?? ""
-          : "",
-        preferred_provider_name: args.providerPreference === "specific"
-          ? args.providerName ?? ""
-          : "",
-        pending_booking: buildDentalPeriodPending(args),
-      },
-    },
-    leadPatch: {},
-    debugNote: args.debugNote,
-    interactiveButtons: dentalPeriodButtons({
-      hasMorning: morningSlots.length > 0,
-      hasAfternoon: afternoonSlots.length > 0,
-    }),
-  };
+  return await showDentalAllSlotsForDate({
+    supabase: args.supabase,
+    organizationId: args.organizationId,
+    clinicSettings: args.clinicSettings,
+    collected: args.collected,
+    service: args.service,
+    selectedDate: args.selectedDate,
+    providerPreference: args.providerPreference,
+    providerId: args.providerId,
+    providerName: args.providerName,
+    debugNote: !morningSlots.length || !afternoonSlots.length
+      ? `${args.debugNote}_single_period_hour_list`
+      : `${args.debugNote}_grouped_hour_list`,
+  });
 }
 
 async function showDentalAllSlotsForDate(args: {
@@ -2225,6 +2393,17 @@ async function showDentalAllSlotsForDate(args: {
   const timezone =
     safeStr((args.clinicSettings as any)?.timezone, DEFAULT_TIMEZONE) ||
     DEFAULT_TIMEZONE;
+  if (isDentalPastDate(args.selectedDate, timezone)) {
+    return dentalPastDateRejection({
+      collected: args.collected,
+      service: args.service,
+      pending: ((args.collected as any)?.pending_booking ?? {}) as Record<
+        string,
+        unknown
+      >,
+      debugNote: `${args.debugNote}_past_date_rejected`,
+    });
+  }
   const slots = await getAvailableSlotsForDay({
     supabase: args.supabase,
     organization_id: args.organizationId,
@@ -2286,9 +2465,15 @@ async function showDentalAllSlotsForDate(args: {
         ],
     };
   }
-  const body = `Para *${
-    formatRequestedDayLabel(args.selectedDate)
-  }*, estos son los horarios disponibles 🦷`;
+  const body = offeredSlots.length > 3
+    ? formatDentalAvailabilityListBody(
+      offeredSlots,
+      getDentalBrandName(args.clinicSettings, null),
+    )
+    : `Estos horarios están disponibles 🦷\n\n${
+      offeredSlots.map((slot) => `• ${formatHourLabel(safeStr(slot.time, ""))}`)
+        .join("\n")
+    }\n\nEscogé una hora para continuar.`;
   return {
     reply: body,
     statePatch: {
@@ -2327,7 +2512,6 @@ async function showDentalAllSlotsForDate(args: {
     interactiveList: dentalPeriodSlotsList(
       offeredSlots,
       body,
-      "Horas disponibles",
     ),
   };
 }
@@ -2348,6 +2532,17 @@ async function showDentalSlotsForPeriod(args: {
   const timezone =
     safeStr((args.clinicSettings as any)?.timezone, DEFAULT_TIMEZONE) ||
     DEFAULT_TIMEZONE;
+  if (isDentalPastDate(args.selectedDate, timezone)) {
+    return dentalPastDateRejection({
+      collected: args.collected,
+      service: args.service,
+      pending: ((args.collected as any)?.pending_booking ?? {}) as Record<
+        string,
+        unknown
+      >,
+      debugNote: `${args.debugNote}_past_date_rejected`,
+    });
+  }
   const slots = await getAvailableSlotsForDay({
     supabase: args.supabase,
     organization_id: args.organizationId,
@@ -2420,13 +2615,6 @@ async function showDentalSlotsForPeriod(args: {
     };
   }
 
-  const body = args.period === "morning"
-    ? `Horarios por la mañana para *${
-      formatRequestedDayLabel(args.selectedDate)
-    }* 🦷`
-    : `Horarios por la tarde para *${
-      formatRequestedDayLabel(args.selectedDate)
-    }* 🦷`;
   const offeredSlots = periodSlots.map((slot) =>
     toDentalOfferedSlot(
       slot,
@@ -2437,6 +2625,18 @@ async function showDentalSlotsForPeriod(args: {
       args.clinicSettings,
     )
   );
+  const body = offeredSlots.length > 3
+    ? formatDentalAvailabilityListBody(
+      offeredSlots,
+      getDentalBrandName(args.clinicSettings, null),
+    )
+    : args.period === "morning"
+    ? `Horarios por la mañana para *${
+      formatRequestedDayLabel(args.selectedDate)
+    }* 🦷`
+    : `Horarios por la tarde para *${
+      formatRequestedDayLabel(args.selectedDate)
+    }* 🦷`;
   return {
     reply: body,
     statePatch: {
@@ -2464,7 +2664,14 @@ async function showDentalSlotsForPeriod(args: {
     },
     leadPatch: {},
     debugNote: args.debugNote,
-    interactiveButtons: [],
+    interactiveButtons: offeredSlots.length <= 3
+      ? offeredSlots.map((slot) => ({
+        id: `select_slot:${safeStr(slot.date, "")}|${safeStr(slot.time, "")}|${
+          safeStr(slot.provider_id, "")
+        }`,
+        title: formatHourLabel(safeStr(slot.time, "")).slice(0, 20),
+      }))
+      : [],
     interactiveList: dentalPeriodSlotsList(offeredSlots, body),
   };
 }
@@ -2486,6 +2693,17 @@ async function showDentalSlotsForSelection(args: {
   const timezone =
     safeStr((args.clinicSettings as any)?.timezone, DEFAULT_TIMEZONE) ||
     DEFAULT_TIMEZONE;
+  if (isDentalPastDate(args.selectedDate, timezone)) {
+    return dentalPastDateRejection({
+      collected: args.collected,
+      service: args.service,
+      pending: ((args.collected as any)?.pending_booking ?? {}) as Record<
+        string,
+        unknown
+      >,
+      debugNote: `${args.debugNote}_past_date_rejected`,
+    });
+  }
   const bookingRules = ((args.clinicSettings as any)?.booking_rules &&
       typeof (args.clinicSettings as any).booking_rules === "object")
     ? ((args.clinicSettings as any).booking_rules as Record<string, unknown>)
@@ -2614,15 +2832,6 @@ async function showDentalSlotsForSelection(args: {
       ],
     };
   }
-  const shown = slots.slice(0, maxVisibleSlots);
-  const hasMore = slots.length > shown.length;
-  const lines = shown.map((slot) =>
-    `• ${formatHourLabel(safeStr(slot.time, ""))}`
-  )
-    .join("\n");
-  const body = hasMore
-    ? `Estos son algunos horarios disponibles 🦷\n\n${lines}\n\nTocá *Más horas* para ver más opciones.`
-    : `Estos horarios están disponibles 🦷\n\n${lines}\n\nEscogé el horario que querés reservar.`;
   const offeredSlots = slots.map((slot) =>
     toDentalOfferedSlot(
       slot as Record<string, unknown>,
@@ -2631,6 +2840,16 @@ async function showDentalSlotsForSelection(args: {
       args.clinicSettings,
     )
   );
+  const shown = slots.slice(0, maxVisibleSlots);
+  const body = offeredSlots.length > 3
+    ? formatDentalAvailabilityListBody(
+      offeredSlots,
+      getDentalBrandName(args.clinicSettings, null),
+    )
+    : `Estos horarios están disponibles 🦷\n\n${
+      shown.map((slot) => `• ${formatHourLabel(safeStr(slot.time, ""))}`)
+        .join("\n")
+    }\n\nEscogé una hora para continuar.`;
   const bufferAfterMin = getDentalBufferAfterMin(
     args.service.name,
     args.clinicSettings,
@@ -2689,7 +2908,7 @@ async function showDentalSlotsForSelection(args: {
         title: formatHourLabel(safeStr(slot.time, "")).slice(0, 20),
       }))
       : [],
-    interactiveList: dentalPeriodSlotsList(offeredSlots, body, "Más horas"),
+    interactiveList: dentalPeriodSlotsList(offeredSlots, body),
   };
 }
 
@@ -2722,10 +2941,10 @@ async function handleDentalDirectBookingRequest(args: {
     args.inboundText,
     args.nowLocal,
   );
-  const requestedDate = ambiguousWeekday ? "" : parseDentalDateFromText(
-    args.inboundText,
-    args.nowLocal,
-  );
+  const requestedDateResult = ambiguousWeekday
+    ? { date: "", yearExplicit: false }
+    : parseDentalDateFromTextWithMetadata(args.inboundText, args.nowLocal);
+  const requestedDate = requestedDateResult.date;
   const requestedTime = parseDentalExplicitTimeFromText(args.inboundText);
   const futureRange = parseDentalFutureRangeFromText(
     args.inboundText,
@@ -2735,6 +2954,20 @@ async function handleDentalDirectBookingRequest(args: {
     /\b(temprano|por la manana|por la mañana|en la manana|en la mañana)\b/
       .test(text);
   if (!hasBookingLanguage && !hasTemporalSignal) return null;
+  const timezone =
+    safeStr((args.clinicSettings as any)?.timezone, DEFAULT_TIMEZONE) ||
+    DEFAULT_TIMEZONE;
+  if (requestedDate && isDentalPastDate(requestedDate, timezone)) {
+    return dentalPastDateRejection({
+      collected: args.collected,
+      service: requestedService,
+      pending: ((args.collected as any)?.pending_booking ?? {}) as Record<
+        string,
+        unknown
+      >,
+      debugNote: "dental_direct_booking_past_date_rejected",
+    });
+  }
 
   if (requestedService && ambiguousWeekday) {
     return {
@@ -2865,6 +3098,7 @@ async function handleDentalDirectBookingRequest(args: {
               (args.collected as any)?.pending_booking?.appointment_date,
               "",
             ),
+            date_year_explicit: requestedDateResult.yearExplicit || undefined,
             appointment_time: requestedTime || safeStr(
               (args.collected as any)?.pending_booking?.appointment_time,
               "",
@@ -2897,6 +3131,7 @@ async function handleDentalDirectBookingRequest(args: {
     service_key: requestedService.id,
     service_name: requestedService.name,
     brand_name: getDentalBrandName(args.clinicSettings, null),
+    date_year_explicit: requestedDateResult.yearExplicit || undefined,
     duration_min: requestedService.duration_min,
     buffer_after_min: bufferAfterMin,
     effective_duration_min: requestedService.duration_min + bufferAfterMin,
@@ -2938,6 +3173,7 @@ async function handleDentalDirectBookingRequest(args: {
         organizationId: args.organizationId,
         collected: {
           ...args.collected,
+          date_year_explicit: requestedDateResult.yearExplicit || undefined,
           pending_booking: {
             ...basePending,
             appointment_date: requestedDate,
@@ -2966,6 +3202,7 @@ async function handleDentalDirectBookingRequest(args: {
           current_service_name: requestedService.name,
           current_date: requestedDate,
           preferred_date: requestedDate,
+          date_year_explicit: requestedDateResult.yearExplicit || undefined,
           pending_booking: {
             ...basePending,
             appointment_date: requestedDate,
@@ -2990,9 +3227,7 @@ async function handleDentalDirectBookingRequest(args: {
     date: requestedDate,
     time_preference: "specific",
     specific_time: requestedTime,
-    timezone:
-      safeStr((args.clinicSettings as any)?.timezone, DEFAULT_TIMEZONE) ||
-      DEFAULT_TIMEZONE,
+    timezone,
     max_options: 10,
   });
   const exactSlot = slots.find((slot) =>
@@ -3020,6 +3255,7 @@ async function handleDentalDirectBookingRequest(args: {
         current_service_name: requestedService.name,
         current_date: requestedDate,
         preferred_date: requestedDate,
+        date_year_explicit: requestedDateResult.yearExplicit || undefined,
         last_offered_slots: [offered],
       },
       pendingBooking,
@@ -3072,6 +3308,7 @@ async function handleDentalDirectBookingRequest(args: {
         current_service_name: requestedService.name,
         current_date: requestedDate,
         preferred_date: requestedDate,
+        date_year_explicit: requestedDateResult.yearExplicit || undefined,
         pending_booking: {
           ...basePending,
           appointment_date: requestedDate,
@@ -3177,12 +3414,20 @@ async function handleDentalGuidedRuntimeTurn(args: {
         );
       }
       if (!normalizedAction) {
-        const parsedDate = parseDentalDateFromText(inboundText, nowLocal);
+        const parsedDateResult = parseDentalDateFromTextWithMetadata(
+          inboundText,
+          nowLocal,
+        );
+        const parsedDate = parsedDateResult.date;
         const parsedTime = parseDentalExplicitTimeFromText(inboundText);
         if (parsedDate && parsedTime) {
-          normalizedAction = `dental_date_time:${parsedDate}|${parsedTime}`;
+          normalizedAction = parsedDateResult.yearExplicit
+            ? `dental_date_time_explicit_year:${parsedDate}|${parsedTime}`
+            : `dental_date_time:${parsedDate}|${parsedTime}`;
         } else if (parsedDate) {
-          normalizedAction = `select_date:${parsedDate}`;
+          normalizedAction = parsedDateResult.yearExplicit
+            ? `select_date_explicit_year:${parsedDate}`
+            : `select_date:${parsedDate}`;
         }
       }
     } else if (expected === "provider_selection") {
@@ -3338,9 +3583,15 @@ async function handleDentalGuidedRuntimeTurn(args: {
         }
       }
       if (!normalizedAction) {
-        const parsedDate = parseDentalDateFromText(inboundText, nowLocal);
+        const parsedDateResult = parseDentalDateFromTextWithMetadata(
+          inboundText,
+          nowLocal,
+        );
+        const parsedDate = parsedDateResult.date;
         if (parsedDate && !parseDentalExplicitTimeFromText(inboundText)) {
-          normalizedAction = `select_date:${parsedDate}`;
+          normalizedAction = parsedDateResult.yearExplicit
+            ? `select_date_explicit_year:${parsedDate}`
+            : `select_date:${parsedDate}`;
         }
       }
       if (!normalizedAction && isAffirmativeDentalText(inboundText)) {
@@ -3660,10 +3911,20 @@ async function handleDentalGuidedRuntimeTurn(args: {
 
   if (
     normalizedAction.startsWith("dental_current_date_time:") ||
-    normalizedAction.startsWith("dental_date_time:")
+    normalizedAction.startsWith("dental_date_time:") ||
+    normalizedAction.startsWith("dental_date_time_explicit_year:")
   ) {
-    const explicitDateTime = normalizedAction.startsWith("dental_date_time:")
-      ? normalizedAction.replace("dental_date_time:", "").split("|")
+    const dateTimeYearExplicit = normalizedAction.startsWith(
+      "dental_date_time_explicit_year:",
+    );
+    const explicitDateTime = normalizedAction.startsWith("dental_date_time:") ||
+        dateTimeYearExplicit
+      ? normalizedAction.replace(
+        dateTimeYearExplicit
+          ? "dental_date_time_explicit_year:"
+          : "dental_date_time:",
+        "",
+      ).split("|")
       : null;
     const requestedTime = explicitDateTime
       ? safeStr(explicitDateTime[1], "")
@@ -3678,6 +3939,17 @@ async function handleDentalGuidedRuntimeTurn(args: {
     if (!service || !selectedDate || !requestedTime) {
       return null;
     }
+    const dateAwareCollected = dateTimeYearExplicit
+      ? {
+        ...collected,
+        date_year_explicit: true,
+        pending_booking: {
+          ...pending,
+          appointment_date: selectedDate,
+          date_year_explicit: true,
+        },
+      }
+      : collected;
     const providerPreference = safeStr(
         (collected as any).provider_preference,
         safeStr((pending as any).provider_preference, "any"),
@@ -3759,13 +4031,15 @@ async function handleDentalGuidedRuntimeTurn(args: {
       );
       const pendingBooking = buildDentalPendingBookingFromSlot({
         slot: offered,
-        pending,
+        pending: dateTimeYearExplicit
+          ? { ...pending, date_year_explicit: true }
+          : pending,
         clinicSettings,
         fallbackService: service,
       });
       return dentalConfirmationOrNameGate({
         leadState,
-        collected,
+        collected: dateAwareCollected,
         pendingBooking,
         debugNote: "dental_current_date_time_confirmation",
       });
@@ -5148,6 +5422,7 @@ async function handleDentalGuidedRuntimeTurn(args: {
   if (
     normalizedAction.startsWith("booking_date_pref:") ||
     normalizedAction.startsWith("select_date:") ||
+    normalizedAction.startsWith("select_date_explicit_year:") ||
     normalizedAction.startsWith("dental_weekday_clarify:") ||
     normalizedAction.startsWith("dental_date_range:")
   ) {
@@ -5382,18 +5657,43 @@ async function handleDentalGuidedRuntimeTurn(args: {
       d.setDate(d.getDate() + 1);
       selectedDate = formatLocalDateForAction(d);
     }
-    if (normalizedAction.startsWith("select_date:")) {
+    const selectedDateYearExplicit = normalizedAction.startsWith(
+      "select_date_explicit_year:",
+    );
+    if (
+      normalizedAction.startsWith("select_date:") ||
+      selectedDateYearExplicit
+    ) {
       selectedDate = parseDateFromAction(normalizedAction);
     }
     if (!selectedDate) {
       return null;
     }
+    if (isDentalPastDate(selectedDate, timezone)) {
+      return dentalPastDateRejection({
+        collected,
+        service,
+        pending,
+        debugNote: "dental_guided_past_date_rejected",
+      });
+    }
+    const dateAwareCollected = selectedDateYearExplicit
+      ? {
+        ...collected,
+        date_year_explicit: true,
+        pending_booking: {
+          ...pending,
+          appointment_date: selectedDate,
+          date_year_explicit: true,
+        },
+      }
+      : collected;
     if (providers.length <= 1) {
       const provider = providers[0];
       return await showDentalPeriodSelector({
         supabase,
         organizationId,
-        collected,
+        collected: dateAwareCollected,
         service,
         selectedDate,
         providerPreference: provider ? "specific" : "any",
@@ -5417,12 +5717,14 @@ async function handleDentalGuidedRuntimeTurn(args: {
           current_service_name: service.name,
           current_date: selectedDate,
           preferred_date: selectedDate,
+          date_year_explicit: selectedDateYearExplicit || undefined,
           pending_booking: {
             ...pending,
             service: service.name,
             service_key: service.id,
             service_name: service.name,
             appointment_date: selectedDate,
+            date_year_explicit: selectedDateYearExplicit || undefined,
             duration_min: service.duration_min,
             buffer_after_min: getDentalBufferAfterMin(
               service.name,
@@ -5467,6 +5769,20 @@ async function handleDentalGuidedRuntimeTurn(args: {
     if (!service || !selectedDate || !provider) {
       return null;
     }
+    if (
+      isDentalInvalidStaleBookingDate(
+        selectedDate,
+        timezone,
+        hasDentalExplicitYearMarker(pending, collected),
+      )
+    ) {
+      return dentalPastDateRejection({
+        collected,
+        service,
+        pending,
+        debugNote: "dental_guided_provider_past_date_rejected",
+      });
+    }
     return await showDentalPeriodSelector({
       supabase,
       organizationId,
@@ -5504,6 +5820,20 @@ async function handleDentalGuidedRuntimeTurn(args: {
       ),
     );
     if (!period || !service || !selectedDate) return null;
+    if (
+      isDentalInvalidStaleBookingDate(
+        selectedDate,
+        timezone,
+        hasDentalExplicitYearMarker(pending, collected),
+      )
+    ) {
+      return dentalPastDateRejection({
+        collected,
+        service,
+        pending,
+        debugNote: "dental_guided_period_past_date_rejected",
+      });
+    }
     return await showDentalSlotsForPeriod({
       supabase,
       organizationId,
@@ -5538,6 +5868,27 @@ async function handleDentalGuidedRuntimeTurn(args: {
       safeStr(slot.provider_id, "") === selected.providerId
     );
     if (!match) return null;
+    if (
+      isDentalInvalidStaleBookingDate(
+        selected.date,
+        timezone,
+        hasDentalExplicitYearMarker(
+          match as Record<string, unknown>,
+          pending,
+          collected,
+        ),
+      )
+    ) {
+      return dentalPastDateRejection({
+        collected,
+        service: services.find((item) =>
+          item.id ===
+            safeStr(match.service_key, safeStr(pending.service_key, ""))
+        ) ?? null,
+        pending,
+        debugNote: "dental_guided_slot_past_date_rejected",
+      });
+    }
     const currentFlow = (collected as any).current_flow;
     const allowAdditionalBooking = Boolean(
       (collected as any).allow_additional_booking ||
@@ -5605,6 +5956,11 @@ async function handleDentalGuidedRuntimeTurn(args: {
       ),
       brand_name: brandName,
       appointment_date: safeStr(match.date, ""),
+      date_year_explicit: hasDentalExplicitYearMarker(
+        match as Record<string, unknown>,
+        pending,
+        collected,
+      ) || undefined,
       appointment_time: safeStr(match.time, ""),
       starts_at: safeStr(match.starts_at, ""),
       provider_id: safeStr(match.provider_id, ""),
@@ -5673,6 +6029,20 @@ async function handleDentalGuidedRuntimeTurn(args: {
     (expected === "patient_name" || expected === "name_input") &&
     inboundText.trim().length >= 3
   ) {
+    if (
+      isDentalInvalidStaleBookingDate(
+        safeStr(pending.appointment_date, ""),
+        timezone,
+        hasDentalExplicitYearMarker(pending, collected),
+      )
+    ) {
+      return dentalPastDateRejection({
+        collected,
+        service: resolveDentalSelectedServiceFromCollected(services, collected),
+        pending,
+        debugNote: "dental_guided_name_gate_past_date_rejected",
+      });
+    }
     const patientName = toDisplayPersonName(inboundText);
     const pendingWithName = { ...pending, patient_name: patientName };
     return {
@@ -5766,6 +6136,20 @@ async function handleDentalGuidedRuntimeTurn(args: {
         interactiveButtons: service ? [] : dentalServiceButtons(services),
       };
     }
+    if (
+      isDentalInvalidStaleBookingDate(
+        selectedDate,
+        timezone,
+        hasDentalExplicitYearMarker(pending, collected),
+      )
+    ) {
+      return dentalPastDateRejection({
+        collected,
+        service,
+        pending,
+        debugNote: "dental_guided_change_time_past_date_rejected",
+      });
+    }
     return await showDentalPeriodSelector({
       supabase,
       organizationId,
@@ -5838,6 +6222,20 @@ async function handleDentalGuidedRuntimeTurn(args: {
       !safeStr(pending.appointment_date, "") ||
       !safeStr(pending.appointment_time, "")
     ) return null;
+    if (
+      isDentalInvalidStaleBookingDate(
+        safeStr(pending.appointment_date, ""),
+        timezone,
+        hasDentalExplicitYearMarker(pending, collected),
+      )
+    ) {
+      return dentalPastDateRejection({
+        collected,
+        service: resolveDentalSelectedServiceFromCollected(services, collected),
+        pending,
+        debugNote: "dental_guided_confirm_past_date_rejected",
+      });
+    }
     const pendingProviderIdRaw = safeStr(pending.provider_id, "");
     const pendingProviderId =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -5913,11 +6311,19 @@ async function handleDentalGuidedRuntimeTurn(args: {
             scheduled_date: safeStr(pending.appointment_date, ""),
             scheduled_time: safeStr(pending.appointment_time, ""),
             starts_at: safeStr(pending.starts_at, ""),
+            date_year_explicit: hasDentalExplicitYearMarker(
+              pending,
+              collected,
+            ),
             selected_slot: {
               source: "dental_guided_pending_confirmation",
               date: safeStr(pending.appointment_date, ""),
               time: safeStr(pending.appointment_time, ""),
               starts_at: safeStr(pending.starts_at, ""),
+              date_year_explicit: hasDentalExplicitYearMarker(
+                pending,
+                collected,
+              ),
               provider_id: pendingProviderId,
               provider_name: pendingProviderName,
               service_key: safeStr(pending.service_key, ""),
@@ -5966,6 +6372,10 @@ async function handleDentalGuidedRuntimeTurn(args: {
               brand_name: brandName,
               appointment_date: safeStr(pending.appointment_date, ""),
               appointment_time: safeStr(pending.appointment_time, ""),
+              date_year_explicit: hasDentalExplicitYearMarker(
+                pending,
+                collected,
+              ),
               buffer_after_min: Number(pending.buffer_after_min ?? 0) || 0,
               effective_duration_min:
                 Number(pending.effective_duration_min ?? 0) ||
@@ -5993,7 +6403,7 @@ async function handleDentalGuidedRuntimeTurn(args: {
       );
       return {
         reply:
-          "No pude guardar la cita en este momento. Te puedo pasar con recepción para revisarlo manualmente.",
+          "Tuve un problema guardando la cita. Te paso con recepción para confirmarla manualmente.",
         statePatch: {
           stage: "BOOKING",
           nextExpected: "confirm_booking",
@@ -6070,7 +6480,7 @@ async function handleDentalGuidedRuntimeTurn(args: {
     );
     return {
       reply: result.replyOverride ??
-        "No pude guardar la cita en este momento. Te puedo pasar con recepción para revisarlo manualmente.",
+        "Tuve un problema guardando la cita. Te paso con recepción para confirmarla manualmente.",
       statePatch: {
         stage: "BOOKING",
         nextExpected: "confirm_booking",
@@ -6577,7 +6987,7 @@ function isCloseTextMatch(a: string, b: string): boolean {
 
 function parseDateFromAction(actionValue: string): string {
   const m = normalizePayloadActionValue(actionValue).match(
-    /^select_date:(\d{4}-\d{2}-\d{2})$/,
+    /^select_date(?:_explicit_year)?:(\d{4}-\d{2}-\d{2})$/,
   );
   return m?.[1] ?? "";
 }
@@ -7449,10 +7859,13 @@ function parseDentalExplicitTimeFromText(input: string): string {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-function parseDentalDateFromText(input: string, nowLocal: Date): string {
+function parseDentalDateFromTextWithMetadata(
+  input: string,
+  nowLocal: Date,
+): { date: string; yearExplicit: boolean } {
   const guided = resolveGuidedDateActionFromText(input, [], nowLocal);
   const guidedDate = parseDateFromAction(guided);
-  if (guidedDate) return guidedDate;
+  if (guidedDate) return { date: guidedDate, yearExplicit: false };
   const n = normalizeTextForMatch(input).trim();
   const monthMap: Record<string, number> = {
     enero: 1,
@@ -7470,27 +7883,28 @@ function parseDentalDateFromText(input: string, nowLocal: Date): string {
     diciembre: 12,
   };
   const m = n.match(
-    /\b(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/,
+    /\b(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+(\d{4}))?\b/,
   );
-  if (!m) return "";
+  if (!m) return { date: "", yearExplicit: false };
   const day = Number(m[1]);
   const month = monthMap[m[2]];
-  if (!Number.isInteger(day) || !month || day < 1 || day > 31) return "";
-  let year = nowLocal.getFullYear();
-  let candidate = new Date(year, month - 1, day, 12, 0, 0);
-  const today = new Date(
-    nowLocal.getFullYear(),
-    nowLocal.getMonth(),
-    nowLocal.getDate(),
-    0,
-    0,
-    0,
-  );
-  if (candidate < today) {
-    year += 1;
-    candidate = new Date(year, month - 1, day, 12, 0, 0);
-  }
-  return formatLocalDateForAction(candidate);
+  const yearExplicit = Boolean(m[3]);
+  const year = yearExplicit ? Number(m[3]) : nowLocal.getFullYear();
+  if (
+    !Number.isInteger(day) || !month || day < 1 || day > 31 ||
+    !Number.isInteger(year) || year < 1900 || year > 2200
+  ) return { date: "", yearExplicit: false };
+  const candidate = new Date(year, month - 1, day, 12, 0, 0);
+  if (
+    candidate.getFullYear() !== year ||
+    candidate.getMonth() !== month - 1 ||
+    candidate.getDate() !== day
+  ) return { date: "", yearExplicit: false };
+  return { date: formatLocalDateForAction(candidate), yearExplicit };
+}
+
+function parseDentalDateFromText(input: string, nowLocal: Date): string {
+  return parseDentalDateFromTextWithMetadata(input, nowLocal).date;
 }
 
 function shouldUseBookingFlowCta(args: {

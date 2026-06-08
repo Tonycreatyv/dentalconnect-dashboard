@@ -9160,14 +9160,10 @@ Deno.test("DentalConnect guided date provider slot and confirmation UX exists", 
     source.includes('{ id: "booking_date_pref:week", title: "Otra fecha" }'),
   );
   assert(source.includes("¿Tenés doctor preferido?"));
-  assert(source.includes("formatDentalPeriodSelectorBody"));
-  assert(source.includes("¿qué horario preferís? 🦷"));
-  assert(
-    source.includes('{ id: "dental_period:morning", title: "Por la mañana" }'),
-  );
-  assert(
-    source.includes('{ id: "dental_period:afternoon", title: "Por la tarde" }'),
-  );
+  assert(source.includes("formatDentalAvailabilityListBody"));
+  assert(source.includes("Estos son algunos horarios disponibles 🦷"));
+  assert(source.includes('"Por la mañana"'));
+  assert(source.includes('"Por la tarde"'));
   assert(source.includes("¿A nombre de quién dejamos la cita?"));
   assert(source.includes("¿Confirmamos?"));
   assert(
@@ -9191,15 +9187,14 @@ Deno.test("DentalConnect uses morning afternoon period lists after date selectio
   assert(source.includes("function showDentalSlotsForPeriod"));
   assert(source.includes("function dentalPeriodSlotsList"));
   assert(source.includes("filterDentalSlotsByPeriod"));
-  assert(source.includes('nextExpected: "dental_time_period"'));
+  assert(source.includes('nextExpected: "availability_slot_selection"'));
   assert(source.includes("Por la mañana"));
   assert(source.includes("Por la tarde"));
-  assert(source.includes("hasMorning: morningSlots.length > 0"));
-  assert(source.includes("hasAfternoon: afternoonSlots.length > 0"));
+  assert(source.includes("_grouped_hour_list"));
   assert(source.includes('"dental_guided_today_no_future_slots"'));
   assert(source.includes("Ya no tengo horarios disponibles para hoy 🦷"));
   assert(source.includes('id: "booking_date_pref:tomorrow", title: "Mañana"'));
-  assert(source.includes('buttonText = "Horarios"'));
+  assert(source.includes('buttonText = "Ver horarios disponibles"'));
   assert(!source.includes('description: "Horario disponible"'));
   assert(!source.includes("Doctor disponible · Limpieza dental"));
 });
@@ -9267,7 +9262,7 @@ Deno.test("DentalConnect period slot lists only include the selected valid perio
   assert(source.includes("function filterDentalSlotsByPeriod"));
   assert(
     source.includes(
-      'period === "morning" ? minutes < 12 * 60 : minutes >= 13 * 60',
+      'period === "morning" ? minutes < 12 * 60 : minutes >= 12 * 60',
     ),
   );
   assert(source.includes('normalizedAction.startsWith("dental_period:")'));
@@ -9455,7 +9450,7 @@ Deno.test("DentalConnect date intelligence handles ambiguous weekdays and future
   assert(source.includes('"dental_guided_future_range_dates"'));
 });
 
-Deno.test("DentalConnect generic doctor displays as Equipo DICAN in patient copy", async () => {
+Deno.test("DentalConnect generic doctor display remains sanitized and is not repeated in confirmation", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
@@ -9464,7 +9459,14 @@ Deno.test("DentalConnect generic doctor displays as Equipo DICAN in patient copy
   assert(source.includes('normalized === "doctor disponible"'));
   assert(source.includes('return "Equipo DICAN"'));
   assert(source.includes("formatDentalProviderDisplayName("));
-  assert(source.includes("Doctor: *${provider}*"));
+  const confirmationStart = source.indexOf(
+    "function formatDentalConfirmationSummary",
+  );
+  const confirmationBody = source.slice(
+    confirmationStart,
+    source.indexOf("function formatDentalBookingSuccess", confirmationStart),
+  );
+  assert(!confirmationBody.includes("Doctor: *${provider}*"));
 });
 
 Deno.test("DentalConnect no-availability recovery searches next slots instead of looping Cualquiera", async () => {
@@ -9503,7 +9505,7 @@ Deno.test("DentalConnect guided booking only confirms after appointment insert s
   assert(source.includes("formatDentalBookingSuccess(result.booking)"));
   assert(
     source.includes(
-      "No pude guardar la cita en este momento. Te puedo pasar con recepción para revisarlo manualmente.",
+      "Tuve un problema guardando la cita. Te paso con recepción para confirmarla manualmente.",
     ),
   );
   assert(source.includes('debugNote: "dental_guided_booking_failed"'));
@@ -9591,13 +9593,123 @@ Deno.test("DentalConnect date-only text stays date-only and does not become time
       "if (parsedDate && !parseDentalExplicitTimeFromText(inboundText))",
     ),
   );
-  assert(source.includes("normalizedAction = `select_date:${parsedDate}`"));
+  assert(source.includes("parseDentalDateFromTextWithMetadata"));
+  assert(source.includes("`select_date_explicit_year:${parsedDate}`"));
+  assert(source.includes("`select_date:${parsedDate}`"));
   assert(
     source.includes(
       "const match = n.match(/\\b(?:a las|alas)\\s*(\\d{1,2})",
     ),
   );
   assert(source.includes("// Dental clinics are daytime businesses"));
+});
+
+Deno.test("DentalConnect rejects past typed month-day dates instead of rolling to next year", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/run-replies/index.ts",
+  );
+
+  const parserStart = source.indexOf("function parseDentalDateFromText");
+  const parserBody = source.slice(
+    parserStart,
+    source.indexOf("function shouldUseBookingFlowCta", parserStart),
+  );
+  assert(source.includes("5 de junio"));
+  assert(parserBody.includes("nowLocal.getFullYear()"));
+  assert(
+    parserBody.includes(
+      "(?:\\s+de\\s+(\\d{4}))?",
+    ),
+  );
+  assert(!parserBody.includes("year += 1"));
+  assert(source.includes("function isDentalPastDate"));
+  assert(source.includes("Esa fecha ya pasó. ¿Qué otra fecha te queda mejor?"));
+  assert(source.includes('debugNote: "dental_guided_past_date_rejected"'));
+  assert(
+    source.includes('debugNote: "dental_direct_booking_past_date_rejected"'),
+  );
+});
+
+Deno.test("DentalConnect accepts explicit next-year dates only with explicit year marker", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/run-replies/index.ts",
+  );
+
+  assert(source.includes("function parseDentalDateFromTextWithMetadata"));
+  assert(source.includes("yearExplicit"));
+  assert(source.includes("`select_date_explicit_year:${parsedDate}`"));
+  assert(
+    source.includes(
+      "`dental_date_time_explicit_year:${parsedDate}|${parsedTime}`",
+    ),
+  );
+  assert(source.includes("date_year_explicit: true"));
+  assert(source.includes("date_year_explicit: hasDentalExplicitYearMarker("));
+});
+
+Deno.test("DentalConnect stale ambiguous rollover state is cleared before confirmation", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/run-replies/index.ts",
+  );
+
+  assert(source.includes("function isDentalSuspiciousAmbiguousFutureDate"));
+  assert(source.includes("daysBetweenIsoDates(todayIso, dateIso) > 90"));
+  assert(source.includes("function isDentalInvalidStaleBookingDate"));
+  assert(source.includes("hasDentalExplicitYearMarker"));
+  assert(source.includes("isDentalInvalidStaleBookingDate("));
+});
+
+Deno.test("DentalConnect availability list uses clear morning afternoon labels and no Más horas copy", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/run-replies/index.ts",
+  );
+
+  const listStart = source.indexOf("function dentalPeriodSlotsList");
+  const listBody = source.slice(
+    listStart,
+    source.indexOf("function formatDentalAvailabilityListBody", listStart),
+  );
+  const bodyStart = source.indexOf("function formatDentalAvailabilityListBody");
+  const availabilityBody = source.slice(
+    bodyStart,
+    source.indexOf(
+      "function resolveDentalSelectedDateFromCollected",
+      bodyStart,
+    ),
+  );
+
+  assert(listBody.includes('title: "Horarios disponibles"'));
+  assert(listBody.includes('buttonText = "Ver horarios disponibles"'));
+  assert(listBody.includes('title: "Por la mañana"'));
+  assert(listBody.includes('title: "Por la tarde"'));
+  assert(
+    availabilityBody.includes("Estos son algunos horarios disponibles 🦷"),
+  );
+  assert(availabilityBody.includes("Escogé una hora para continuar."));
+  assert(availabilityBody.includes('"Por la mañana"'));
+  assert(availabilityBody.includes('"Por la tarde"'));
+  assert(!availabilityBody.includes('"Mañana"'));
+  assert(!availabilityBody.includes('"Tarde"'));
+  assert(!source.includes("Tocá *Más horas*"));
+});
+
+Deno.test("DentalConnect stale past selected slot is cleared before confirmation", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/run-replies/index.ts",
+  );
+
+  assert(source.includes('debugNote: "dental_guided_slot_past_date_rejected"'));
+  assert(
+    source.includes('debugNote: "dental_guided_name_gate_past_date_rejected"'),
+  );
+  assert(
+    source.includes('debugNote: "dental_guided_confirm_past_date_rejected"'),
+  );
+  assert(source.includes("pending_booking: null"));
+  assert(source.includes("selected_slot: null"));
+  assert(source.includes("current_date: null"));
+  assert(source.includes("last_offered_slots: null"));
+  assert(source.includes("last_offered_dates: null"));
 });
 
 Deno.test("DentalConnect direct booking extracts service date time before service picker", async () => {
@@ -9766,23 +9878,19 @@ Deno.test("DentalConnect reschedule hour change skips intermediate options", asy
   assert(source.includes('normalizedAction = "dental_reschedule_show_hours"'));
 });
 
-Deno.test("DentalConnect date selection opens direct hour list when only one period has slots", async () => {
+Deno.test("DentalConnect date selection opens direct grouped hour list", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
 
   assert(source.includes("async function showDentalAllSlotsForDate"));
+  assert(source.includes("_single_period_hour_list"));
+  assert(source.includes("_grouped_hour_list"));
   assert(
-    source.includes("if (!morningSlots.length || !afternoonSlots.length)"),
+    source.includes("Estos horarios están disponibles 🦷"),
   );
-  assert(
-    source.includes("debugNote: `${args.debugNote}_single_period_hour_list`"),
-  );
-  assert(
-    source.includes("estos son los horarios disponibles 🦷"),
-  );
-  assert(source.includes("buttonText,"));
-  assert(source.includes('"Horas disponibles"'));
+  assert(source.includes('buttonText = "Ver horarios disponibles"'));
+  assert(source.includes('"Ver horarios disponibles"'));
 });
 
 Deno.test("DentalConnect date buttons hide Hoy when today has no future slots", async () => {
@@ -9911,7 +10019,7 @@ Deno.test("DentalConnect same-date text keeps selected date instead of parsing a
     "isDentalKeepSelectedDateText(text)",
   );
   const dateParserAfterCheck = source.indexOf(
-    "parseDentalDateFromText(inboundText, nowLocal)",
+    "parseDentalDateFromTextWithMetadata(",
     keepSameDateCheck,
   );
   assert(
@@ -9955,7 +10063,7 @@ Deno.test("DentalConnect hour and alternative lists keep rows time-only", async 
   );
   assert(
     source.includes(
-      'interactiveList: dentalPeriodSlotsList(offeredSlots, body, "Más horas")',
+      "interactiveList: dentalPeriodSlotsList(offeredSlots, body)",
     ),
   );
   assert(!source.includes("Doctor disponible · Limpieza dental"));
@@ -10256,13 +10364,13 @@ Deno.test("DentalConnect selected-service date time text preserves both date and
   assert(source.includes("parseDentalExplicitTimeFromText(inboundText)"));
   assert(
     source.includes(
-      "normalizedAction = `dental_date_time:${parsedDate}|${parsedTime}`",
+      "`dental_date_time:${parsedDate}|${parsedTime}`",
     ),
   );
   assert(source.includes('normalizedAction.startsWith("dental_date_time:")'));
   assert(
     source.includes(
-      'const explicitDateTime = normalizedAction.startsWith("dental_date_time:")',
+      'normalizedAction.startsWith("dental_date_time_explicit_year:")',
     ),
   );
   assert(source.includes("const selectedDate = explicitDateTime"));
@@ -10290,7 +10398,6 @@ Deno.test("DentalConnect final demo confirmation and success include real patien
     "supabase/functions/run-replies/domain/actionExecutor.ts",
   );
 
-  assert(indexSource.includes("Nombre: *${patientName}*"));
   assert(indexSource.includes("👤 Nombre: *${patientName}*"));
   assert(indexSource.includes("patient_name: safeStr("));
   assert(
