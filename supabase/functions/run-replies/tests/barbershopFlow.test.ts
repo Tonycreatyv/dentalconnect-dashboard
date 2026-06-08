@@ -10081,43 +10081,40 @@ Deno.test("BarberLine service-selected date list has numbered fallback only outs
   );
 });
 
-Deno.test("WhatsApp inbound lead routing uses existing lead organization before DEFAULT_ORG", async () => {
+Deno.test("WhatsApp inbound routing resolves organization before scoped lead lookup", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/meta-webhook/index.ts",
   );
 
   assert(source.includes("function normalizeChannelUserId"));
-  assert(source.includes("async function findExistingLeadByChannelUser"));
+  assert(source.includes("async function resolveOrganizationForInbound"));
+  assert(source.includes("async function findWhatsAppLeadRoutingDiagnostics"));
   assert(source.includes('channel === "whatsapp"'));
-  assert(source.includes('organizationSource = "existing_whatsapp_lead"'));
-  assert(
-    source.includes('organizationSource = "existing_whatsapp_lead_recheck"'),
-  );
-  assert(
-    source.includes("organization_id = String(existingLead.organization_id)"),
-  );
   assert(
     source.includes('defaultOrgUsed = resolvedOrg.source === "default_org"'),
   );
-  assert(source.includes("recheckExistingWhatsAppLead"));
+  assert(!source.includes('organizationSource = "existing_whatsapp_lead"'));
+  assert(!source.includes("recheckExistingWhatsAppLead"));
+  assert(
+    !source.includes("organization_id = String(existingLead.organization_id)"),
+  );
 });
 
-Deno.test("WhatsApp duplicate lead routing selects existing lead and logs duplicates", async () => {
+Deno.test("WhatsApp duplicate lead routing logs stale leads without selecting their org", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/meta-webhook/index.ts",
   );
 
   assert(source.includes("chooseLeadForInbound"));
-  assert(source.includes("duplicate_lead_detected"));
+  assert(source.includes("stale_whatsapp_leads_detected"));
   assert(source.includes("status"));
   assert(source.includes("handoff_to_human"));
   assert(source.includes("safeString(a?.organization_id) === defaultOrg"));
-  assert(
-    source.includes('String(row?.status ?? "").toLowerCase() === "active"'),
-  );
+  assert(source.includes('String(a?.status ?? "").toLowerCase() === "active"'));
   assert(source.includes("!isArchivedChannelUserId(row?.channel_user_id)"));
   assert(source.includes("updated_at"));
-  assert(source.includes("candidate_leads"));
+  assert(source.includes("stale_leads"));
+  assert(source.includes("selectedOrganizationId"));
   assert(
     !source.includes(
       '.eq("organization_id", organization_id)\n        .eq("channel", channel)\n        .eq("channel_user_id", senderId)\n        .maybeSingle();\n      if (selErr) throw selErr;\n\n      const nextState',
@@ -10140,6 +10137,100 @@ Deno.test("WhatsApp inbound lead routing logs selected lead and fallback/default
   assert(source.includes("used_default_org: defaultOrgUsed"));
   assert(source.includes("duplicate_lead_detected: duplicateLeadCount > 1"));
   assert(source.includes("fallback_default_org_used: defaultOrgUsed"));
+});
+
+Deno.test("WhatsApp demo contact routing maps shared phone contacts to demo orgs", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/meta-webhook/index.ts",
+  );
+
+  assert(source.includes("BUILT_IN_DEMO_CONTACT_ROUTES"));
+  assert(source.includes('"17812961757": "barber-demo"'));
+  assert(source.includes('"50433899824": "clinic-demo"'));
+  assert(source.includes('"50493312928": "barber-demo-wimaeil"'));
+  assert(source.includes("DEMO_SHARED_WHATSAPP_PHONE_NUMBER_ID"));
+  assert(source.includes("DEMO_WHATSAPP_PHONE_NUMBER_ID"));
+  assert(source.includes("DEMO_SHARED_PHONE_NUMBER_ID"));
+  assert(source.includes("DEMO_CONTACT_ROUTES"));
+  assert(source.includes('source = "demo_contact_route"'));
+});
+
+Deno.test("WhatsApp demo contact routing wins before existing lead fallback", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/meta-webhook/index.ts",
+  );
+
+  assert(
+    source.includes("const resolvedOrg = await resolveOrganizationForInbound"),
+  );
+  assert(
+    source.includes(
+      "const leadDiagnostics = await findWhatsAppLeadRoutingDiagnostics",
+    ),
+  );
+  assert(source.includes('if (resolvedOrg.source === "demo_contact_route")'));
+  assert(!source.includes('const existingLeadMatch = channel === "whatsapp"'));
+  assert(
+    !source.includes(
+      'organizationSource === "default_org" && !existingLead?.id',
+    ),
+  );
+});
+
+Deno.test("WhatsApp org routing logs canonical source names", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/meta-webhook/index.ts",
+  );
+
+  assert(source.includes("organization_source: organizationSource"));
+  assert(source.includes("organization_source: resolvedOrg.source"));
+  assert(source.includes('source = "org_settings"'));
+  assert(
+    source.includes('defaultOrgUsed = resolvedOrg.source === "default_org"'),
+  );
+  assert(!source.includes('source = "organization_settings_integration"'));
+});
+
+Deno.test("WhatsApp phone routing requires active bot-enabled org_settings candidates", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/meta-webhook/index.ts",
+  );
+
+  assert(source.includes('.eq("whatsapp_phone_number_id", phoneNumberId)'));
+  assert(source.includes("normalizeBooleanFlag(row?.whatsapp_enabled)"));
+  assert(source.includes("normalizeBooleanFlag(row?.bot_enabled)"));
+  assert(source.includes('.order("updated_at", { ascending: false })'));
+  assert(source.includes("whatsapp_org_routing_ambiguous"));
+});
+
+Deno.test("WhatsApp active phone org routing is not overridden by stale existing lead", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/meta-webhook/index.ts",
+  );
+
+  assert(source.includes('} else if (resolvedOrg.source === "org_settings")'));
+  assert(source.includes("organization_id = resolvedOrg.organizationId"));
+  assert(source.includes("existing_lead_found_under_selected_org"));
+  assert(source.includes("stale_lead_count"));
+  assert(
+    !source.includes("organization_id = String(recheck.lead.organization_id)"),
+  );
+});
+
+Deno.test("WhatsApp inbound org routing logs candidate orgs and prompt key", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/meta-webhook/index.ts",
+  );
+
+  assert(source.includes("candidate_orgs: resolvedOrg.routingCandidates"));
+  assert(source.includes("selected_business_type: orgBusinessType"));
+  assert(source.includes("selected_prompt_key: promptKeyForBusinessType"));
+  assert(source.includes("inbound_phone_number_id: phoneNumberId"));
+  assert(
+    source.includes(
+      'return businessType === "barbershop" ? "barbershop_v1" : "dental_v1"',
+    ),
+  );
 });
 
 Deno.test("DentalConnect final demo hours formatter groups identical weekdays", async () => {
