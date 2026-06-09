@@ -1183,12 +1183,12 @@ function dentalDateSelectionList(
 ): WhatsAppInteractiveListSpec | undefined {
   if (!dates.length) return undefined;
   return {
-    body: "Escogé el día que querés revisar 🦷",
-    buttonText: "Ver días disponibles",
+    body: "¿Qué día te queda mejor? 🦷",
+    buttonText: "Ver días",
     sections: [
       {
         title: "Días disponibles",
-        rows: dates.slice(0, 7).map((date) => ({
+        rows: dates.slice(0, 10).map((date) => ({
           id: `select_date:${date.date}`,
           title: date.label.slice(0, 24),
           description: "Disponible",
@@ -1482,9 +1482,9 @@ async function buildDentalDateOptions(args: {
     : {};
   const maxBookingDaysAhead = Math.max(
     1,
-    Math.min(60, Number(bookingRules.max_booking_days_ahead ?? 14) || 14),
+    Math.min(14, Number(bookingRules.max_booking_days_ahead ?? 14) || 14),
   );
-  const limit = Math.max(1, Math.min(7, Number(args.limit ?? 7) || 7));
+  const limit = Math.max(1, Math.min(10, Number(args.limit ?? 10) || 10));
   const days: Array<{ date: string; label: string; offset: number }> = [];
   for (
     let offset = 0;
@@ -1509,16 +1509,32 @@ async function buildDentalDateOptions(args: {
       max_options: 1,
     });
     if (slots.length === 0) continue;
-    const weekday = d.toLocaleDateString("es-HN", { weekday: "long" })
-      .toLowerCase();
-    const label = offset === 0
-      ? `Hoy ${weekday}`
-      : offset === 1
-      ? `Mañana ${weekday}`
-      : formatRequestedDayLabel(date);
-    days.push({ date, label, offset });
+    days.push({
+      date,
+      label: formatDentalAvailableDayLabel(date, offset),
+      offset,
+    });
   }
   return days;
+}
+
+function formatDentalAvailableDayLabel(
+  dateIso: string,
+  offset: number,
+): string {
+  const d = new Date(`${dateIso}T12:00:00`);
+  if (Number.isNaN(d.valueOf())) return formatRequestedDayLabel(dateIso);
+  const weekday = d.toLocaleDateString("es-HN", { weekday: "short" })
+    .replace(".", "")
+    .toLowerCase();
+  const month = d.toLocaleDateString("es-HN", { month: "short" })
+    .replace(".", "")
+    .toLowerCase();
+  const day = d.getDate();
+  if (offset === 0) return `Hoy, ${weekday} ${day} ${month}`;
+  if (offset === 1) return `Mañana, ${weekday} ${day} ${month}`;
+  const prefix = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  return `${prefix} ${day} ${month}`;
 }
 
 async function buildDentalDateOptionsInRange(args: {
@@ -1844,9 +1860,9 @@ function dentalAlternativeSlotsList(
 ): WhatsAppInteractiveListSpec | undefined {
   if (slots.length <= 3) return undefined;
   return {
-    title: "Horarios disponibles",
+    title: "Horarios",
     body,
-    buttonText: "Ver horarios disponibles",
+    buttonText: "Ver horarios",
     sections: [
       {
         title: "Próximos horarios",
@@ -1998,10 +2014,9 @@ function formatDentalPeriodSelectorBody(
   dateIso: string,
   timezone = DEFAULT_TIMEZONE,
 ): string {
-  const label = dateIso === formatLocalDateForAction(nowInTimezone(timezone))
-    ? "hoy"
-    : formatRequestedDayLabel(dateIso);
-  return `Para *${label}*, ¿qué horario preferís? 🦷`;
+  void dateIso;
+  void timezone;
+  return "Perfecto 🦷 ¿Qué horario preferís?";
 }
 
 function getDentalSlotMinute(time: string): number {
@@ -2047,9 +2062,10 @@ function parseDentalCurrentTimeSelectionFromText(input: string): string {
 function dentalPeriodSlotsList(
   slots: Array<Record<string, unknown>>,
   body: string,
-  buttonText = "Ver horarios disponibles",
+  buttonText = "Ver horarios",
+  period?: "morning" | "afternoon",
 ): WhatsAppInteractiveListSpec | undefined {
-  if (slots.length <= 3) return undefined;
+  if (!slots.length) return undefined;
   const providerNames = slots
     .map((slot) =>
       formatDentalProviderDisplayName(
@@ -2077,20 +2093,32 @@ function dentalPeriodSlotsList(
     periodSlots.slice(0, 10).map((slot) => ({
       id: `select_slot:${safeStr(slot.date, "")}|${safeStr(slot.time, "")}|${
         safeStr(slot.provider_id, "")
-      }`,
+      }`.slice(0, 200),
       title: toRowTitle(slot),
     }));
-  const morningRows = toRows(filterDentalSlotsByPeriod(slots, "morning"));
-  const afternoonRows = toRows(filterDentalSlotsByPeriod(slots, "afternoon"));
-  const sections = [
-    morningRows.length ? { title: "Por la mañana", rows: morningRows } : null,
-    afternoonRows.length
-      ? { title: "Por la tarde", rows: afternoonRows }
-      : null,
-  ].filter(Boolean) as WhatsAppInteractiveListSpec["sections"];
+  const sections = period
+    ? [{
+      title: period === "morning" ? "Por la mañana" : "Por la tarde",
+      rows: toRows(slots),
+    }]
+    : (() => {
+      const morningRows = toRows(filterDentalSlotsByPeriod(slots, "morning"));
+      const remaining = Math.max(0, 10 - morningRows.length);
+      const afternoonRows = toRows(
+        filterDentalSlotsByPeriod(slots, "afternoon").slice(0, remaining),
+      );
+      return [
+        morningRows.length
+          ? { title: "Por la mañana", rows: morningRows }
+          : null,
+        afternoonRows.length
+          ? { title: "Por la tarde", rows: afternoonRows }
+          : null,
+      ].filter(Boolean) as WhatsAppInteractiveListSpec["sections"];
+    })();
   if (!sections.length) return undefined;
   return {
-    title: "Horarios disponibles",
+    title: "Horarios",
     body,
     buttonText,
     sections,
@@ -2275,6 +2303,114 @@ function buildDentalPeriodPending(args: {
   };
 }
 
+async function showDentalAvailableDaysForService(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  clinicSettings: Record<string, unknown>;
+  collected: Record<string, unknown>;
+  service: DentalGuidedService;
+  providerPreference?: "any" | "specific";
+  providerId?: string | null;
+  providerName?: string | null;
+  debugNote: string;
+  reply?: string;
+}): Promise<GenerateReplyResult> {
+  const providerPreference = args.providerPreference ?? "any";
+  const days = await buildDentalDateOptions({
+    supabase: args.supabase,
+    organizationId: args.organizationId,
+    clinicSettings: args.clinicSettings,
+    service: args.service,
+    providerId: providerPreference === "specific"
+      ? args.providerId ?? null
+      : null,
+    providerPreference,
+    limit: 10,
+  });
+  const pending = ((args.collected as any)?.pending_booking ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const bufferAfterMin = getDentalBufferAfterMin(
+    args.service.name,
+    args.clinicSettings,
+  );
+  const collected = {
+    ...args.collected,
+    activeBookingFlow: true,
+    lastBookingStep: "select_day",
+    expected_step: "day_selection",
+    current_service_key: args.service.id,
+    current_service_name: args.service.name,
+    service: args.service.name,
+    provider_preference: providerPreference,
+    preferred_provider_id: providerPreference === "specific"
+      ? args.providerId ?? ""
+      : "",
+    preferred_provider_name: providerPreference === "specific"
+      ? args.providerName ?? ""
+      : "",
+    pending_booking: {
+      ...pending,
+      service: args.service.name,
+      service_key: args.service.id,
+      service_name: args.service.name,
+      brand_name: getDentalBrandName(args.clinicSettings, null),
+      provider_id: providerPreference === "specific"
+        ? args.providerId ?? ""
+        : "",
+      provider_name: providerPreference === "specific"
+        ? args.providerName ?? ""
+        : "",
+      provider_preference: providerPreference,
+      duration_min: args.service.duration_min,
+      buffer_after_min: bufferAfterMin,
+      effective_duration_min: args.service.duration_min + bufferAfterMin,
+    },
+    last_offered_dates: days.map((day) => ({
+      date: day.date,
+      label: day.label,
+      source: day.offset === 0
+        ? "today"
+        : day.offset === 1
+        ? "tomorrow"
+        : "dental_available_day",
+      service_key: args.service.id,
+    })),
+    last_offered_slots: null,
+    available_slots_morning: null,
+    available_slots_afternoon: null,
+  };
+  if (!days.length) {
+    return {
+      reply:
+        "No veo horarios disponibles en los próximos días. Te puedo pasar con recepción para ayudarte.",
+      statePatch: {
+        stage: "BOOKING",
+        nextExpected: "date_selection",
+        collected,
+      },
+      leadPatch: {},
+      debugNote: `${args.debugNote}_no_available_days`,
+      interactiveButtons: [
+        { id: "talk_to_human", title: "Hablar con recepción" },
+      ],
+    };
+  }
+  return {
+    reply: args.reply ?? "¿Qué día te queda mejor? 🦷",
+    statePatch: {
+      stage: "BOOKING",
+      nextExpected: "date_selection",
+      collected,
+    },
+    leadPatch: {},
+    debugNote: args.debugNote,
+    interactiveButtons: [],
+    interactiveList: dentalDateSelectionList(days),
+  };
+}
+
 async function showDentalPeriodSelector(args: {
   supabase: SupabaseClientType;
   organizationId: string;
@@ -2326,41 +2462,20 @@ async function showDentalPeriodSelector(args: {
   const isToday =
     args.selectedDate === formatLocalDateForAction(nowInTimezone(timezone));
   if (!morningSlots.length && !afternoonSlots.length) {
-    return {
-      reply: isToday
-        ? "Ya no tengo horarios disponibles para hoy 🦷\n\n¿Querés revisar mañana u otra fecha?"
-        : `No tengo horarios disponibles para *${
-          formatRequestedDayLabel(args.selectedDate)
-        }* 🦷\n\n¿Querés revisar otra fecha?`,
-      statePatch: {
-        stage: "BOOKING",
-        nextExpected: "booking_date_preference",
-        collected: {
-          ...args.collected,
-          activeBookingFlow: true,
-          lastBookingStep: "select_day",
-          expected_step: "day_selection",
-          current_service_key: args.service.id,
-          current_service_name: args.service.name,
-          current_date: args.selectedDate,
-          preferred_date: args.selectedDate,
-          pending_booking: buildDentalPeriodPending(args),
-        },
-      },
-      leadPatch: {},
+    return await showDentalAvailableDaysForService({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      clinicSettings: args.clinicSettings,
+      collected: args.collected,
+      service: args.service,
+      providerPreference: args.providerPreference,
+      providerId: args.providerId,
+      providerName: args.providerName,
       debugNote: isToday
         ? "dental_guided_today_no_future_slots"
         : `${args.debugNote}_no_slots`,
-      interactiveButtons: isToday
-        ? [
-          { id: "booking_date_pref:tomorrow", title: "Mañana" },
-          { id: "booking_date_pref:week", title: "Otra fecha" },
-        ]
-        : [
-          { id: "booking_date_pref:week", title: "Otra fecha" },
-          { id: "talk_to_human", title: "Hablar con recepción" },
-        ],
-    };
+      reply: "Ese día se acaba de llenar. ¿Querés escoger otro día?",
+    });
   }
   return await showDentalAllSlotsForDate({
     supabase: args.supabase,
@@ -2429,61 +2544,39 @@ async function showDentalAllSlotsForDate(args: {
   if (!offeredSlots.length) {
     const isToday =
       args.selectedDate === formatLocalDateForAction(nowInTimezone(timezone));
-    return {
-      reply: isToday
-        ? "Ya no tengo horarios disponibles para hoy 🦷\n\n¿Querés revisar mañana u otra fecha?"
-        : `No tengo horarios disponibles para *${
-          formatRequestedDayLabel(args.selectedDate)
-        }* 🦷\n\n¿Querés revisar otra fecha?`,
-      statePatch: {
-        stage: "BOOKING",
-        nextExpected: "booking_date_preference",
-        collected: {
-          ...args.collected,
-          activeBookingFlow: true,
-          lastBookingStep: "select_day",
-          expected_step: "day_selection",
-          current_service_key: args.service.id,
-          current_service_name: args.service.name,
-          current_date: args.selectedDate,
-          preferred_date: args.selectedDate,
-          pending_booking: buildDentalPeriodPending(args),
-        },
-      },
-      leadPatch: {},
+    return await showDentalAvailableDaysForService({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      clinicSettings: args.clinicSettings,
+      collected: args.collected,
+      service: args.service,
+      providerPreference: args.providerPreference,
+      providerId: args.providerId,
+      providerName: args.providerName,
       debugNote: isToday
         ? "dental_current_date_today_no_future_slots"
         : `${args.debugNote}_no_slots`,
-      interactiveButtons: isToday
-        ? [
-          { id: "booking_date_pref:tomorrow", title: "Mañana" },
-          { id: "booking_date_pref:week", title: "Otra fecha" },
-        ]
-        : [
-          { id: "booking_date_pref:week", title: "Otra fecha" },
-          { id: "talk_to_human", title: "Hablar con recepción" },
-        ],
-    };
+      reply: "Ese día se acaba de llenar. ¿Querés escoger otro día?",
+    });
   }
-  const body = offeredSlots.length > 3
-    ? formatDentalAvailabilityListBody(
-      offeredSlots,
-      getDentalBrandName(args.clinicSettings, null),
-    )
-    : `Estos horarios están disponibles 🦷\n\n${
-      offeredSlots.map((slot) => `• ${formatHourLabel(safeStr(slot.time, ""))}`)
-        .join("\n")
-    }\n\nEscogé una hora para continuar.`;
+  const morningOfferedSlots = filterDentalSlotsByPeriod(
+    offeredSlots,
+    "morning",
+  );
+  const afternoonOfferedSlots = filterDentalSlotsByPeriod(
+    offeredSlots,
+    "afternoon",
+  );
   return {
-    reply: body,
+    reply: formatDentalPeriodSelectorBody(args.selectedDate, timezone),
     statePatch: {
       stage: "BOOKING",
-      nextExpected: "availability_slot_selection",
+      nextExpected: "time_period_selection",
       collected: {
         ...args.collected,
         activeBookingFlow: true,
-        lastBookingStep: "select_time",
-        expected_step: "slot_selection",
+        lastBookingStep: "select_time_period",
+        expected_step: "time_period_selection",
         current_service_key: args.service.id,
         current_service_name: args.service.name,
         current_date: args.selectedDate,
@@ -2496,23 +2589,17 @@ async function showDentalAllSlotsForDate(args: {
           ? args.providerName ?? ""
           : "",
         pending_booking: buildDentalPeriodPending(args),
-        last_offered_slots: offeredSlots,
+        last_offered_slots: null,
+        available_slots_morning: morningOfferedSlots,
+        available_slots_afternoon: afternoonOfferedSlots,
       },
     },
     leadPatch: {},
     debugNote: args.debugNote,
-    interactiveButtons: offeredSlots.length <= 3
-      ? offeredSlots.map((slot) => ({
-        id: `select_slot:${safeStr(slot.date, "")}|${safeStr(slot.time, "")}|${
-          safeStr(slot.provider_id, "")
-        }`,
-        title: formatHourLabel(safeStr(slot.time, "")).slice(0, 20),
-      }))
-      : [],
-    interactiveList: dentalPeriodSlotsList(
-      offeredSlots,
-      body,
-    ),
+    interactiveButtons: dentalPeriodButtons({
+      hasMorning: morningOfferedSlots.length > 0,
+      hasAfternoon: afternoonOfferedSlots.length > 0,
+    }),
   };
 }
 
@@ -2543,24 +2630,44 @@ async function showDentalSlotsForPeriod(args: {
       debugNote: `${args.debugNote}_past_date_rejected`,
     });
   }
-  const slots = await getAvailableSlotsForDay({
-    supabase: args.supabase,
-    organization_id: args.organizationId,
-    business_type: "dental",
-    service_id: args.service.id,
-    service_name: args.service.name,
-    provider_id: args.providerPreference === "specific"
-      ? args.providerId ?? null
-      : null,
-    provider_preference: args.providerPreference,
-    date: args.selectedDate,
-    timezone,
-    max_options: 20,
-  });
-  const periodSlots = filterDentalSlotsByPeriod(
-    slots as Array<Record<string, unknown>>,
-    args.period,
-  );
+  const cachedMorningSlots = Array.isArray(
+      (args.collected as any)?.available_slots_morning,
+    )
+    ? ((args.collected as any).available_slots_morning as Array<
+      Record<string, unknown>
+    >)
+    : [];
+  const cachedAfternoonSlots = Array.isArray(
+      (args.collected as any)?.available_slots_afternoon,
+    )
+    ? ((args.collected as any).available_slots_afternoon as Array<
+      Record<string, unknown>
+    >)
+    : [];
+  const hasCachedSlots = cachedMorningSlots.length > 0 ||
+    cachedAfternoonSlots.length > 0;
+  const slots = hasCachedSlots
+    ? [...cachedMorningSlots, ...cachedAfternoonSlots]
+    : await getAvailableSlotsForDay({
+      supabase: args.supabase,
+      organization_id: args.organizationId,
+      business_type: "dental",
+      service_id: args.service.id,
+      service_name: args.service.name,
+      provider_id: args.providerPreference === "specific"
+        ? args.providerId ?? null
+        : null,
+      provider_preference: args.providerPreference,
+      date: args.selectedDate,
+      timezone,
+      max_options: 20,
+    });
+  const periodSlots = hasCachedSlots
+    ? (args.period === "morning" ? cachedMorningSlots : cachedAfternoonSlots)
+    : filterDentalSlotsByPeriod(
+      slots as Array<Record<string, unknown>>,
+      args.period,
+    );
   const oppositePeriod = args.period === "morning" ? "afternoon" : "morning";
   const oppositeSlots = filterDentalSlotsByPeriod(
     slots as Array<Record<string, unknown>>,
@@ -2574,20 +2681,13 @@ async function showDentalSlotsForPeriod(args: {
     : "Por la mañana";
 
   if (!periodSlots.length) {
-    const body = oppositeSlots.length
-      ? `No tengo horarios ${periodLabel} para *${
-        formatRequestedDayLabel(args.selectedDate)
-      }*, pero puedo mostrarte opciones ${
-        args.period === "morning" ? "por la tarde" : "por la mañana"
-      }.`
-      : `No tengo horarios ${periodLabel} para *${
-        formatRequestedDayLabel(args.selectedDate)
-      }*.`;
+    const body =
+      `No tengo horarios disponibles ${periodLabel} para ese día. ¿Querés ver otro horario?`;
     return {
       reply: body,
       statePatch: {
         stage: "BOOKING",
-        nextExpected: "dental_time_period",
+        nextExpected: "time_period_selection",
         collected: {
           ...args.collected,
           activeBookingFlow: true,
@@ -2598,6 +2698,32 @@ async function showDentalSlotsForPeriod(args: {
           current_date: args.selectedDate,
           preferred_date: args.selectedDate,
           pending_booking: buildDentalPeriodPending(args),
+          available_slots_morning: hasCachedSlots
+            ? cachedMorningSlots
+            : filterDentalSlotsByPeriod(
+              slots as Array<Record<string, unknown>>,
+              "morning",
+            ).map((slot) =>
+              toDentalOfferedSlot(
+                slot,
+                args.service,
+                "dental_guided_period_recovery",
+                args.clinicSettings,
+              )
+            ),
+          available_slots_afternoon: hasCachedSlots
+            ? cachedAfternoonSlots
+            : filterDentalSlotsByPeriod(
+              slots as Array<Record<string, unknown>>,
+              "afternoon",
+            ).map((slot) =>
+              toDentalOfferedSlot(
+                slot,
+                args.service,
+                "dental_guided_period_recovery",
+                args.clinicSettings,
+              )
+            ),
         },
       },
       leadPatch: {},
@@ -2610,7 +2736,6 @@ async function showDentalSlotsForPeriod(args: {
           }]
           : []),
         { id: "booking_date_pref:week", title: "Otra fecha" },
-        { id: "talk_to_human", title: "Hablar con recepción" },
       ].slice(0, 3),
     };
   }
@@ -2625,18 +2750,16 @@ async function showDentalSlotsForPeriod(args: {
       args.clinicSettings,
     )
   );
-  const body = offeredSlots.length > 3
-    ? formatDentalAvailabilityListBody(
-      offeredSlots,
-      getDentalBrandName(args.clinicSettings, null),
-    )
-    : args.period === "morning"
-    ? `Horarios por la mañana para *${
-      formatRequestedDayLabel(args.selectedDate)
-    }* 🦷`
-    : `Horarios por la tarde para *${
-      formatRequestedDayLabel(args.selectedDate)
-    }* 🦷`;
+  const visibleSlots = offeredSlots.slice(0, 10);
+  const body = `${
+    args.period === "morning"
+      ? "Horarios por la mañana"
+      : "Horarios por la tarde"
+  } 🦷\nEscogé una hora para continuar.${
+    offeredSlots.length > 10
+      ? "\n\nTe muestro los primeros horarios disponibles."
+      : ""
+  }`;
   return {
     reply: body,
     statePatch: {
@@ -2659,20 +2782,30 @@ async function showDentalSlotsForPeriod(args: {
           ? args.providerName ?? ""
           : "",
         pending_booking: buildDentalPeriodPending(args),
-        last_offered_slots: offeredSlots,
+        last_offered_slots: visibleSlots,
+        available_slots_morning: hasCachedSlots
+          ? cachedMorningSlots
+          : filterDentalSlotsByPeriod(
+            slots as Array<Record<string, unknown>>,
+            "morning",
+          ),
+        available_slots_afternoon: hasCachedSlots
+          ? cachedAfternoonSlots
+          : filterDentalSlotsByPeriod(
+            slots as Array<Record<string, unknown>>,
+            "afternoon",
+          ),
       },
     },
     leadPatch: {},
     debugNote: args.debugNote,
-    interactiveButtons: offeredSlots.length <= 3
-      ? offeredSlots.map((slot) => ({
-        id: `select_slot:${safeStr(slot.date, "")}|${safeStr(slot.time, "")}|${
-          safeStr(slot.provider_id, "")
-        }`,
-        title: formatHourLabel(safeStr(slot.time, "")).slice(0, 20),
-      }))
-      : [],
-    interactiveList: dentalPeriodSlotsList(offeredSlots, body),
+    interactiveButtons: [],
+    interactiveList: dentalPeriodSlotsList(
+      visibleSlots,
+      body,
+      "Ver horarios",
+      args.period,
+    ),
   };
 }
 
@@ -3138,31 +3271,18 @@ async function handleDentalDirectBookingRequest(args: {
   };
 
   if (!requestedDate) {
-    return {
-      reply: "¿Qué día te queda mejor?",
-      statePatch: {
-        stage: "BOOKING",
-        nextExpected: "booking_date_preference",
-        collected: {
-          ...args.collected,
-          activeBookingFlow: true,
-          lastBookingStep: "select_day",
-          expected_step: "day_selection",
-          current_service_key: requestedService.id,
-          current_service_name: requestedService.name,
-          service: requestedService.name,
-          pending_booking: basePending,
-        },
+    return await showDentalAvailableDaysForService({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      clinicSettings: args.clinicSettings,
+      collected: {
+        ...args.collected,
+        pending_booking: basePending,
       },
-      leadPatch: {},
+      service: requestedService,
+      providerPreference: "any",
       debugNote: "dental_direct_booking_missing_date",
-      interactiveButtons: await dentalDatePreferenceButtons({
-        supabase: args.supabase,
-        organizationId: args.organizationId,
-        clinicSettings: args.clinicSettings,
-        service: requestedService,
-      }),
-    };
+    });
   }
 
   const provider = args.providers.length <= 1 ? args.providers[0] : null;
@@ -3188,32 +3308,23 @@ async function handleDentalDirectBookingRequest(args: {
         debugNote: "dental_direct_booking_date_only_period_selector",
       });
     }
-    return {
-      reply: "¿Tenés doctor preferido?",
-      statePatch: {
-        stage: "BOOKING",
-        nextExpected: "provider_selection",
-        collected: {
-          ...args.collected,
-          activeBookingFlow: true,
-          lastBookingStep: "select_provider",
-          expected_step: "provider_selection",
-          current_service_key: requestedService.id,
-          current_service_name: requestedService.name,
-          current_date: requestedDate,
-          preferred_date: requestedDate,
-          date_year_explicit: requestedDateResult.yearExplicit || undefined,
-          pending_booking: {
-            ...basePending,
-            appointment_date: requestedDate,
-          },
+    return await showDentalPeriodSelector({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      collected: {
+        ...args.collected,
+        date_year_explicit: requestedDateResult.yearExplicit || undefined,
+        pending_booking: {
+          ...basePending,
+          appointment_date: requestedDate,
         },
       },
-      leadPatch: {},
-      debugNote: "dental_direct_booking_provider_prompt",
-      interactiveButtons: dentalProviderButtons(args.providers),
-      interactiveList: dentalProviderSelectionList(args.providers),
-    };
+      service: requestedService,
+      selectedDate: requestedDate,
+      providerPreference: "any",
+      clinicSettings: args.clinicSettings,
+      debugNote: "dental_direct_booking_date_only_period_selector",
+    });
   }
 
   const slots = await getAvailableSlotsForDay({
@@ -3440,7 +3551,9 @@ async function handleDentalGuidedRuntimeTurn(args: {
           provider.preference === "any" ? "any" : provider.id
         }`;
       }
-    } else if (expected === "dental_time_period") {
+    } else if (
+      expected === "dental_time_period" || expected === "time_period_selection"
+    ) {
       if (isDentalChangeHourText(text) || isDentalKeepSelectedDateText(text)) {
         normalizedAction = "dental_show_current_date_hours";
       } else {
@@ -3858,30 +3971,15 @@ async function handleDentalGuidedRuntimeTurn(args: {
       };
     }
     if (!selectedDate) {
-      return {
-        reply: "¿Qué día te queda mejor?",
-        statePatch: {
-          stage: "BOOKING",
-          nextExpected: "booking_date_preference",
-          collected: {
-            ...collected,
-            activeBookingFlow: true,
-            current_service_key: service.id,
-            current_service_name: service.name,
-            lastBookingStep: "select_day",
-            expected_step: "day_selection",
-          },
-        },
-        leadPatch: {},
+      return await showDentalAvailableDaysForService({
+        supabase,
+        organizationId,
+        clinicSettings,
+        collected,
+        service,
+        providerPreference: "any",
         debugNote: "dental_current_date_hours_missing_date",
-        interactiveButtons: await dentalDatePreferenceButtons({
-          supabase,
-          organizationId,
-          clinicSettings,
-          service,
-          providerPreference: "any",
-        }),
-      };
+      });
     }
     const providerPreference = safeStr(
         (collected as any).provider_preference,
@@ -4106,7 +4204,7 @@ async function handleDentalGuidedRuntimeTurn(args: {
         ? dentalAlternativeSlotButtons(offeredSlots)
         : [{ id: "booking_date_pref:week", title: "Otra fecha" }],
       interactiveList: alternatives.length
-        ? dentalPeriodSlotsList(offeredSlots, body, "Horas disponibles")
+        ? dentalPeriodSlotsList(offeredSlots, body)
         : undefined,
     };
   }
@@ -4632,7 +4730,7 @@ async function handleDentalGuidedRuntimeTurn(args: {
     if (expected === "reschedule_date_preference") {
       return {
         reply:
-          "Escribime la fecha que preferís, por ejemplo: mañana, viernes o 5 de junio.",
+          "Escribime la fecha que preferís, por ejemplo: mañana, viernes o lunes.",
         statePatch: {
           stage: "BOOKING",
           active_flow: "reschedule",
@@ -5026,31 +5124,18 @@ async function handleDentalGuidedRuntimeTurn(args: {
       });
     }
     if (service) {
-      return {
-        reply: "¿Qué día te queda mejor?",
-        statePatch: {
-          stage: "BOOKING",
-          nextExpected: "booking_date_preference",
-          collected: {
-            ...collected,
-            activeBookingFlow: true,
-            lastBookingStep: "select_day",
-            expected_step: "day_selection",
-            current_service_key: service.id,
-            current_service_name: service.name,
-            service: service.name,
-            pending_booking: pending,
-          },
+      return await showDentalAvailableDaysForService({
+        supabase,
+        organizationId,
+        clinicSettings,
+        collected: {
+          ...collected,
+          pending_booking: pending,
         },
-        leadPatch: {},
+        service,
+        providerPreference: "any",
         debugNote: "dental_cancel_recovery_date_prompt",
-        interactiveButtons: await dentalDatePreferenceButtons({
-          supabase,
-          organizationId,
-          clinicSettings,
-          service,
-        }),
-      };
+      });
     }
     const list = dentalServiceSelectionList(services);
     return {
@@ -5379,44 +5464,15 @@ async function handleDentalGuidedRuntimeTurn(args: {
         });
       }
     }
-    return {
-      reply: "¿Qué día te queda mejor?",
-      statePatch: {
-        stage: "BOOKING",
-        nextExpected: "booking_date_preference",
-        collected: {
-          ...collected,
-          activeBookingFlow: true,
-          lastBookingStep: "select_day",
-          expected_step: "day_selection",
-          current_service_key: selectedService.id,
-          current_service_name: selectedService.name,
-          service: selectedService.name,
-          pending_booking: {
-            ...pending,
-            service: selectedService.name,
-            service_key: selectedService.id,
-            service_name: selectedService.name,
-            brand_name: brandName,
-            duration_min: selectedService.duration_min,
-            buffer_after_min: getDentalBufferAfterMin(
-              selectedService.name,
-              clinicSettings,
-            ),
-            effective_duration_min: selectedService.duration_min +
-              getDentalBufferAfterMin(selectedService.name, clinicSettings),
-          },
-        },
-      },
-      leadPatch: {},
+    return await showDentalAvailableDaysForService({
+      supabase,
+      organizationId,
+      clinicSettings,
+      collected,
+      service: selectedService,
+      providerPreference: "any",
       debugNote: "dental_guided_date_prompt",
-      interactiveButtons: await dentalDatePreferenceButtons({
-        supabase,
-        organizationId,
-        clinicSettings,
-        service: selectedService,
-      }),
-    };
+    });
   }
 
   if (
@@ -5581,7 +5637,7 @@ async function handleDentalGuidedRuntimeTurn(args: {
     if (normalizedAction === "booking_date_pref:week") {
       return {
         reply:
-          "Escribime la fecha que preferís, por ejemplo: mañana, viernes o 5 de junio.",
+          "Escribime la fecha que preferís, por ejemplo: mañana, viernes o lunes.",
         statePatch: {
           stage: "BOOKING",
           nextExpected: "date_selection",
@@ -5703,48 +5759,16 @@ async function handleDentalGuidedRuntimeTurn(args: {
         debugNote: "dental_guided_slots_single_provider",
       });
     }
-    return {
-      reply: "¿Tenés doctor preferido?",
-      statePatch: {
-        stage: "BOOKING",
-        nextExpected: "provider_selection",
-        collected: {
-          ...collected,
-          activeBookingFlow: true,
-          lastBookingStep: "select_provider",
-          expected_step: "provider_selection",
-          current_service_key: service.id,
-          current_service_name: service.name,
-          current_date: selectedDate,
-          preferred_date: selectedDate,
-          date_year_explicit: selectedDateYearExplicit || undefined,
-          pending_booking: {
-            ...pending,
-            service: service.name,
-            service_key: service.id,
-            service_name: service.name,
-            appointment_date: selectedDate,
-            date_year_explicit: selectedDateYearExplicit || undefined,
-            duration_min: service.duration_min,
-            buffer_after_min: getDentalBufferAfterMin(
-              service.name,
-              clinicSettings,
-            ),
-            effective_duration_min: service.duration_min +
-              getDentalBufferAfterMin(service.name, clinicSettings),
-          },
-          last_offered_providers: providers.map((provider) => ({
-            id: provider.id,
-            name: provider.name,
-            active: provider.active,
-          })),
-        },
-      },
-      leadPatch: {},
-      debugNote: "dental_guided_provider_prompt",
-      interactiveButtons: dentalProviderButtons(providers),
-      interactiveList: dentalProviderSelectionList(providers),
-    };
+    return await showDentalPeriodSelector({
+      supabase,
+      organizationId,
+      collected: dateAwareCollected,
+      service,
+      selectedDate,
+      providerPreference: "any",
+      clinicSettings,
+      debugNote: "dental_guided_slots_any_provider",
+    });
   }
 
   if (normalizedAction.startsWith("select_provider:")) {

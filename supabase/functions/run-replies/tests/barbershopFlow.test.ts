@@ -8956,7 +8956,7 @@ Deno.test("BarberLine slot selection prefers grouped WhatsApp list for larger av
   assert(!composer.includes('"booking_more_hours"'));
   assert(source.includes("function formatBarbershopConfirmationSummary"));
   assert(source.includes("Barbero: *${provider}*"));
-  assert(!source.includes('buttonText: "Ver horarios"'));
+  assert(!composer.includes('buttonText: "Ver horarios"'));
 });
 
 Deno.test("BarberLine future appointment guard filters same-day past appointments", async () => {
@@ -9149,19 +9149,15 @@ Deno.test("DentalConnect guided date provider slot and confirmation UX exists", 
 
   assert(
     source.includes(
-      "Escribime la fecha que preferís, por ejemplo: mañana, viernes o 5 de junio.",
+      "Escribime la fecha que preferís, por ejemplo: mañana, viernes o lunes.",
     ),
   );
-  assert(source.includes('{ id: todayAction, title: "Hoy" }'));
-  assert(
-    source.includes('{ id: "booking_date_pref:tomorrow", title: "Mañana" }'),
-  );
-  assert(
-    source.includes('{ id: "booking_date_pref:week", title: "Otra fecha" }'),
-  );
-  assert(source.includes("¿Tenés doctor preferido?"));
-  assert(source.includes("formatDentalAvailabilityListBody"));
-  assert(source.includes("Estos son algunos horarios disponibles 🦷"));
+  assert(source.includes("showDentalAvailableDaysForService"));
+  assert(source.includes('buttonText: "Ver días"'));
+  assert(source.includes('title: "Días disponibles"'));
+  assert(source.includes("select_date:${date.date}"));
+  assert(!source.includes("por ejemplo: mañana, viernes o 5 de junio."));
+  assert(source.includes("Perfecto 🦷 ¿Qué horario preferís?"));
   assert(source.includes('"Por la mañana"'));
   assert(source.includes('"Por la tarde"'));
   assert(source.includes("¿A nombre de quién dejamos la cita?"));
@@ -9174,7 +9170,7 @@ Deno.test("DentalConnect guided date provider slot and confirmation UX exists", 
   assert(!source.includes("👩‍⚕️ Doctor: ${provider}"));
 });
 
-Deno.test("DentalConnect uses morning afternoon period lists after date selection", async () => {
+Deno.test("DentalConnect uses period buttons after date selection and capped period lists", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
@@ -9187,71 +9183,72 @@ Deno.test("DentalConnect uses morning afternoon period lists after date selectio
   assert(source.includes("function showDentalSlotsForPeriod"));
   assert(source.includes("function dentalPeriodSlotsList"));
   assert(source.includes("filterDentalSlotsByPeriod"));
+  assert(source.includes('nextExpected: "time_period_selection"'));
   assert(source.includes('nextExpected: "availability_slot_selection"'));
+  assert(source.includes("available_slots_morning"));
+  assert(source.includes("available_slots_afternoon"));
+  assert(source.includes("last_offered_slots: visibleSlots"));
   assert(source.includes("Por la mañana"));
   assert(source.includes("Por la tarde"));
   assert(source.includes("_grouped_hour_list"));
   assert(source.includes('"dental_guided_today_no_future_slots"'));
-  assert(source.includes("Ya no tengo horarios disponibles para hoy 🦷"));
-  assert(source.includes('id: "booking_date_pref:tomorrow", title: "Mañana"'));
-  assert(source.includes('buttonText = "Ver horarios disponibles"'));
+  assert(
+    source.includes("Ese día se acaba de llenar. ¿Querés escoger otro día?"),
+  );
+  assert(source.includes("showDentalAvailableDaysForService({"));
+  assert(source.includes('buttonText = "Ver horarios"'));
+  assert(source.includes('title: "Horarios"'));
+  assert(source.includes("slots.slice(0, 10)"));
   assert(!source.includes('description: "Horario disponible"'));
   assert(!source.includes("Doctor disponible · Limpieza dental"));
 });
 
-Deno.test("DentalConnect date picker hides Hoy when today has no future slots", async () => {
+Deno.test("DentalConnect service selection sends available days list instead of static date buttons", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
 
-  assert(source.includes("async function dentalDatePreferenceButtons"));
-  assert(source.includes("const todaySlots = await getAvailableSlotsForDay"));
-  assert(source.includes("if (todaySlots.length > 0)"));
-  assert(source.includes('{ id: todayAction, title: "Hoy" }'));
-  assert(
-    source.includes("const tomorrowSlots = await getAvailableSlotsForDay"),
+  const helper = source.slice(
+    source.indexOf("async function showDentalAvailableDaysForService"),
+    source.indexOf("async function showDentalPeriodSelector"),
   );
-  assert(source.includes("if (tomorrowSlots.length > 0)"));
-  assert(source.includes('{ id: otherDateAction, title: "Otra fecha" }'));
-  assert(
-    !source.includes(
-      'return withKeepExisting([\\n    { id: otherDateAction, title: "Otra fecha" },\\n    { id: "talk_to_human", title: "Hablar con recepción" }',
-    ),
-  );
-  assert(
-    source.includes("interactiveButtons: await dentalDatePreferenceButtons({"),
-  );
+  assert(helper.includes('reply: args.reply ?? "¿Qué día te queda mejor? 🦷"'));
+  assert(helper.includes("interactiveButtons: []"));
+  assert(helper.includes("interactiveList: dentalDateSelectionList(days)"));
+  assert(helper.includes("last_offered_dates: days.map"));
+  assert(helper.includes('nextExpected: "date_selection"'));
+  assert(helper.includes("available_slots_morning: null"));
+  assert(helper.includes("available_slots_afternoon: null"));
+  assert(!helper.includes('title: "Hoy"'));
+  assert(!helper.includes('title: "Mañana"'));
+  assert(!helper.includes('title: "Otra fecha"'));
 });
 
-Deno.test("DentalConnect manual hoy no-slots recovery excludes reception from primary recovery", async () => {
+Deno.test("DentalConnect available days list excludes unavailable days and stays within WhatsApp limits", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
-  const branch = source.slice(source.indexOf("debugNote: isToday"));
-  const buttonBranch = branch.slice(
-    branch.indexOf("interactiveButtons: isToday"),
+  const builder = source.slice(
+    source.indexOf("async function buildDentalDateOptions"),
+    source.indexOf("async function buildDentalDateOptionsInRange"),
   );
-  const todayButtons = buttonBranch.slice(
-    buttonBranch.indexOf("? ["),
-    buttonBranch.indexOf("]\n        :"),
+  const list = source.slice(
+    source.indexOf("function dentalDateSelectionList"),
+    source.indexOf("async function dentalDatePreferenceButtons"),
   );
 
-  assert(branch.includes('"dental_guided_today_no_future_slots"'));
-  assert(
-    todayButtons.includes(
-      '{ id: "booking_date_pref:tomorrow", title: "Mañana" }',
-    ),
-  );
-  assert(
-    todayButtons.includes(
-      '{ id: "booking_date_pref:week", title: "Otra fecha" }',
-    ),
-  );
-  assert(
-    !todayButtons.includes(
-      '{ id: "talk_to_human", title: "Hablar con recepción" }',
-    ),
-  );
+  assert(builder.includes("max_options: 1"));
+  assert(builder.includes("if (slots.length === 0) continue;"));
+  assert(builder.includes("Math.min(14"));
+  assert(builder.includes("Math.min(10"));
+  assert(builder.includes("formatDentalAvailableDayLabel(date, offset)"));
+  assert(list.includes('body: "¿Qué día te queda mejor? 🦷"'));
+  assert(list.includes('buttonText: "Ver días"'));
+  assert(list.includes('title: "Días disponibles"'));
+  assert(list.includes("dates.slice(0, 10)"));
+  assert(list.includes("id: `select_date:${date.date}`"));
+  assert(!list.includes("booking_date_pref:today"));
+  assert(!list.includes("booking_date_pref:tomorrow"));
 });
 
 Deno.test("DentalConnect period slot lists only include the selected valid period", async () => {
@@ -9586,7 +9583,7 @@ Deno.test("DentalConnect date-only text stays date-only and does not become time
   );
 
   assert(source.includes("function parseDentalDateFromText"));
-  assert(source.includes("5 de junio"));
+  assert(source.includes("const monthMap: Record<string, number>"));
   assert(source.includes("function parseDentalExplicitTimeFromText"));
   assert(
     source.includes(
@@ -9602,6 +9599,7 @@ Deno.test("DentalConnect date-only text stays date-only and does not become time
     ),
   );
   assert(source.includes("// Dental clinics are daytime businesses"));
+  assert(!source.includes("por ejemplo: mañana, viernes o 5 de junio."));
 });
 
 Deno.test("DentalConnect rejects past typed month-day dates instead of rolling to next year", async () => {
@@ -9614,7 +9612,7 @@ Deno.test("DentalConnect rejects past typed month-day dates instead of rolling t
     parserStart,
     source.indexOf("function shouldUseBookingFlowCta", parserStart),
   );
-  assert(source.includes("5 de junio"));
+  assert(source.includes("const monthMap: Record<string, number>"));
   assert(parserBody.includes("nowLocal.getFullYear()"));
   assert(
     parserBody.includes(
@@ -9678,8 +9676,8 @@ Deno.test("DentalConnect availability list uses clear morning afternoon labels a
     ),
   );
 
-  assert(listBody.includes('title: "Horarios disponibles"'));
-  assert(listBody.includes('buttonText = "Ver horarios disponibles"'));
+  assert(listBody.includes('title: "Horarios"'));
+  assert(listBody.includes('buttonText = "Ver horarios"'));
   assert(listBody.includes('title: "Por la mañana"'));
   assert(listBody.includes('title: "Por la tarde"'));
   assert(
@@ -9878,7 +9876,7 @@ Deno.test("DentalConnect reschedule hour change skips intermediate options", asy
   assert(source.includes('normalizedAction = "dental_reschedule_show_hours"'));
 });
 
-Deno.test("DentalConnect date selection opens direct grouped hour list", async () => {
+Deno.test("DentalConnect date selection opens period selector instead of grouped hour list", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
@@ -9886,11 +9884,12 @@ Deno.test("DentalConnect date selection opens direct grouped hour list", async (
   assert(source.includes("async function showDentalAllSlotsForDate"));
   assert(source.includes("_single_period_hour_list"));
   assert(source.includes("_grouped_hour_list"));
-  assert(
-    source.includes("Estos horarios están disponibles 🦷"),
-  );
-  assert(source.includes('buttonText = "Ver horarios disponibles"'));
-  assert(source.includes('"Ver horarios disponibles"'));
+  assert(source.includes("Perfecto 🦷 ¿Qué horario preferís?"));
+  assert(source.includes("dentalPeriodButtons({"));
+  assert(source.includes("hasMorning: morningOfferedSlots.length > 0"));
+  assert(source.includes("hasAfternoon: afternoonOfferedSlots.length > 0"));
+  assert(!source.includes('buttonText = "Ver horarios disponibles"'));
+  assert(!source.includes('"Ver horarios disponibles"'));
 });
 
 Deno.test("DentalConnect date buttons hide Hoy when today has no future slots", async () => {
@@ -10044,11 +10043,7 @@ Deno.test("DentalConnect direct typed time uses current selected date and clean 
   );
   assert(source.includes('debugNote: "dental_current_date_time_confirmation"'));
   assert(source.includes('"dental_current_date_time_alternatives"'));
-  assert(
-    source.includes(
-      'dentalPeriodSlotsList(offeredSlots, body, "Horas disponibles")',
-    ),
-  );
+  assert(source.includes("dentalPeriodSlotsList(offeredSlots, body)"));
 });
 
 Deno.test("DentalConnect hour and alternative lists keep rows time-only", async () => {
@@ -10064,7 +10059,7 @@ Deno.test("DentalConnect hour and alternative lists keep rows time-only", async 
   assert(
     source.includes(
       "interactiveList: dentalPeriodSlotsList(offeredSlots, body)",
-    ),
+    ) || source.includes("dentalPeriodSlotsList(visibleSlots,"),
   );
   assert(!source.includes("Doctor disponible · Limpieza dental"));
   assert(!source.includes("Equipo DICAN ·"));
