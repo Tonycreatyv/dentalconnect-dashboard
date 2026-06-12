@@ -10385,7 +10385,7 @@ Deno.test("DentalConnect final demo patient name gate rejects demo names and use
   assert(source.includes("patient_name: patientName"));
 });
 
-Deno.test("DentalConnect final demo confirmation and success include real patient name", async () => {
+Deno.test("DentalConnect final demo confirmation stores real patient name and uses clean success copy", async () => {
   const indexSource = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
@@ -10393,7 +10393,13 @@ Deno.test("DentalConnect final demo confirmation and success include real patien
     "supabase/functions/run-replies/domain/actionExecutor.ts",
   );
 
-  assert(indexSource.includes("👤 Nombre: *${patientName}*"));
+  assert(indexSource.includes("✅ Cita confirmada 🦷"));
+  assert(indexSource.includes("Te esperamos en ${brandName}:"));
+  assert(
+    indexSource.includes(
+      "Si necesitás cambiarla o cancelarla, podés escribirnos por aquí.",
+    ),
+  );
   assert(indexSource.includes("patient_name: safeStr("));
   assert(
     actionSource.includes(

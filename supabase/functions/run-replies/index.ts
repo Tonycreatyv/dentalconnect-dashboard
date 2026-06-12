@@ -1424,7 +1424,30 @@ function formatDentalConfirmationSummary(
     safeStr(pendingBooking.appointment_date, ""),
   );
   const time = formatHourLabel(safeStr(pendingBooking.appointment_time, ""));
-  return `Perfecto 🦷 Tengo ${service} para ${date} a las ${time}. ¿Confirmamos la cita?`;
+  const duration = formatDentalDurationLabel(
+    pendingBooking.duration_min ?? pendingBooking.effective_duration_min,
+  );
+  return `Listo 🦷 Te puedo reservar este espacio:
+
+🦷 Servicio: ${service}
+📅 Fecha: ${date}
+🕚 Hora: ${time}
+⏱️ Duración: ${duration}
+
+¿Confirmamos?`;
+}
+
+function formatDentalDurationLabel(minutesRaw: unknown): string {
+  const minutes = Number(minutesRaw);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return "duración por confirmar";
+  }
+  if (minutes === 60) return "1 hora";
+  if (minutes < 60) return `${Math.round(minutes)} minutos`;
+  const hours = Math.floor(minutes / 60);
+  const remaining = Math.round(minutes % 60);
+  if (!remaining) return hours === 1 ? "1 hora" : `${hours} horas`;
+  return `${hours} hora${hours === 1 ? "" : "s"} ${remaining} minutos`;
 }
 
 function formatDentalBookingSuccess(booking: BookingActionResult): string {
@@ -1446,21 +1469,15 @@ function formatDentalBookingSuccess(booking: BookingActionResult): string {
     (appt as any).brand_name,
     safeStr(((appt as any).metadata ?? {})?.brand_name, "la clínica"),
   );
-  const provider = formatDentalProviderDisplayName(
-    safeStr((appt as any).provider_name, "Doctor disponible"),
-    brandName,
-  );
-  const patientName = toDisplayPersonName(
-    safeStr((appt as any).patient_name, ""),
-  );
-  const nameLine = isReliableDentalPatientName(patientName)
-    ? `\n👤 Nombre: *${patientName}*`
-    : "";
-  return `✅ Cita confirmada\n\n🦷 Servicio: *${service}*\n📅 Fecha: *${
-    formatRequestedDayLabel(date)
-  }*\n⏰ Hora: *${
-    formatHourLabel(time)
-  }*\n🧑‍⚕️ Doctor: *${provider}*${nameLine}\n\nTe esperamos en *${brandName}*.`;
+  return `✅ Cita confirmada 🦷
+
+Te esperamos en ${brandName}:
+
+🦷 Servicio: ${service}
+📅 Fecha: ${formatRequestedDayLabel(date)}
+🕚 Hora: ${formatHourLabel(time)}
+
+Si necesitás cambiarla o cancelarla, podés escribirnos por aquí.`;
 }
 
 async function buildDentalDateOptions(args: {
