@@ -7299,6 +7299,74 @@ function toBarbershopOfferedSlot(
   };
 }
 
+function getBarbershopSlotPeriod(
+  slot: Record<string, unknown>,
+): "morning" | "afternoon" {
+  const minutes = parseTimeToMinutes(safeStr(slot.time, ""), 12 * 60);
+  return minutes < 12 * 60 ? "morning" : "afternoon";
+}
+
+function splitBarbershopSlotsByPeriod(
+  slots: Array<Record<string, unknown>>,
+): {
+  morning: Array<Record<string, unknown>>;
+  afternoon: Array<Record<string, unknown>>;
+} {
+  return {
+    morning: slots.filter((slot) => getBarbershopSlotPeriod(slot) === "morning"),
+    afternoon: slots.filter((slot) => getBarbershopSlotPeriod(slot) === "afternoon"),
+  };
+}
+
+function buildBarbershopPeriodPreferenceButtons(): InteractiveButton[] {
+  return [
+    { id: "booking_time_block:morning", title: "Por la mañana" },
+    { id: "booking_time_block:afternoon", title: "Por la tarde" },
+    { id: "booking_date_pref:week", title: "Otro día" },
+  ];
+}
+
+function buildShortBarbershopPeriodSlotsList(args: {
+  slots: Array<Record<string, unknown>>;
+  body: string;
+  serviceName: string;
+  providerPreference: "any" | "specific";
+  period: "morning" | "afternoon";
+}): WhatsAppInteractiveListSpec {
+  const hasOverflow = args.slots.length > 6;
+  const visibleSlots = hasOverflow ? args.slots.slice(0, 5) : args.slots.slice(0, 6);
+  const rows = visibleSlots.map((slot) => {
+    const time = safeStr(slot.time, "");
+    const providerName = safeStr(slot.provider_name, "Barbero");
+    return {
+      id: `select_time:${safeStr(slot.date, "")}|${time}|${safeStr(slot.provider_id, "")}`,
+      title: args.providerPreference === "specific"
+        ? formatHourLabel(time).slice(0, 24)
+        : `${formatHourLabel(time)} · ${providerName}`.slice(0, 24),
+      description: args.providerPreference === "specific"
+        ? args.serviceName.slice(0, 72)
+        : `${providerName} · ${args.serviceName}`.slice(0, 72),
+    };
+  });
+  if (hasOverflow) {
+    rows.push({
+      id: "booking_date_pref:week",
+      title: "Otro día",
+      description: "Ver más opciones disponibles",
+    });
+  }
+  return {
+    body: args.body,
+    buttonText: "Elegir hora",
+    sections: [
+      {
+        title: args.period === "morning" ? "Por la mañana" : "Por la tarde",
+        rows,
+      },
+    ],
+  };
+}
+
 function toBarbershopOfferedDate(
   date: string,
   label: string,
@@ -13832,6 +13900,146 @@ export async function generateReply(
         interactiveList: barbershopDateSelectionList(dateOptions, listBody),
       };
     };
+    const buildBarbershopPeriodAwareSlotsResult = (args: {
+      slots: Array<Record<string, unknown>>;
+      collected: Record<string, unknown>;
+      selectedDate: string;
+      selectedService: Record<string, unknown> | null;
+      serviceId: string;
+      serviceName: string;
+      providerPreference: "any" | "specific";
+      providerId?: string;
+      providerName?: string;
+      source: "date" | "today" | "tomorrow" | "more_hours" | "exact_alternative";
+      debugNote: string;
+    }): GenerateReplyResult => {
+      const periods = splitBarbershopSlotsByPeriod(args.slots);
+      const hasMorning = periods.morning.length > 0;
+      const hasAfternoon = periods.afternoon.length > 0;
+      const serviceKey = toServiceActionKey(
+        args.selectedService ?? { id: args.serviceId, name: args.serviceName },
+      );
+      const baseCollected = {
+        ...args.collected,
+        activeBookingFlow: true,
+        current_service_key: serviceKey,
+        current_service_name: args.serviceName,
+        current_date: args.selectedDate,
+        preferred_date: args.selectedDate,
+        provider_preference: args.providerPreference,
+        preferred_provider_id: args.providerPreference === "specific"
+          ? safeStr(args.providerId, "")
+          : "",
+        preferred_barber: args.providerPreference === "specific"
+          ? safeStr(args.providerName, "")
+          : "",
+        available_slots_morning: periods.morning,
+        available_slots_afternoon: periods.afternoon,
+        last_availability_context: {
+          date: args.selectedDate,
+          service: args.serviceName,
+          provider_preference: args.providerPreference,
+          provider_id: args.providerPreference === "specific"
+            ? safeStr(args.providerId, "")
+            : null,
+          slots: args.slots,
+        },
+        pending_booking: {
+          ...(((args.collected as any)?.pending_booking ?? {}) as Record<string, unknown>),
+          service_key: serviceKey,
+          service_name: args.serviceName,
+          appointment_date: args.selectedDate,
+          provider_id: args.providerPreference === "specific"
+            ? safeStr(args.providerId, "")
+            : "",
+          provider_name: args.providerPreference === "specific"
+            ? safeStr(args.providerName, "")
+            : "",
+          provider_preference: args.providerPreference,
+        },
+      };
+
+      if (hasMorning && hasAfternoon) {
+        logEvent("barbershop_time_period_prompt_shown", {
+          organization_id: organizationId,
+          lead_id: leadId,
+          date: args.selectedDate,
+          morning_slots: periods.morning.length,
+          afternoon_slots: periods.afternoon.length,
+        });
+        return {
+          reply: "Perfecto 💈 ¿Qué horario preferís?",
+          statePatch: {
+            stage: "BOOKING",
+            nextExpected: "booking_time_period_selection",
+            collected: {
+              ...baseCollected,
+              lastBookingStep: "select_time_period",
+              expected_step: "time_period_selection",
+              last_offered_slots: [],
+            },
+          },
+          leadPatch: {},
+          debugNote: `${args.debugNote}_period_prompt`,
+          interactiveButtons: buildBarbershopPeriodPreferenceButtons(),
+        };
+      }
+
+      const period: "morning" | "afternoon" = hasMorning ? "morning" : "afternoon";
+      const periodSlots = hasMorning ? periods.morning : periods.afternoon;
+      const shownSlots = periodSlots.length > 6
+        ? periodSlots.slice(0, 5)
+        : periodSlots.slice(0, 6);
+      const offeredSlots = shownSlots.map((slot) =>
+        toBarbershopOfferedSlot(
+          slot,
+          args.selectedService,
+          args.serviceName,
+          args.source,
+        )
+      );
+      const periodLabel = formatTimeBlockLabel(period);
+      const body = `Estos horarios están disponibles en ${periodLabel} para ${
+        formatRequestedDayLabel(args.selectedDate)
+      }:\n\nEscogé una hora de la lista.`;
+      logEvent("barbershop_period_slot_list_shown", {
+        organization_id: organizationId,
+        lead_id: leadId,
+        date: args.selectedDate,
+        period,
+        rows_count: periodSlots.length > 6 ? 6 : shownSlots.length,
+        total_period_slots: periodSlots.length,
+      });
+      return {
+        reply: body,
+        statePatch: {
+          stage: "BOOKING",
+          nextExpected: "availability_slot_selection",
+          collected: {
+            ...baseCollected,
+            lastBookingStep: "select_time",
+            expected_step: "slot_selection",
+            availability_shown_offset: 0,
+            last_availability_context: {
+              ...(baseCollected.last_availability_context as Record<string, unknown>),
+              time_preference: period,
+              slots: periodSlots,
+            },
+            last_offered_slots: offeredSlots,
+          },
+        },
+        leadPatch: {},
+        debugNote: `${args.debugNote}_${period}_slot_list`,
+        interactiveButtons: [],
+        interactiveList: buildShortBarbershopPeriodSlotsList({
+          slots: periodSlots,
+          body,
+          serviceName: args.serviceName,
+          providerPreference: args.providerPreference,
+          period,
+        }),
+      };
+    };
     const buildProviderPreferencePrompt = async (
       collected: Record<string, unknown>,
       selectedDate: string,
@@ -13900,14 +14108,6 @@ export async function generateReply(
               normalizeTextForMatch(serviceName)
           ) ??
           null;
-        const bookingRules = ((clinicSettings as any)?.booking_rules &&
-            typeof (clinicSettings as any).booking_rules === "object")
-          ? ((clinicSettings as any).booking_rules as Record<string, unknown>)
-          : {};
-        const maxVisibleSlots = Math.max(
-          1,
-          Math.min(5, Number(bookingRules.max_visible_slots ?? 3) || 3),
-        );
         const slots = await getAvailableSlotsForDay({
           supabase,
           organization_id: organizationId,
@@ -13920,105 +14120,34 @@ export async function generateReply(
           timezone,
           max_options: 40,
         });
-        const shown = slots.slice(0, maxVisibleSlots);
-        const visibleForList = slots.length > 3 ? slots.slice(0, 10) : shown;
-        const useSlotList = slots.length > 3;
-        const lines = shown.map((slot) =>
-          `• ${formatHourLabel(safeStr(slot.time, ""))}`
-        ).join("\n");
-        const body = useSlotList
-          ? formatBarbershopAvailabilityListBody(
-            visibleForList as Array<Record<string, unknown>>,
-          )
-          : formatBarbershopSlotOptionsBody({
-            providerPreference: "specific",
-            providerName: soloProvider.name,
-            lines,
-            hasMore: false,
-          });
-        const offeredSlots = visibleForList.map((slot) =>
-          toBarbershopOfferedSlot(
-            slot as Record<string, unknown>,
-            selectedService,
-            serviceName,
-            "date",
-          )
-        );
         logEvent("barbershop_solo_provider_auto_assigned", {
           organization_id: organizationId,
           lead_id: leadId,
           provider_id: soloProvider.id,
           provider_name: soloProvider.name,
         });
-        logEvent("barbershop_state_contract_saved_slots", {
-          organization_id: organizationId,
-          lead_id: leadId,
-          source: "date",
-          slots_count: offeredSlots.length,
-        });
-        return {
-          reply: body,
-          statePatch: {
-            stage: "BOOKING",
-            nextExpected: "availability_slot_selection",
-            collected: {
-              ...collected,
-              activeBookingFlow: true,
-              lastBookingStep: "select_time",
-              expected_step: "slot_selection",
-              current_service_key: serviceId,
-              current_service_name: serviceName,
-              current_date: selectedDate,
-              preferred_date: selectedDate,
-              preferred_provider_id: soloProvider.id,
-              preferred_barber: soloProvider.name,
-              provider_preference: "specific",
-              last_availability_context: {
-                date: selectedDate,
-                service: serviceName,
-                provider_preference: "specific",
-                provider_id: soloProvider.id,
-                slots,
+        return buildBarbershopPeriodAwareSlotsResult({
+          slots: slots as Array<Record<string, unknown>>,
+          collected: {
+            ...collected,
+            last_offered_providers: [
+              {
+                id: soloProvider.id,
+                name: soloProvider.name,
+                source: "solo_provider_auto_assigned",
               },
-              last_offered_slots: offeredSlots,
-              last_offered_providers: [
-                {
-                  id: soloProvider.id,
-                  name: soloProvider.name,
-                  source: "solo_provider_auto_assigned",
-                },
-              ],
-              pending_booking: {
-                ...(((collected as any)?.pending_booking ?? {}) as Record<
-                  string,
-                  unknown
-                >),
-                service_key: serviceId,
-                service_name: serviceName,
-                appointment_date: selectedDate,
-                provider_id: soloProvider.id,
-                provider_name: soloProvider.name,
-                provider_preference: "specific",
-              },
-            },
+            ],
           },
-          leadPatch: {},
+          selectedDate,
+          selectedService,
+          serviceId,
+          serviceName,
+          providerPreference: "specific",
+          providerId: soloProvider.id,
+          providerName: soloProvider.name,
+          source: "date",
           debugNote: "booking_solo_provider_auto_assigned_slots_for_day",
-          interactiveButtons: useSlotList
-            ? []
-            : buildBarbershopAvailabilityButtons(
-              shown as Array<Record<string, unknown>>,
-              false,
-            ),
-          interactiveList: useSlotList
-            ? buildExpandedBarbershopTimeSlotsList({
-              slots: visibleForList as Array<Record<string, unknown>>,
-              body,
-              serviceName,
-              providerPreference: "specific",
-            })
-            : undefined,
-        };
+        });
       }
       const providersList = providerSelectionList(availableProviders);
       return {
@@ -14140,6 +14269,11 @@ export async function generateReply(
           normalizedAction = `select_provider:${
             provider.preference === "any" ? "any" : provider.id
           }`;
+        }
+      } else if (nextExpected === "booking_time_period_selection") {
+        const block = detectActiveBookingTimeBlockFollowup(inboundText);
+        if (block) {
+          normalizedAction = `booking_time_block:${block}`;
         }
       } else if (nextExpected === "availability_slot_selection") {
         normalizedAction = resolveGuidedSlotActionFromText(
@@ -15048,108 +15182,25 @@ export async function generateReply(
               ].slice(0, 3),
             };
           }
-          const visibleForList = slots.length > 3 ? slots.slice(0, 10) : shown;
-          const useSlotList = slots.length > 3;
-          const lines = providerPreference === "specific"
-            ? shown.map((slot) =>
-              `• ${formatHourLabel(safeStr(slot.time, ""))}`
-            ).join("\n")
-            : shown.map((slot) =>
-              `• ${formatHourLabel(safeStr(slot.time, ""))} · ${
-                safeStr(slot.provider_name, "Barbero")
-              }`
-            ).join("\n");
-          const body = useSlotList
-            ? formatBarbershopAvailabilityListBody(
-              visibleForList as Array<Record<string, unknown>>,
-            )
-            : formatBarbershopSlotOptionsBody({
-              providerPreference,
-              providerName: providerPreference === "specific"
-                ? selectedProvider.name
-                : undefined,
-              lines,
-              hasMore: false,
-            });
-          const offeredSlots = visibleForList.map((slot) =>
-            toBarbershopOfferedSlot(
-              slot as Record<string, unknown>,
-              selectedService,
-              resolvedServiceName,
-              "date",
-            )
-          );
-          logEvent("barbershop_state_contract_saved_slots", {
-            organization_id: organizationId,
-            lead_id: leadId,
+          return buildBarbershopPeriodAwareSlotsResult({
+            slots: slots as Array<Record<string, unknown>>,
+            collected,
+            selectedDate,
+            selectedService,
+            serviceId,
+            serviceName: resolvedServiceName,
+            providerPreference,
+            providerId: providerPreference === "specific"
+              ? selectedProvider.id
+              : "",
+            providerName: providerPreference === "specific"
+              ? selectedProvider.name
+              : "",
             source: "date",
-            slots_count: offeredSlots.length,
-          });
-          return {
-            reply: body,
-            statePatch: {
-              stage: "BOOKING",
-              nextExpected: "availability_slot_selection",
-              collected: {
-                ...collected,
-                activeBookingFlow: true,
-                lastBookingStep: "select_time",
-                current_service_key: serviceId,
-                current_service_name: resolvedServiceName,
-                current_date: selectedDate,
-                preferred_date: selectedDate,
-                preferred_provider_id: providerPreference === "specific"
-                  ? selectedProvider.id
-                  : "",
-                preferred_barber: providerPreference === "specific"
-                  ? selectedProvider.name
-                  : "",
-                provider_preference: providerPreference,
-                availability_shown_offset: 0,
-                last_availability_context: {
-                  date: selectedDate,
-                  service: resolvedServiceName,
-                  provider_preference: providerPreference,
-                  provider_id: providerPreference === "specific"
-                    ? selectedProvider.id
-                    : null,
-                  slots,
-                },
-                last_offered_slots: offeredSlots,
-                pending_booking: {
-                  ...pending,
-                  service_key: serviceId,
-                  service_name: resolvedServiceName,
-                  appointment_date: selectedDate,
-                  provider_id: providerPreference === "specific"
-                    ? selectedProvider.id
-                    : "",
-                  provider_name: providerPreference === "specific"
-                    ? selectedProvider.name
-                    : "",
-                  provider_preference: providerPreference,
-                },
-              },
-            },
-            leadPatch: {},
             debugNote: providerPreference === "specific"
               ? "booking_provider_specific_slots_for_day"
               : "booking_provider_any_slots_for_day",
-            interactiveButtons: useSlotList
-              ? []
-              : buildBarbershopAvailabilityButtons(
-                shown as Array<Record<string, unknown>>,
-                false,
-              ),
-            interactiveList: useSlotList
-              ? buildExpandedBarbershopTimeSlotsList({
-                slots: visibleForList as Array<Record<string, unknown>>,
-                body,
-                serviceName: resolvedServiceName,
-                providerPreference,
-              })
-              : undefined,
-          };
+          });
         }
         const { buttons, offeredDates } = await buildQuickDateOptions({
           serviceId,
@@ -15742,8 +15793,7 @@ export async function generateReply(
           ),
           max_options: maxVisibleSlots + 1,
         });
-        const shown = slots.slice(0, maxVisibleSlots);
-        if (!shown.length) {
+        if (!slots.length) {
           return {
             reply: `No tengo horarios para ${
               formatRequestedDayLabel(selectedDate)
@@ -15757,92 +15807,29 @@ export async function generateReply(
             interactiveButtons: barberlineMenuButtons,
           };
         }
-        const uniqueProviders = Array.from(
-          new Set(
-            shown.map((s) => safeStr(s.provider_name, "").trim()).filter(
-              Boolean,
-            ),
-          ),
-        );
-        const timeLines = uniqueProviders.length <= 1
-          ? shown.map((s) => `• ${formatHourLabel(s.time)}`).join("\n")
-          : shown.map((s) =>
-            `• ${formatHourLabel(s.time)} · ${s.provider_name}`
-          ).join("\n");
-        const hasMore = slots.length > shown.length;
-        const timeButtons = buildBarbershopAvailabilityButtons(
-          shown as Array<Record<string, unknown>>,
-          hasMore,
-        );
-        const listSlots = slots.length > 3 ? slots.slice(0, 10) : shown;
-        const body = hasMore
-          ? formatBarbershopAvailabilityListBody(
-            listSlots as Array<Record<string, unknown>>,
-          )
-          : formatBarbershopSlotOptionsBody({
-            providerPreference: uniqueProviders.length === 1
-              ? "specific"
-              : "any",
-            providerName: uniqueProviders[0],
-            lines: timeLines,
-            hasMore: false,
-          });
-        const offeredSlots = listSlots.map((slot) =>
-          toBarbershopOfferedSlot(
-            slot as Record<string, unknown>,
-            selectedService,
-            serviceName || safeStr(selectedService?.name, ""),
-            "date",
-          )
-        );
-        logEvent("barbershop_state_contract_saved_slots", {
-          organization_id: organizationId,
-          lead_id: leadId,
+        return buildBarbershopPeriodAwareSlotsResult({
+          slots: slots as Array<Record<string, unknown>>,
+          collected: ((leadState as any)?.collected ?? {}) as Record<
+            string,
+            unknown
+          >,
+          selectedDate,
+          selectedService,
+          serviceId,
+          serviceName: serviceName || safeStr(selectedService?.name, ""),
+          providerPreference,
+          providerId: providerPreference === "specific"
+            ? selectedProviderId
+            : "",
+          providerName: providerPreference === "specific"
+            ? safeStr(
+              ((leadState as any)?.collected as any)?.preferred_barber,
+              "",
+            )
+            : "",
           source: "date",
-          slots_count: offeredSlots.length,
-        });
-        return {
-          reply: body,
-          statePatch: {
-            stage: "BOOKING",
-            nextExpected: "availability_slot_selection",
-            collected: {
-              ...(((leadState as any)?.collected ?? {}) as Record<
-                string,
-                unknown
-              >),
-              preferred_date: selectedDate,
-              activeBookingFlow: true,
-              lastBookingStep: "select_time",
-              current_service_key: toServiceActionKey(
-                selectedService ?? { id: serviceKey, name: serviceName },
-              ),
-              current_service_name: serviceName ||
-                safeStr(selectedService?.name, ""),
-              current_date: selectedDate,
-              last_availability_context: {
-                date: selectedDate,
-                service: serviceName || safeStr(selectedService?.name, ""),
-                provider_preference: providerPreference,
-                slots,
-              },
-              last_offered_slots: offeredSlots,
-            },
-          },
-          leadPatch: {},
           debugNote: "booking_interactive_time_menu",
-          interactiveButtons: timeButtons,
-          interactiveList: hasMore
-            ? buildExpandedBarbershopTimeSlotsList({
-              slots: listSlots as Array<Record<string, unknown>>,
-              body,
-              serviceName: serviceName || safeStr(selectedService?.name, ""),
-              providerPreference: uniqueProviders.length === 1
-                ? "specific"
-                : "any",
-            })
-            : undefined,
-        };
+        });
       }
     }
     if (
@@ -16172,29 +16159,46 @@ export async function generateReply(
       if (block && selectedDate && (serviceName || selectedService)) {
         const resolvedServiceName = serviceName ||
           safeStr(selectedService?.name, "");
-        const blockSlots = await getAvailableSlotsForDay({
-          supabase,
-          organization_id: organizationId,
-          business_type: "barbershop",
-          service_id: safeStr(selectedService?.id, ""),
-          service_name: resolvedServiceName,
-          provider_preference: "any",
-          date: selectedDate,
-          time_preference: block,
-          timezone,
-          max_options: 40,
-        });
-        const shown = blockSlots.slice(0, 3);
+        const cachedPeriodSlots = block === "morning" &&
+            Array.isArray((collected as any).available_slots_morning)
+          ? ((collected as any).available_slots_morning as Array<Record<string, unknown>>)
+          : block === "afternoon" &&
+              Array.isArray((collected as any).available_slots_afternoon)
+          ? ((collected as any).available_slots_afternoon as Array<Record<string, unknown>>)
+          : [];
+        const providerPreference = safeStr(
+          (collected as any).provider_preference,
+          safeStr(pending.provider_preference, "any"),
+        ) === "specific"
+          ? "specific"
+          : "any";
+        const selectedProviderId = safeStr(
+          (collected as any).preferred_provider_id,
+          safeStr(pending.provider_id, ""),
+        );
+        const blockSlots = cachedPeriodSlots.length
+          ? cachedPeriodSlots
+          : await getAvailableSlotsForDay({
+            supabase,
+            organization_id: organizationId,
+            business_type: "barbershop",
+            service_id: safeStr(selectedService?.id, ""),
+            service_name: resolvedServiceName,
+            provider_id: providerPreference === "specific"
+              ? selectedProviderId
+              : null,
+            provider_preference: providerPreference,
+            date: selectedDate,
+            time_preference: block,
+            timezone,
+            max_options: 40,
+          });
         const blockLabel = formatTimeBlockLabel(block);
-        if (shown.length > 0) {
-          const lines = shown
-            .map((slot) =>
-              `${formatHourLabel(safeStr(slot.time, ""))} · ${
-                safeStr(slot.provider_name, "Barbero")
-              }`
-            )
-            .join("\n");
-          const offeredSlots = shown.map((slot) =>
+        if (blockSlots.length > 0) {
+          const shownSlots = blockSlots.length > 6
+            ? blockSlots.slice(0, 5)
+            : blockSlots.slice(0, 6);
+          const offeredSlots = shownSlots.map((slot) =>
             toBarbershopOfferedSlot(
               slot as Record<string, unknown>,
               selectedService,
@@ -16208,10 +16212,11 @@ export async function generateReply(
             source: block,
             slots_count: offeredSlots.length,
           });
+          const body = `Estos horarios están disponibles en ${blockLabel} para ${
+            formatRequestedDayLabel(selectedDate)
+          }:\n\nEscogé una hora de la lista.`;
           return {
-            reply: `Disponible ${
-              formatRequestedDayLabel(selectedDate).toLowerCase()
-            } en ${blockLabel}:\n\n${lines}\n\nTambién podés decirme otra hora.`,
+            reply: body,
             statePatch: {
               stage: "BOOKING",
               nextExpected: "availability_slot_selection",
@@ -16219,6 +16224,7 @@ export async function generateReply(
                 ...collected,
                 activeBookingFlow: true,
                 lastBookingStep: "select_time",
+                expected_step: "slot_selection",
                 current_service_key: toServiceActionKey(
                   selectedService ??
                     { id: serviceKey, name: resolvedServiceName },
@@ -16229,7 +16235,10 @@ export async function generateReply(
                 last_availability_context: {
                   date: selectedDate,
                   service: resolvedServiceName,
-                  provider_preference: "any",
+                  provider_preference: providerPreference,
+                  provider_id: providerPreference === "specific"
+                    ? selectedProviderId
+                    : null,
                   time_preference: block,
                   slots: blockSlots,
                 },
@@ -16238,10 +16247,14 @@ export async function generateReply(
             },
             leadPatch: {},
             debugNote: "booking_time_block_followup",
-            interactiveButtons: shown.map((slot) => ({
-              id: `select_time:${slot.date}|${slot.time}|${slot.provider_id}`,
-              title: formatHourLabel(slot.time).slice(0, 20),
-            })),
+            interactiveButtons: [],
+            interactiveList: buildShortBarbershopPeriodSlotsList({
+              slots: blockSlots,
+              body,
+              serviceName: resolvedServiceName,
+              providerPreference,
+              period: block,
+            }),
           };
         }
         logEvent("time_block_followup_no_slots", {
@@ -16256,44 +16269,39 @@ export async function generateReply(
           business_type: "barbershop",
           service_id: safeStr(selectedService?.id, ""),
           service_name: resolvedServiceName,
-          provider_preference: "any",
+          provider_id: providerPreference === "specific"
+            ? selectedProviderId
+            : null,
+          provider_preference: providerPreference,
           date: selectedDate,
           timezone,
           max_options: 40,
         });
-        const shownAlternatives = alternatives.slice(0, 3);
-        const altLines = shownAlternatives
-          .map((slot) =>
-            `${formatHourLabel(safeStr(slot.time, ""))} · ${
-              safeStr(slot.provider_name, "Barbero")
-            }`
-          )
-          .join("\n");
-        const offeredSlots = shownAlternatives.map((slot) =>
-          toBarbershopOfferedSlot(
-            slot as Record<string, unknown>,
-            selectedService,
-            resolvedServiceName,
-            "date",
-          )
+        const oppositeBlock = block === "morning" ? "afternoon" : "morning";
+        const oppositeHasSlots = alternatives.some((slot) =>
+          getBarbershopSlotPeriod(slot as Record<string, unknown>) === oppositeBlock
         );
         return {
-          reply: altLines
+          reply: oppositeHasSlots
             ? `No tengo espacios en ${blockLabel} para ${
               formatRequestedDayLabel(selectedDate).toLowerCase()
-            }.\n\nTengo estas opciones:\n${altLines}\n\n¿Te sirve una de esas?`
+            }.\n\n¿Querés ver ${
+              oppositeBlock === "morning" ? "la mañana" : "la tarde"
+            } u otro día?`
             : `No tengo espacios en ${blockLabel} para ${
               formatRequestedDayLabel(selectedDate).toLowerCase()
             }.\n\n¿Querés que busque otro día?`,
           statePatch: {
             stage: "BOOKING",
-            nextExpected: shownAlternatives.length > 0
-              ? "availability_slot_selection"
+            nextExpected: oppositeHasSlots
+              ? "booking_time_period_selection"
               : "booking_date_preference",
             collected: {
               ...collected,
               activeBookingFlow: true,
-              lastBookingStep: "select_time",
+              lastBookingStep: oppositeHasSlots
+                ? "select_time_period"
+                : "select_time",
               current_service_key: toServiceActionKey(
                 selectedService ??
                   { id: serviceKey, name: resolvedServiceName },
@@ -16301,15 +16309,22 @@ export async function generateReply(
               current_service_name: resolvedServiceName,
               current_date: selectedDate,
               preferred_date: selectedDate,
-              last_offered_slots: offeredSlots,
+              last_offered_slots: [],
             },
           },
           leadPatch: {},
           debugNote: "booking_time_block_followup_empty",
-          interactiveButtons: shownAlternatives.map((slot) => ({
-            id: `select_time:${slot.date}|${slot.time}|${slot.provider_id}`,
-            title: formatHourLabel(slot.time).slice(0, 20),
-          })),
+          interactiveButtons: oppositeHasSlots
+            ? [
+              {
+                id: `booking_time_block:${oppositeBlock}`,
+                title: oppositeBlock === "morning"
+                  ? "Por la mañana"
+                  : "Por la tarde",
+              },
+              { id: "booking_date_pref:week", title: "Otro día" },
+            ]
+            : [{ id: "booking_date_pref:week", title: "Otro día" }],
         };
       }
     }

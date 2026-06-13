@@ -8174,15 +8174,17 @@ Deno.test("Time-block follow-up: en la mañana is recognized", async () => {
   assert(source.includes("formatTimeBlockLabel(block)"));
 });
 
-Deno.test("Time-block follow-up: no afternoon slots offers same-day alternatives", async () => {
+Deno.test("Time-block follow-up: no afternoon slots offers period or day recovery", async () => {
   const source = await Deno.readTextFile(
     new URL("../index.ts", import.meta.url),
   );
   assert(source.includes("time_block_followup_no_slots"));
   assert(source.includes("No tengo espacios en ${blockLabel}"));
-  assert(source.includes("Tengo estas opciones"));
-  assert(source.includes("¿Te sirve una de esas?"));
-  assert(source.includes('lastBookingStep: "select_time"'));
+  assert(source.includes("oppositeHasSlots"));
+  assert(source.includes('nextExpected: oppositeHasSlots'));
+  assert(source.includes('id: `booking_time_block:${oppositeBlock}`'));
+  assert(source.includes('{ id: "booking_date_pref:week", title: "Otro día" }'));
+  assert(source.includes("lastBookingStep: oppositeHasSlots"));
 });
 
 Deno.test("Time-block follow-up: availability core uses configured time_blocks and fallback afternoon-to-close", async () => {
@@ -8977,6 +8979,29 @@ Deno.test("BarberLine guided slots use WhatsApp list rows and preserve provider 
   assert(source.includes("booking_more_hours_shown"));
 });
 
+Deno.test("BarberLine guided slots ask period before short WhatsApp hour list", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/run-replies/index.ts",
+  );
+
+  assert(source.includes("function buildBarbershopPeriodPreferenceButtons"));
+  assert(source.includes('{ id: "booking_time_block:morning", title: "Por la mañana" }'));
+  assert(source.includes('{ id: "booking_time_block:afternoon", title: "Por la tarde" }'));
+  assert(source.includes('{ id: "booking_date_pref:week", title: "Otro día" }'));
+  assert(source.includes("function splitBarbershopSlotsByPeriod"));
+  assert(source.includes("const buildBarbershopPeriodAwareSlotsResult"));
+  assert(source.includes('"Perfecto 💈 ¿Qué horario preferís?"'));
+  assert(source.includes('nextExpected: "booking_time_period_selection"'));
+  assert(source.includes('lastBookingStep: "select_time_period"'));
+  assert(source.includes("function buildShortBarbershopPeriodSlotsList"));
+  assert(source.includes("const visibleSlots = hasOverflow ? args.slots.slice(0, 5) : args.slots.slice(0, 6)"));
+  assert(source.includes('rows.push({\n      id: "booking_date_pref:week"'));
+  assert(source.includes('buttonText: "Elegir hora"'));
+  assert(source.includes("buildShortBarbershopPeriodSlotsList({"));
+  assert(source.includes("available_slots_morning"));
+  assert(source.includes("available_slots_afternoon"));
+});
+
 Deno.test("BarberLine guided text replies normalize by expected step", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
@@ -8986,10 +9011,13 @@ Deno.test("BarberLine guided text replies normalize by expected step", async () 
   assert(source.includes('nextExpected === "booking_date_preference"'));
   assert(source.includes('nextExpected === "date_selection"'));
   assert(source.includes('nextExpected === "provider_selection"'));
+  assert(source.includes('nextExpected === "booking_time_period_selection"'));
   assert(source.includes('nextExpected === "availability_slot_selection"'));
   assert(source.includes("resolveGuidedDateActionFromText("));
   assert(source.includes("offeredDates"));
   assert(source.includes("nowLocal"));
+  assert(source.includes("detectActiveBookingTimeBlockFollowup(inboundText)"));
+  assert(source.includes("normalizedAction = `booking_time_block:${block}`"));
   assert(source.includes("resolveGuidedSlotActionFromText("));
   assert(source.includes("offeredSlots"));
   assert(source.includes("true"));
@@ -9214,33 +9242,24 @@ Deno.test("BarberLine guided handoff and post-booking state remain explicit", as
   assert(source.includes("clearActiveBookingState"));
 });
 
-Deno.test("BarberLine slot selection prefers grouped WhatsApp list for larger availability", async () => {
+Deno.test("BarberLine slot selection uses period-gated short WhatsApp lists", async () => {
   const source = await Deno.readTextFile(
     "supabase/functions/run-replies/index.ts",
   );
-  const composer = await Deno.readTextFile(
-    "supabase/functions/run-replies/domain/barbershopResponseComposer.ts",
-  );
   assert(source.includes("function formatBarbershopSlotOptionsBody"));
-  assert(source.includes("formatBarbershopAvailabilityListBody"));
-  assert(source.includes("interactiveList: useSlotList"));
-  assert(source.includes("interactiveList: hasMore"));
-  assert(composer.includes('title: "Horarios disponibles"'));
-  assert(composer.includes('buttonText: "Ver horarios disponibles"'));
-  assert(composer.includes('"Por la mañana"'));
-  assert(composer.includes('"Por la tarde"'));
-  assert(composer.includes("hasMultipleProviders"));
-  assert(!composer.includes('"Mañana"'));
-  assert(!composer.includes('"Tarde"'));
-  assert(!composer.includes("Mañana:"));
-  assert(!composer.includes("Tarde:"));
-  assert(composer.includes("Escogé una hora para continuar."));
-  assert(!composer.includes('"booking_more_hours"'));
+  assert(source.includes("buildBarbershopPeriodAwareSlotsResult"));
+  assert(source.includes("buildShortBarbershopPeriodSlotsList"));
+  assert(source.includes("Perfecto 💈 ¿Qué horario preferís?"));
+  assert(source.includes('{ id: "booking_time_block:morning", title: "Por la mañana" }'));
+  assert(source.includes('{ id: "booking_time_block:afternoon", title: "Por la tarde" }'));
+  assert(source.includes('buttonText: "Elegir hora"'));
+  assert(source.includes("const visibleSlots = hasOverflow ? args.slots.slice(0, 5) : args.slots.slice(0, 6)"));
+  assert(source.includes("available_slots_morning"));
+  assert(source.includes("available_slots_afternoon"));
   assert(source.includes("function formatBarbershopConfirmationSummary"));
   assert(source.includes("Listo 💈 Te puedo reservar este espacio:"));
   assert(source.includes("💈 Barbero: ${provider}"));
   assert(source.includes("👤 Nombre: ${customerName}"));
-  assert(!composer.includes('buttonText: "Ver horarios"'));
 });
 
 Deno.test("BarberLine future appointment guard filters same-day past appointments", async () => {
