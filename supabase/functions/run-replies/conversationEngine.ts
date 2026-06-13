@@ -473,6 +473,23 @@ function getBarbershopServicesFromSettings(
     .filter((row) => row.name);
 }
 
+function getBarbershopProvidersFromSettings(
+  clinicSettings?: Record<string, unknown>,
+): Array<{ id: string; name: string }> {
+  const raw = Array.isArray((clinicSettings ?? {}).providers)
+    ? ((clinicSettings ?? {}).providers as Array<Record<string, unknown>>)
+    : (Array.isArray((clinicSettings ?? {}).barbers)
+      ? ((clinicSettings ?? {}).barbers as Array<Record<string, unknown>>)
+      : []);
+  return raw
+    .filter((row) => row?.active !== false && row?.is_active !== false)
+    .map((row) => ({
+      id: safeStr(row?.id, safeStr(row?.barber_id, safeStr(row?.name, ""))).trim(),
+      name: safeStr(row?.name, "").trim(),
+    }))
+    .filter((row) => row.id && row.name);
+}
+
 function findBarbershopFaqAnswer(
   inboundText: string,
   clinicSettings?: Record<string, unknown>,
@@ -1014,6 +1031,9 @@ function isBusinessHoursQuestionText(input: string): boolean {
   if (/\b(que horas tenes disponible|horarios disponibles|hay cupo|hay espacio|tenes espacio|tienes espacio)\b/.test(text)) {
     return false;
   }
+  if (/\b(que horarios tenes|que horarios tienes|que horas tenes|que horas tienes)\b/.test(text)) {
+    return false;
+  }
   return /\b(horario|horarios|horario de atencion|a que hora abren|a que hora cierran|cuando abren|cuando cierran|abren|cierran)\b/i
     .test(text);
 }
@@ -1177,6 +1197,98 @@ function getBarbershopBusinessHoursReply(
   return `Horario:\nLunes a viernes: ${openMon} – ${closeMon}\nSábado: ${openSat} – ${closeSat}\nDomingo: ${sunClosed ? "cerrado" : `${formatHourForReply(safeStr(sun.open, "09:00"))} – ${formatHourForReply(safeStr(sun.close, "17:00"))}`}\n\n¿Querés que revise espacios disponibles?`;
 }
 
+function getConfiguredHoursEntry(
+  hours: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const aliases: Record<string, string[]> = {
+    mon: ["mon", "monday", "lunes", "1"],
+    tue: ["tue", "tuesday", "martes", "2"],
+    wed: ["wed", "wednesday", "miercoles", "miércoles", "3"],
+    thu: ["thu", "thursday", "jueves", "4"],
+    fri: ["fri", "friday", "viernes", "5"],
+    sat: ["sat", "saturday", "sabado", "sábado", "6"],
+    sun: ["sun", "sunday", "domingo", "0", "7"],
+  };
+  for (const alias of aliases[key] ?? [key]) {
+    const entry = hours[alias];
+    if (entry && typeof entry === "object") return entry as Record<string, unknown>;
+  }
+  return null;
+}
+
+function formatBarbershopConfiguredHoursReply(
+  clinicSettings?: Record<string, unknown>,
+): string {
+  const brandName = getBarbershopCopyBrandName(clinicSettings);
+  const hours = (clinicSettings?.hours && typeof clinicSettings.hours === "object")
+    ? (clinicSettings.hours as Record<string, unknown>)
+    : {};
+  if (Object.keys(hours).length === 0) {
+    return `Por ahora no tengo los horarios exactos de ${brandName} configurados. Podés tocar "Hablar con alguien" para que te ayuden.`;
+  }
+  const dayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const dayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+  const rows = dayKeys.map((key, index) => {
+    const entry = getConfiguredHoursEntry(hours, key) ??
+      (index > 0 && index < 5 ? getConfiguredHoursEntry(hours, "mon") : null);
+    const open = safeStr(entry?.open ?? entry?.open_time, "");
+    const close = safeStr(entry?.close ?? entry?.close_time, "");
+    const closed = !entry || Boolean(entry.closed ?? entry.is_closed) || !open || !close;
+    return {
+      label: dayNames[index],
+      value: closed ? "cerrado" : `${formatHourForReply(open)} – ${formatHourForReply(close)}`,
+    };
+  });
+  const weekdays = rows.slice(0, 5);
+  const sameWeekdays = weekdays.every((row) => row.value === weekdays[0].value);
+  const lines = sameWeekdays
+    ? [
+      `Lunes a viernes: ${weekdays[0].value}`,
+      `Sábado: ${rows[5].value}`,
+      `Domingo: ${rows[6].value}`,
+    ]
+    : rows.map((row) => `${row.label}: ${row.value}`);
+  return `Horario:\n${brandName} atiende:\n\n${lines.join("\n")}`;
+}
+
+function formatBarbershopServicesPricesReply(
+  input: string,
+  clinicSettings?: Record<string, unknown>,
+): string {
+  const brandName = getBarbershopCopyBrandName(clinicSettings);
+  const services = getBarbershopServicesFromSettings(clinicSettings);
+  const priceShort = (price: unknown) => {
+    const num = Number(price);
+    return Number.isFinite(num) && num > 0 ? `L${Math.round(num)}` : "precio por confirmar";
+  };
+  if (services.length === 0) {
+    return `Por ahora no tengo servicios configurados para ${brandName}. Podés tocar "Hablar con alguien" para que te ayuden.`;
+  }
+  const specific = resolveBarbershopServiceFromSettings(input, clinicSettings);
+  const normalized = normalizeTextForIntent(input);
+  const asksSpecific = specific &&
+    /\b(corte|barba|limpieza|facial|cejas|servicio|cuanto|cuánto|precio|vale|cuesta)\b/.test(normalized) &&
+    !/\b(precios|servicios|que servicios tienen|lista de precios)\b/.test(normalized);
+  if (asksSpecific && specific) {
+    return `${specific.name}: ${priceShort(specific.price)} · ${formatBarbershopDurationLabel(specific.durationMin)}.\n\nPara agendar, tocá "Agendar cita" o escribí el servicio que querés.`;
+  }
+  const lines = services.slice(0, 8).map((service) =>
+    `${getBarbershopServiceEmoji(service.name)} ${service.name} — ${priceShort(service.price)}`
+  );
+  return `Estos son los servicios disponibles en ${brandName}:\n\n${lines.join("\n")}\n\nPara agendar, tocá "Agendar cita" o escribí el servicio que querés.`;
+}
+
+function formatBarbershopProvidersReply(
+  clinicSettings?: Record<string, unknown>,
+): string {
+  const providers = getBarbershopProvidersFromSettings(clinicSettings);
+  if (providers.length === 0) {
+    return 'Por ahora no tengo barberos configurados para mostrar. Podés tocar "Hablar con alguien" para que te ayuden.';
+  }
+  return `Estos barberos están disponibles:\n\n${providers.map((provider) => `💈 ${provider.name}`).join("\n")}\n\nPodés escoger uno o elegir “cualquiera disponible”.`;
+}
+
 function formatBarbershopPendingBookingConfirmationReminder(
   pendingBooking: Record<string, unknown>,
   bookingCollected: Record<string, unknown>,
@@ -1226,6 +1338,54 @@ function formatBarbershopPendingBookingConfirmationReminder(
 🕝 Hora: ${time}${nameLine}
 
 ¿Confirmamos?`;
+}
+
+function classifyBarbershopGlobalInfoInterrupt(input: string): "hours" | "location" | "services_prices" | "providers" | "availability" | null {
+  const text = normalizeTextForIntent(input);
+  if (!text) return null;
+  if (
+    /^(disponibilidad)$/.test(text) ||
+    /\b(tienen|tienes|tenes|hay|que|qué|cual|cuál|quien|quién)\b.*\b(cupo|cupos|espacio|espacios|disponibilidad|chance)\b/.test(text) ||
+    /\b(que horas disponibles|horas disponibles|horarios disponibles|quien esta disponible|quien está disponible)\b/.test(text)
+  ) {
+    return "availability";
+  }
+  if (
+    /^(hora|horario|horarios)$/.test(text) ||
+    /\b(que horarios tienen|que horario tienen|horario de atencion|a que hora abren|a que hora cierran|cuando abren|cuando cierran|hasta que hora trabajan|hasta que hora atienden|hoy hasta que hora)\b/.test(text)
+  ) {
+    return "hours";
+  }
+  if (/\b(ubicacion|ubicación|direccion|dirección|donde estan|donde están|donde quedan|ubicados|me pasan ubicacion|me pasan ubicación|como llego|cómo llego)\b/.test(text)) {
+    return "location";
+  }
+  if (/\b(que barberos hay|barberos disponibles|barberos|quien corta|quienes cortan|con quien puedo agendar|con quien puedo reservar)\b/.test(text)) {
+    return "providers";
+  }
+  if (
+    /\b(precio|precios|cuanto cuesta|cuánto cuesta|cuanto vale|cuánto vale|costo|costos|tarifa|tarifas|servicios|que servicios tienen|que ofrecen|tienen limpieza facial|limpieza facial)\b/.test(text)
+  ) {
+    return "services_prices";
+  }
+  return null;
+}
+
+function hasActiveBarbershopBookingContext(
+  state: ConversationState,
+  bookingCollected: Record<string, unknown>,
+): boolean {
+  return Boolean(
+    state.nextExpected ||
+      state.stage === "BOOKING" ||
+      state.stage === "CONFIRMING" ||
+      bookingCollected.activeBookingFlow ||
+      bookingCollected.lastBookingStep ||
+      bookingCollected.pending_booking ||
+      bookingCollected.current_service_name ||
+      bookingCollected.service ||
+      bookingCollected.preferred_date ||
+      bookingCollected.current_date,
+  );
 }
 
 function isBarbershopPricingFollowup(input: string): boolean {
@@ -2852,6 +3012,126 @@ export function runConversationEngine(args: {
         safeStr((bookingCollected as any)?.pending_booking?.service_name, "").trim() ||
         safeStr((bookingCollected as any)?.pending_booking_request?.service, "").trim(),
     );
+    const globalInfoInterrupt = classifyBarbershopGlobalInfoInterrupt(args.inboundText);
+    const globalInfoActiveContext = hasActiveBarbershopBookingContext(state, bookingCollected);
+    const globalServicesPriceListQuestion = /\b(precios|servicios|que servicios tienen|qué servicios tienen|lista de precios|que precios tienen|qué precios tienen)\b/
+      .test(normalizedBarbershopInbound);
+    const shouldSkipGlobalInfoInterrupt = (
+      globalInfoInterrupt === "services_prices" &&
+      (
+        getBarbershopServicesFromSettings(args.clinicSettings).length === 0 ||
+        (
+          !globalInfoActiveContext &&
+          (!globalServicesPriceListQuestion || !/^(precios|servicios)$/.test(normalizedBarbershopInbound))
+        )
+      )
+    ) || (
+      !globalInfoActiveContext &&
+      (
+        globalInfoInterrupt === "location" ||
+        (globalInfoInterrupt === "services_prices" && !/^(precios|servicios)$/.test(normalizedBarbershopInbound))
+      )
+    );
+    if (globalInfoInterrupt && !shouldSkipGlobalInfoInterrupt) {
+      const pending = ((bookingCollected as any).pending_booking ?? null) as Record<string, unknown> | null;
+      const serviceForAvailability = (
+        detectedServiceName ||
+        safeStr(bookingCollected.service, "").trim() ||
+        safeStr((bookingCollected as any).current_service_name, "").trim() ||
+        safeStr((bookingCollected as any)?.pending_booking_request?.service, "").trim()
+      ).trim();
+      const dateForAvailability = (
+        parsedDateTime?.date ||
+        parsedDateOnly ||
+        safeStr((bookingCollected as any).preferred_date, "").trim() ||
+        safeStr((bookingCollected as any).current_date, "").trim()
+      ).trim();
+      const providerForAvailability = (
+        safeStr((bookingCollected as any).preferred_barber, "").trim() ||
+        safeStr((bookingCollected as any).provider_name, "").trim() ||
+        safeStr((bookingCollected as any).preferred_provider_id, "").trim()
+      ).trim();
+      const providerPreference = safeStr((bookingCollected as any).provider_preference, "").trim();
+      if (globalInfoInterrupt === "availability" && !serviceForAvailability) {
+        if (!serviceForAvailability) {
+          const serviceMenu = formatBarbershopServiceMenuFromSettings(getBarbershopServicesFromSettings(args.clinicSettings));
+          return {
+            replyText: `Claro 💈 ¿Qué servicio querés revisar?\n\n${serviceMenu}`,
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "availability",
+              nextExpected: "service",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                activeBookingFlow: true,
+                lastBookingStep: "select_service",
+                ...(dateForAvailability ? { preferred_date: dateForAvailability, current_date: dateForAvailability } : {}),
+              },
+            },
+            debug: withInterpreterDebug({ intent: "availability", phase: "BOOKING", route: "barbershop_global_availability_ask_service" }, "shadow"),
+          };
+        }
+      }
+      if (globalInfoInterrupt === "availability") {
+        // Service/date/provider availability is already handled by the booking engine below.
+      } else {
+      const infoReply = globalInfoInterrupt === "hours"
+        ? (!globalInfoActiveContext && /\b(a que hora abren|cuando abren|a que hora cierran|cuando cierran)\b/.test(normalizedBarbershopInbound)
+          ? getBarbershopBusinessHoursReply(args.inboundText, args.clinicSettings)
+          : formatBarbershopConfiguredHoursReply(args.clinicSettings))
+        : globalInfoInterrupt === "location"
+        ? (() => {
+          const address = resolveConfiguredBarbershopPublicLocation(args.clinicSettings);
+          return address
+            ? `Estamos ubicados en:\n${address}`
+            : 'Por ahora no tengo la ubicación exacta configurada. Podés tocar "Hablar con alguien" para que te ayuden.';
+        })()
+        : globalInfoInterrupt === "providers"
+        ? formatBarbershopProvidersReply(args.clinicSettings)
+        : formatBarbershopServicesPricesReply(args.inboundText, args.clinicSettings);
+      if (
+        safeStr(state.nextExpected, "") === "confirm_booking" &&
+        hasValidPendingForConfirm &&
+        !pendingIsStale &&
+        pending
+      ) {
+        const pendingReminder = formatBarbershopPendingBookingConfirmationReminder(pending, bookingCollected, state);
+        return {
+          replyText: `${infoReply}\n\n${pendingReminder}`,
+          statePatch: {
+            stage: "CONFIRMING",
+            lastIntent: globalInfoInterrupt,
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_booking: pending,
+              pending_booking_stale: false,
+              last_bot_step: "barbershop_preconfirm",
+            },
+          },
+          debug: withInterpreterDebug({ intent: globalInfoInterrupt, phase: "CONFIRMING", route: "barbershop_global_info_pending_confirm" }, "shadow"),
+        };
+      }
+      return {
+        replyText: globalInfoActiveContext
+          ? `${infoReply}\n\nPodés continuar con la cita cuando querás.`
+          : `${infoReply}\n\n¿Querés agendar una cita?`,
+        statePatch: {
+          stage: globalInfoActiveContext ? safeStr(state.stage, "BOOKING") as Stage : "DISCOVERY",
+          lastIntent: globalInfoInterrupt,
+          nextExpected: globalInfoActiveContext ? state.nextExpected : "main_menu_selection",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            ...(globalInfoActiveContext ? {} : { activeBookingFlow: false }),
+          },
+        },
+        debug: withInterpreterDebug({ intent: globalInfoInterrupt, phase: globalInfoActiveContext ? "BOOKING" : "DISCOVERY", route: globalInfoActiveContext ? "barbershop_global_info_preserve_flow" : "barbershop_global_info_menu" }, "shadow"),
+      };
+      }
+    }
     const plainAppointmentRequest = isBarbershopGenericBookingRequestText(args.inboundText) ||
       /\b(agendar cita|agendar una cita|reservar cita|reservar una cita)\b/.test(normalizedBarbershopInbound);
     const thirdPartySignalBeforeRouting = /\b(para mi hijo|para mi hija|para mi hermano|para mi hermana|para mi mama|para mi mamá|para mi papa|para mi papá|para otra persona|para alguien mas|para alguien más)\b/
@@ -4239,6 +4519,7 @@ export function runConversationEngine(args: {
       (isAvailabilityInquiryText(args.inboundText) ||
         isAvailabilityDiscoveryIntentText(args.inboundText) ||
         runtimeIntent === "availability_question") &&
+      !isBusinessHoursQuestionText(args.inboundText) &&
       state.nextExpected !== "confirm_booking"
     ) {
       console.log(JSON.stringify({

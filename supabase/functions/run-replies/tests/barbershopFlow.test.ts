@@ -4027,6 +4027,163 @@ Deno.test("B4.2 pending + ubicación responde info y preserva pending_booking", 
   );
 });
 
+Deno.test("BarberLine global info: saludo + horarios responde negocio y no pregunta barbero", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "que horarios tienen",
+    leadState: {
+      orgType: "barbershop",
+      stage: "DISCOVERY",
+      collected: {},
+    } as any,
+    clinicSettings: {
+      business_type: "barbershop",
+      brand_name: "BarberLine Demo",
+      hours: {
+        mon: { open: "09:00", close: "19:00" },
+        tue: { open: "09:00", close: "19:00" },
+        wed: { open: "09:00", close: "19:00" },
+        thu: { open: "09:00", close: "19:00" },
+        fri: { open: "09:00", close: "19:00" },
+        sat: { closed: true },
+        sun: { open: "10:00", close: "17:00" },
+      },
+    },
+  } as any);
+  const reply = String((result as any).replyText).toLowerCase();
+  assert(reply.includes("horario"));
+  assert(reply.includes("lunes a viernes"));
+  assert(reply.includes("sábado: cerrado"));
+  assert(!reply.includes("con qué barbero querés"));
+  assert(!reply.includes("con que barbero queres"));
+});
+
+Deno.test("BarberLine global info: saludo + ubicación responde fallback y no pregunta barbero", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "donde estan ubicados",
+    leadState: {
+      orgType: "barbershop",
+      stage: "DISCOVERY",
+      collected: {},
+    } as any,
+    clinicSettings: { business_type: "barbershop" },
+  } as any);
+  const reply = String((result as any).replyText).toLowerCase();
+  assert(reply.includes("estamos"));
+  assert(reply.includes("barrio los andes"));
+  assert(!reply.includes("con qué barbero querés"));
+  assert(!reply.includes("con que barbero queres"));
+});
+
+Deno.test("BarberLine global info: saludo + precios responde servicios/precios", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "precios",
+    leadState: {
+      orgType: "barbershop",
+      stage: "DISCOVERY",
+      collected: {},
+    } as any,
+    clinicSettings: {
+      business_type: "barbershop",
+      brand_name: "BarberLine Demo",
+      services: [
+        { id: "haircut", name: "Corte de pelo", price: 130, duration_min: 35, is_active: true },
+        { id: "combo", name: "Corte y barba", price: 200, duration_min: 60, is_active: true },
+      ],
+    },
+  } as any);
+  const reply = String((result as any).replyText);
+  assert(reply.includes("Estos son los servicios disponibles en BarberLine Demo"));
+  assert(reply.includes("Corte de pelo"));
+  assert(reply.includes("L130"));
+  assert(reply.includes("Corte y barba"));
+  assert(reply.includes("L200"));
+});
+
+Deno.test("BarberLine global info: saludo + barberos responde providers", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "que barberos hay",
+    leadState: {
+      orgType: "barbershop",
+      stage: "DISCOVERY",
+      collected: {},
+    } as any,
+    clinicSettings: {
+      business_type: "barbershop",
+      providers: [
+        { id: "allan", name: "Allan", active: true },
+        { id: "edgar", name: "Edgar", active: true },
+      ],
+    },
+  } as any);
+  const reply = String((result as any).replyText);
+  assert(reply.includes("Estos barberos están disponibles"));
+  assert(reply.includes("Allan"));
+  assert(reply.includes("Edgar"));
+  assert(!reply.toLowerCase().includes("con qué barbero querés"));
+});
+
+Deno.test("BarberLine global info: booking en progreso + precios preserva collected", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "cuanto cuesta corte y barba",
+    leadState: {
+      orgType: "barbershop",
+      stage: "BOOKING",
+      nextExpected: "provider_selection",
+      collected: {
+        activeBookingFlow: true,
+        lastBookingStep: "select_provider",
+        service: "Corte clásico",
+        current_service_name: "Corte clásico",
+        current_date: "2026-05-13",
+      },
+    } as any,
+    clinicSettings: {
+      business_type: "barbershop",
+      services: [
+        { id: "haircut", name: "Corte clásico", price: 130, duration_min: 35, is_active: true },
+        { id: "combo", name: "Corte y barba", price: 200, duration_min: 60, is_active: true },
+      ],
+    },
+  } as any);
+  const reply = String((result as any).replyText).toLowerCase();
+  assert(reply.includes("corte y barba"));
+  assert(reply.includes("podés continuar con la cita"));
+  assertEquals((result as any).statePatch?.nextExpected, "provider_selection");
+  assertEquals(
+    (result as any).statePatch?.collected?.current_service_name,
+    "Corte clásico",
+  );
+  assertEquals((result as any).statePatch?.collected?.current_date, "2026-05-13");
+});
+
+Deno.test("BarberLine global info: tienen cupo hoy reconduce disponibilidad y no horarios", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "tienen cupo hoy",
+    leadState: {
+      orgType: "barbershop",
+      stage: "DISCOVERY",
+      collected: {},
+    } as any,
+    clinicSettings: {
+      business_type: "barbershop",
+      services: [
+        { id: "haircut", name: "Corte clásico", price: 130, duration_min: 35, is_active: true },
+      ],
+    },
+  } as any);
+  const reply = String((result as any).replyText).toLowerCase();
+  assert(reply.includes("qué servicio querés revisar") || reply.includes("que servicio queres revisar"));
+  assert(!reply.includes("atiende"));
+  assert(!reply.includes("lunes a viernes"));
+  assertEquals((result as any).statePatch?.nextExpected, "service");
+});
+
 Deno.test("B4.2 pending + 'corte y barba' usa fecha/hora pendiente y no pide genérico día/hora", () => {
   const result = runConversationEngine({
     organizationId: "barber-demo",
@@ -8513,6 +8670,7 @@ Deno.test("BarberLine guided WhatsApp menu is greeting-only and uses structured 
   assert(!source.includes("3. Ubicación\\n4. Hablar con alguien"));
   assert(menuBlock.includes('{ id: "booking_start", title: "Agendar cita" }'));
   assert(menuBlock.includes('{ id: "view_prices", title: "Servicios" }'));
+  assert(menuBlock.includes('{ id: "barber_info", title: "Info barbería" }'));
   assert(!menuBlock.includes("Precios"));
   assert(!menuBlock.includes("Hablar con"));
   assert(source.includes('intent === "greeting_only"'));
@@ -8535,6 +8693,7 @@ Deno.test("BarberLine WIMAEIL welcome menu keeps handoff out of primary CTAs", a
   );
   assert(menuBlock.includes('{ id: "booking_start", title: "Agendar cita" }'));
   assert(menuBlock.includes('{ id: "view_prices", title: "Servicios" }'));
+  assert(menuBlock.includes('{ id: "barber_info", title: "Info barbería" }'));
   assert(!menuBlock.includes("Precios"));
   assert(!menuBlock.includes("Hablar con William"));
   assert(
@@ -8577,6 +8736,23 @@ Deno.test("BarberLine WIMAEIL booking start sends guided service picker", async 
     ),
   );
   assert(source.includes("interactiveButtons: servicesList"));
+});
+
+Deno.test("BarberLine global info menu and service rows keep WhatsApp-safe actions", async () => {
+  const source = await Deno.readTextFile(
+    "supabase/functions/run-replies/index.ts",
+  );
+
+  assert(source.includes('const barberlineInfoButtons'));
+  assert(source.includes('{ id: "view_hours", title: "Horarios" }'));
+  assert(source.includes('{ id: "view_location", title: "Ubicación" }'));
+  assert(source.includes('normalizedAction === "barber_info"'));
+  assert(source.includes('classifyBarbershopGlobalInfoText(inboundText)'));
+  assert(source.includes('title: `${getServiceMenuEmoji(name)} ${name}`.slice(0, 24)'));
+  assert(source.includes("description: formatServiceSelectionDescription(service)"));
+  assert(source.includes('{ id: "confirm_booking", title: "Confirmar" }'));
+  assert(source.includes('{ id: "change_booking_slot", title: "Cambiar hora" }'));
+  assert(source.includes('{ id: "cancel", title: "Cancelar" }'));
 });
 
 Deno.test("BarberLine WIMAEIL service text from stale provider context returns to date flow", async () => {
