@@ -1873,11 +1873,16 @@ Deno.test("post-tool success copy barbershop no contiene emoji dental y muestra 
     } as any,
   });
   assert(reply.includes("✅ Cita confirmada"));
-  assert(reply.includes("💈 Servicio: *Corte + barba*"));
+  assert(reply.includes("✂️ Servicio: Corte + barba"));
   assert(reply.includes("📅 Fecha:"));
-  assert(reply.includes("⏰ Hora:"));
-  assert(reply.includes("✂️ Barbero: *Carlos*"));
-  assert(reply.includes("Te esperamos en *la barbería*."));
+  assert(reply.includes("🕝 Hora:"));
+  assert(reply.includes("💈 Barbero: Carlos"));
+  assert(reply.includes("Te esperamos en la barbería:"));
+  assert(
+    reply.includes(
+      "Si necesitás cambiarla o cancelarla, podés escribirnos por aquí.",
+    ),
+  );
   assert(!reply.includes("🦷"));
 });
 
@@ -1912,8 +1917,8 @@ Deno.test("post-tool success copy barbershop genérico omite servicio y muestra 
     } as any,
   });
   assert(reply.includes("✅ Cita confirmada"));
-  assert(reply.includes("✂️ Barbero: *Carlos*"));
-  assert(reply.includes("💈 Servicio: *Cita barbería*"));
+  assert(reply.includes("💈 Barbero: Carlos"));
+  assert(reply.includes("✂️ Servicio: Cita barbería"));
   assert(!reply.includes("🦷"));
 });
 
@@ -1980,7 +1985,7 @@ Deno.test("flow exacto: corte con Carlos + sí + success copy incluye barbero", 
       },
     } as any,
   });
-  assert(success.includes("✂️ Barbero: *Carlos*"));
+  assert(success.includes("💈 Barbero: Carlos"));
 });
 
 Deno.test("duraciones barbershop por servicio", () => {
@@ -3918,6 +3923,107 @@ Deno.test("B4.2 pending + pricing interruption preserva pending_booking", () => 
   assertEquals(
     (result as any).statePatch?.collected?.pending_booking?.appointment_time,
     "10:00",
+  );
+});
+
+Deno.test("B4.2 pending + horarios responde info y preserva pending_booking", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "que horarios tienen",
+    leadState: {
+      orgType: "barbershop",
+      stage: "CONFIRMING",
+      nextExpected: "confirm_booking",
+      collected: {
+        service: "Corte clásico",
+        preferred_date: "2026-05-13",
+        preferred_time: "10:00",
+        customer_name: "Luis Perez",
+        pending_booking: {
+          service: "Corte clásico",
+          provider_name: "Alex",
+          appointment_date: "2026-05-13",
+          appointment_time: "10:00",
+          status: "pending_confirmation",
+        },
+        pending_booking_stale: false,
+        last_bot_step: "barbershop_preconfirm",
+      },
+    } as any,
+    clinicSettings: {
+      business_type: "barbershop",
+      brand_name: "BarberLine Demo",
+      hours: {
+        mon: { open: "09:00", close: "19:00" },
+        sat: { open: "10:00", close: "17:00" },
+        sun: { closed: true },
+      },
+    },
+  } as any);
+  const reply = String((result as any).replyText).toLowerCase();
+  assert(reply.includes("horario"));
+  assert(reply.includes("tenés esta cita pendiente"));
+  assert(reply.includes("servicio: corte clásico"));
+  assert(reply.includes("barbero: alex"));
+  assert(reply.includes("nombre: luis perez"));
+  assert(!reply.includes("con qué barbero querés"));
+  assert(!reply.includes("con que barbero queres"));
+  assertEquals((result as any).statePatch?.nextExpected, "confirm_booking");
+  assertEquals(
+    (result as any).statePatch?.collected?.pending_booking?.appointment_time,
+    "10:00",
+  );
+  assertEquals(
+    (result as any).statePatch?.collected?.pending_booking_stale,
+    false,
+  );
+});
+
+Deno.test("B4.2 pending + ubicación responde info y preserva pending_booking", () => {
+  const result = runConversationEngine({
+    organizationId: "barber-demo",
+    inboundText: "donde estan ubicados",
+    leadState: {
+      orgType: "barbershop",
+      stage: "CONFIRMING",
+      nextExpected: "confirm_booking",
+      collected: {
+        service: "Corte clásico",
+        preferred_date: "2026-05-13",
+        preferred_time: "10:00",
+        customer_name: "Luis Perez",
+        pending_booking: {
+          service: "Corte clásico",
+          provider_name: "Alex",
+          appointment_date: "2026-05-13",
+          appointment_time: "10:00",
+          status: "pending_confirmation",
+        },
+        pending_booking_stale: false,
+        last_bot_step: "barbershop_preconfirm",
+      },
+    } as any,
+    clinicSettings: {
+      business_type: "barbershop",
+      address: "Avenida Central, Local 12",
+    },
+  } as any);
+  const reply = String((result as any).replyText).toLowerCase();
+  assert(reply.includes("estamos ubicados en"));
+  assert(reply.includes("avenida central, local 12"));
+  assert(reply.includes("tenés esta cita pendiente"));
+  assert(reply.includes("servicio: corte clásico"));
+  assert(reply.includes("barbero: alex"));
+  assert(!reply.includes("con qué barbero querés"));
+  assert(!reply.includes("con que barbero queres"));
+  assertEquals((result as any).statePatch?.nextExpected, "confirm_booking");
+  assertEquals(
+    (result as any).statePatch?.collected?.pending_booking?.appointment_date,
+    "2026-05-13",
+  );
+  assertEquals(
+    (result as any).statePatch?.collected?.pending_booking_stale,
+    false,
   );
 });
 
@@ -8666,7 +8772,7 @@ Deno.test("BarberLine guided booking respects provider, late today, and confirma
     source.includes('{ id: "change_booking_slot", title: "Cambiar hora" }'),
   );
   assert(
-    source.includes('{ id: "talk_to_human", title: "Hablar con alguien" }'),
+    source.includes('{ id: "cancel", title: "Cancelar" }'),
   );
 });
 
@@ -8955,7 +9061,9 @@ Deno.test("BarberLine slot selection prefers grouped WhatsApp list for larger av
   assert(composer.includes("Escogé una hora para continuar."));
   assert(!composer.includes('"booking_more_hours"'));
   assert(source.includes("function formatBarbershopConfirmationSummary"));
-  assert(source.includes("Barbero: *${provider}*"));
+  assert(source.includes("Listo 💈 Te puedo reservar este espacio:"));
+  assert(source.includes("💈 Barbero: ${provider}"));
+  assert(source.includes("👤 Nombre: ${customerName}"));
   assert(!composer.includes('buttonText: "Ver horarios"'));
 });
 
@@ -9023,7 +9131,7 @@ Deno.test("BarberLine reschedule success copy is distinct from new booking succe
 
 Deno.test("BarberLine booking success personality does not duplicate Te esperamos line", () => {
   const base =
-    "✅ Cita confirmada\n\n💈 Servicio: Corte solo\n📅 Fecha: jueves, 28 de mayo\n⏰ Hora: 9:00 AM\n✂️ Barbero: Allan\n\nTe esperamos en BarberLine.";
+    "✅ Cita confirmada 💈\n\nTe esperamos en BarberLine:\n\n✂️ Servicio: Corte solo\n💈 Barbero: Allan\n📅 Fecha: jueves, 28 de mayo\n🕝 Hora: 9:00 AM\n\nSi necesitás cambiarla o cancelarla, podés escribirnos por aquí.";
   const reply = formatBarberLineReply(base, {
     businessType: "barbershop",
     channel: "whatsapp",

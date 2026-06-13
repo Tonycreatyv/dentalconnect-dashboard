@@ -9139,13 +9139,21 @@ function formatBarbershopConfirmationSummary(
     pendingBooking.service_name,
     safeStr(pendingBooking.service, "Servicio"),
   );
-  const provider = safeStr(pendingBooking.provider_name, "Barbero");
+  const provider = safeStr(pendingBooking.provider_name, "").trim() ||
+    "Barbero disponible";
   const date = formatRequestedDayLabel(
     safeStr(pendingBooking.appointment_date, ""),
   );
   const time = formatHourLabel(safeStr(pendingBooking.appointment_time, ""));
-  const nameLine = customerName ? `\nNombre: *${customerName}*` : "";
-  return `Perfecto 💈\n\nServicio: *${service}*\nBarbero: *${provider}*\nFecha: *${date}*\nHora: *${time}*${nameLine}\n\n¿Confirmamos?`;
+  const nameLine = customerName ? `\n👤 Nombre: ${customerName}` : "";
+  return `Listo 💈 Te puedo reservar este espacio:
+
+✂️ Servicio: ${service}
+💈 Barbero: ${provider}
+📅 Fecha: ${date}
+🕝 Hora: ${time}${nameLine}
+
+¿Confirmamos?`;
 }
 
 function buildBookingRetryPatch(
@@ -9507,7 +9515,15 @@ function buildInteractiveButtonsForState(
       safeStr(pending.appointment_time, "").trim(),
   );
   if (
-    (nextExpected === "confirm_booking" && hasValidPendingBooking) ||
+    nextExpected === "confirm_booking" && hasValidPendingBooking
+  ) {
+    return [
+      { id: "confirm_booking", title: "Confirmar" },
+      { id: "change_booking_slot", title: "Cambiar hora" },
+      { id: "cancel", title: "Cancelar" },
+    ];
+  }
+  if (
     nextExpected === "confirm_cancel_appointment" ||
     nextExpected === "confirm_reschedule_appointment"
   ) {
@@ -14117,7 +14133,7 @@ export async function generateReply(
           interactiveButtons: [
             { id: "confirm_booking", title: "Confirmar" },
             { id: "change_booking_slot", title: "Cambiar hora" },
-            { id: "talk_to_human", title: "Hablar con alguien" },
+            { id: "cancel", title: "Cancelar" },
           ],
         };
       }
@@ -15816,7 +15832,7 @@ export async function generateReply(
           interactiveButtons: [
             { id: "confirm_booking", title: "Confirmar" },
             { id: "change_booking_slot", title: "Cambiar hora" },
-            { id: "talk_to_human", title: "Hablar con alguien" },
+            { id: "cancel", title: "Cancelar" },
           ],
         };
       }
@@ -16359,7 +16375,7 @@ export async function generateReply(
             interactiveButtons: [
               { id: "confirm_booking", title: "Confirmar" },
               { id: "change_booking_slot", title: "Cambiar hora" },
-              { id: "talk_to_human", title: "Hablar con alguien" },
+              { id: "cancel", title: "Cancelar" },
             ],
           };
         }

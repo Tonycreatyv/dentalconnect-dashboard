@@ -1133,6 +1133,24 @@ function resolveBarbershopPublicLocation(clinicSettings?: Record<string, unknown
   return candidates.find((v) => v.length > 0) ?? "Barrio Los Andes, San Pedro Sula, frente al parque principal";
 }
 
+function resolveConfiguredBarbershopPublicLocation(clinicSettings?: Record<string, unknown>): string {
+  const locationRaw = clinicSettings?.location;
+  const locationObj = (locationRaw && typeof locationRaw === "object")
+    ? (locationRaw as Record<string, unknown>)
+    : null;
+  const integrations = (clinicSettings?.integrations && typeof clinicSettings.integrations === "object")
+    ? (clinicSettings.integrations as Record<string, unknown>)
+    : null;
+  const candidates = [
+    typeof locationRaw === "string" ? locationRaw : "",
+    safeStr(locationObj?.address, ""),
+    safeStr(locationObj?.label, ""),
+    safeStr(clinicSettings?.address, ""),
+    safeStr(integrations?.public_location, ""),
+  ].map((v) => safeStr(v, "").trim());
+  return candidates.find((v) => v.length > 0) ?? "";
+}
+
 function getBarbershopBusinessHoursReply(
   input: string,
   clinicSettings?: Record<string, unknown>,
@@ -1157,6 +1175,57 @@ function getBarbershopBusinessHoursReply(
     return `Cerramos a las ${closeMon}.`;
   }
   return `Horario:\nLunes a viernes: ${openMon} – ${closeMon}\nSábado: ${openSat} – ${closeSat}\nDomingo: ${sunClosed ? "cerrado" : `${formatHourForReply(safeStr(sun.open, "09:00"))} – ${formatHourForReply(safeStr(sun.close, "17:00"))}`}\n\n¿Querés que revise espacios disponibles?`;
+}
+
+function formatBarbershopPendingBookingConfirmationReminder(
+  pendingBooking: Record<string, unknown>,
+  bookingCollected: Record<string, unknown>,
+  state: ConversationState,
+): string {
+  const service = safeStr(
+    pendingBooking.service_name,
+    safeStr(pendingBooking.service, safeStr(bookingCollected.service, "Cita barbería")),
+  );
+  const provider = safeStr(
+    pendingBooking.provider_name,
+    safeStr(
+      pendingBooking.preferred_barber,
+      safeStr(bookingCollected.preferred_barber, "Barbero disponible"),
+    ),
+  );
+  const date = formatHumanDay(
+    safeStr(pendingBooking.appointment_date, safeStr(bookingCollected.preferred_date, "")),
+  );
+  const time = formatHourLabel(
+    safeStr(pendingBooking.appointment_time, safeStr(bookingCollected.preferred_time, "")),
+  );
+  const customerName = toDisplayPersonName(
+    safeStr(
+      pendingBooking.patient_name,
+      safeStr(
+        pendingBooking.customer_name,
+        safeStr(
+          pendingBooking.client_name,
+          safeStr(
+            bookingCollected.patient_name,
+            safeStr(
+              bookingCollected.customer_name,
+              safeStr(bookingCollected.client_name, safeStr(resolveAppointmentPatientName(bookingCollected, state), "")),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  const nameLine = safeStr(customerName, "").trim() ? `\n👤 Nombre: ${customerName}` : "";
+  return `Tenés esta cita pendiente:
+
+✂️ Servicio: ${service}
+💈 Barbero: ${provider}
+📅 Fecha: ${date}
+🕝 Hora: ${time}${nameLine}
+
+¿Confirmamos?`;
 }
 
 function isBarbershopPricingFollowup(input: string): boolean {
@@ -4068,6 +4137,47 @@ export function runConversationEngine(args: {
           collected: { ...bookingCollected },
         },
         debug: { intent: "book_appointment", phase: "BOOKING", route: bookingLink ? "barbershop_link_share" : "barbershop_link_not_available" },
+      };
+    }
+
+    if (
+      state.nextExpected === "confirm_booking" &&
+      hasValidPendingForConfirm &&
+      !pendingIsStale &&
+      (isBusinessHoursQuestionText(args.inboundText) || barbershopLocationQuestion)
+    ) {
+      const pending = ((bookingCollected as any).pending_booking ?? {}) as Record<string, unknown>;
+      const pendingReminder = formatBarbershopPendingBookingConfirmationReminder(pending, bookingCollected, state);
+      const infoReply = isBusinessHoursQuestionText(args.inboundText)
+        ? getBarbershopBusinessHoursReply(args.inboundText, args.clinicSettings)
+          .replace(/\n\n¿Querés que revise espacios disponibles\?$/, "")
+        : (() => {
+          const address = resolveConfiguredBarbershopPublicLocation(args.clinicSettings);
+          return address
+            ? `Estamos ubicados en:\n${address}`
+            : 'Por ahora no tengo la ubicación exacta configurada. Podés tocar "Hablar con alguien" para que te ayuden.';
+        })();
+      return {
+        replyText: `${infoReply}\n\n${pendingReminder}`,
+        statePatch: {
+          stage: "CONFIRMING",
+          lastIntent: isBusinessHoursQuestionText(args.inboundText) ? "hours" : "location",
+          nextExpected: "confirm_booking",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            pending_booking: pending,
+            pending_booking_stale: false,
+            last_bot_step: "barbershop_preconfirm",
+          },
+        },
+        debug: withInterpreterDebug({
+          intent: isBusinessHoursQuestionText(args.inboundText) ? "hours" : "location",
+          phase: "CONFIRMING",
+          route: isBusinessHoursQuestionText(args.inboundText)
+            ? "barbershop_pending_booking_hours_answer"
+            : "barbershop_pending_booking_location_answer",
+        }, "shadow"),
       };
     }
 
