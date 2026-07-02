@@ -9,6 +9,29 @@ export type InsuranceServiceOption = {
   aliases: string[];
 };
 
+const DEFAULT_INSURANCE_SERVICE_OPTIONS: InsuranceServiceOption[] = [
+  {
+    id: "auto",
+    name: "Auto",
+    aliases: ["auto", "carro", "carros", "vehiculo", "vehiculos", "car", "vehicle"],
+  },
+  {
+    id: "vida",
+    name: "Vida",
+    aliases: ["vida", "life"],
+  },
+  {
+    id: "casa",
+    name: "Casa",
+    aliases: ["casa", "hogar", "vivienda", "home", "homeowners"],
+  },
+  {
+    id: "negocio",
+    name: "Negocio",
+    aliases: ["negocio", "comercial", "empresa", "business", "commercial"],
+  },
+];
+
 function safeStr(value: unknown, fallback = ""): string {
   const text = String(value ?? "").trim();
   return text || fallback;
@@ -28,7 +51,7 @@ function unique(values: string[]): string[] {
 }
 
 export function getInsuranceServiceOptions(services: unknown): InsuranceServiceOption[] {
-  if (!Array.isArray(services)) return [];
+  if (!Array.isArray(services) || services.length === 0) return DEFAULT_INSURANCE_SERVICE_OPTIONS;
   return services
     .map((service, index): InsuranceServiceOption | null => {
       if (!service || typeof service !== "object") return null;
