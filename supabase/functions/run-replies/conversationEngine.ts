@@ -47,6 +47,30 @@ import {
   mergeConversationContext,
   normalizeInboundRuntime,
 } from "./domain/conversationRuntime.ts";
+import {
+  calculateInsuranceScoring,
+  interpretInsuranceTurn,
+  type InsuranceCollected,
+} from "./domain/insurance/insuranceInterpreter.ts";
+import {
+  buildInsuranceBudgetButtons,
+  buildInsuranceCurrentCoverageButtons,
+  buildInsurancePreferredTimeButtons,
+  buildInsuranceTypeList,
+  composeInsuranceBudgetPrompt,
+  composeInsuranceConfirmation,
+  composeInsuranceContactPrompt,
+  composeInsuranceCurrentCoveragePrompt,
+  composeInsuranceEmailPrompt,
+  composeInsuranceLocationPrompt,
+  composeInsurancePreferredTimePrompt,
+  composeInsuranceTypePrompt,
+  getInsuranceServiceOptions,
+} from "./domain/insurance/insuranceResponseComposer.ts";
+import type {
+  InteractiveButton,
+  WhatsAppInteractiveListSpec,
+} from "../_shared/metaMessageAdapter.ts";
 
 export type Stage =
   | "INITIAL"
@@ -68,7 +92,7 @@ export type ConversationState = {
   nextExpected?: string;
   collected?: Record<string, unknown>;
   asked?: Record<string, boolean>;
-  orgType?: "creatyv" | "dental" | "barbershop" | "generic";
+  orgType?: "creatyv" | "dental" | "barbershop" | "insurance" | "generic";
   name?: string | null;
   full_name?: string | null;
   collected_name?: boolean;
@@ -78,6 +102,8 @@ export type ConversationResult = {
   replyText: string;
   /** Patch to merge into lead state (index and tests use statePatch). */
   statePatch: Record<string, unknown>;
+  interactiveButtons?: InteractiveButton[];
+  interactiveList?: WhatsAppInteractiveListSpec;
   debug: {
     intent: string;
     phase: string;
@@ -148,6 +174,13 @@ const RESPONSES = {
     emergency: ["Si querés, te ayudo a buscar el primer horario disponible."],
     handoff: ["Te comunico con recepción en un momento."],
     fallback: ["¿Querés que te ayude con corte, barba o una cita?"],
+  },
+  insurance: {
+    greeting: ["Hola. Te ayudo con tu seguro. ¿En qué te puedo ayudar?"],
+    pricing: ["Te ayudo a revisar opciones de seguro."],
+    services: ["Decime qué tipo de seguro necesitás."],
+    handoff: ["Te conecto con alguien del equipo."],
+    fallback: ["Gracias por escribir. ¿Buscás cotizar un seguro?"],
   },
   generic: {
     greeting: ["¡Hola! 👋 ¿En qué te puedo ayudar?"],
@@ -848,16 +881,30 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function determineOrgType(orgId: string): "creatyv" | "dental" | "barbershop" | "generic" {
-  const id = orgId.toLowerCase();
-  if (id.includes("creatyv") || id.includes("product")) return "creatyv";
-  if (id.includes("dental") || id.includes("clinic")) return "dental";
-  if (id.includes("barber") || id.includes("barberia")) return "barbershop";
+function determineOrgType(
+  _orgId: string,
+  businessType?: string | null,
+): "creatyv" | "dental" | "barbershop" | "insurance" | "generic" {
+  const type = safeStr(businessType, "").trim().toLowerCase();
+  if (type === "creatyv") return "creatyv";
+  if (type === "dental") return "dental";
+  if (type === "barbershop") return "barbershop";
+  if (type === "insurance") return "insurance";
   return "generic";
 }
 
-function getResponses(orgType: "creatyv" | "dental" | "barbershop" | "generic") {
+function getResponses(orgType: "creatyv" | "dental" | "barbershop" | "insurance" | "generic") {
   return RESPONSES[orgType] ?? RESPONSES.generic;
+}
+
+function formatInsuranceCurrentCoverageForCopy(value: unknown): string {
+  const normalized = safeStr(value).toLowerCase();
+  if (normalized === "vence_pronto") return "Vence pronto";
+  if (normalized === "comparando") return "Ya tengo, comparo";
+  if (normalized === "no_tiene") return "No tengo";
+  if (normalized === "si") return "Sí";
+  if (normalized === "no") return "No";
+  return safeStr(value);
 }
 
 function buildRecoveryContextFromState(state: ConversationState): ConversationContext {
@@ -2403,20 +2450,25 @@ export function maybeHandleNameCapture(args: {
 export function runConversationEngine(args: {
   organizationId: string;
   leadId?: string;
+  channelUserId?: string | null;
   leadState: ConversationState | null;
   inboundText: string;
   channel?: string;
   knowledge?: Record<string, unknown>;
   clinicKnowledge?: Record<string, unknown>;
   clinicSettings?: Record<string, unknown>;
+  businessType?: string | null;
   dentalInterpreterResult?: DentalInterpreterResult | null;
   barbershopInterpreterResult?: BarbershopInterpretedTurn | null;
 }): ConversationResult | null {
   const text = normalizeText(args.inboundText);
   if (!text) return null;
 
-  const orgType = args.leadState?.orgType ??
-    determineOrgType(args.organizationId);
+  const resolvedBusinessType = safeStr(
+    args.businessType,
+    safeStr(args.clinicSettings?.business_type, safeStr(args.leadState?.orgType, "")),
+  );
+  const orgType = determineOrgType(args.organizationId, resolvedBusinessType);
   const responses: any = getResponses(orgType);
   const state: ConversationState = {
     stage: "INITIAL",
@@ -2439,13 +2491,15 @@ export function runConversationEngine(args: {
       debug: { intent: "book_appointment", phase: "BOOKING", route: "state_correction_reset_datetime" },
     };
   }
-  const nameCapture = maybeHandleNameCapture({
-    organizationId: args.organizationId,
-    leadState: state,
-    inboundText: args.inboundText,
-    channel: args.channel,
-  });
-  if (nameCapture) return nameCapture;
+  if (orgType !== "insurance") {
+    const nameCapture = maybeHandleNameCapture({
+      organizationId: args.organizationId,
+      leadState: state,
+      inboundText: args.inboundText,
+      channel: args.channel,
+    });
+    if (nameCapture) return nameCapture;
+  }
 
   const needsName = !hasCollectedName(state);
   const normalizedIntentText = normalizeTextForIntent(text);
@@ -2497,6 +2551,179 @@ export function runConversationEngine(args: {
         collected: {},
       },
       debug: { intent: "reset", phase: "DISCOVERY", route: "explicit_reset" },
+    };
+  }
+
+  if (orgType === "insurance") {
+    const insuranceServices = getInsuranceServiceOptions(args.clinicSettings?.services);
+    const insuranceTypeList = buildInsuranceTypeList(insuranceServices);
+    const existingInsurance = ((collected.insurance ?? {}) as InsuranceCollected);
+    const interpreted = interpretInsuranceTurn({
+      inboundText: args.inboundText,
+      nextExpected: state.nextExpected,
+      services: insuranceServices,
+      collected: existingInsurance,
+    });
+    const currentInsurance: InsuranceCollected = {
+      ...existingInsurance,
+      contacto: { ...(existingInsurance.contacto ?? {}) },
+    };
+    const channelPhone = safeStr(args.channelUserId, "");
+    if (channelPhone && !safeStr(currentInsurance.contacto?.telefono)) {
+      currentInsurance.contacto!.telefono = channelPhone;
+    }
+    if (interpreted.fields_found.tipo_seguro) {
+      currentInsurance.tipo_seguro = interpreted.fields_found.tipo_seguro;
+      currentInsurance.tipo_seguro_id = interpreted.fields_found.tipo_seguro_id ?? undefined;
+    }
+    if (interpreted.fields_found.nombre) currentInsurance.contacto!.nombre = interpreted.fields_found.nombre;
+    if (interpreted.fields_found.estado) currentInsurance.contacto!.estado = interpreted.fields_found.estado;
+    if (interpreted.fields_found.telefono) currentInsurance.contacto!.telefono = interpreted.fields_found.telefono;
+    if (interpreted.fields_found.email) currentInsurance.contacto!.email = interpreted.fields_found.email;
+    if (interpreted.fields_found.seguro_actual) currentInsurance.seguro_actual = interpreted.fields_found.seguro_actual;
+    if (interpreted.fields_found.presupuesto) currentInsurance.presupuesto = interpreted.fields_found.presupuesto;
+    if (
+      safeStr(state.nextExpected, "") === "insurance_preferred_time" &&
+      interpreted.fields_found.horario_preferido
+    ) {
+      currentInsurance.horario_preferido = interpreted.fields_found.horario_preferido;
+    }
+
+    const contactMissing = ["nombre", "estado", "email"].filter((field) =>
+      !safeStr((currentInsurance.contacto as Record<string, unknown> | undefined)?.[field])
+    );
+    const baseCollected = { ...collected, insurance: currentInsurance };
+    const stateBase = {
+      stage: "DISCOVERY" as Stage,
+      orgType: "insurance" as const,
+      collected: baseCollected,
+    };
+
+    if (interpreted.intent === "restart") {
+      return {
+        replyText: insuranceTypeList?.body ?? composeInsuranceTypePrompt(insuranceServices),
+        interactiveList: insuranceTypeList,
+        statePatch: {
+          ...stateBase,
+          collected: { ...collected, insurance: {} },
+          lastIntent: "insurance_restart",
+          nextExpected: "insurance_type",
+        },
+        debug: { intent: "restart", phase: "DISCOVERY", route: "insurance_restart" },
+      };
+    }
+
+    if (!safeStr(currentInsurance.tipo_seguro)) {
+      return {
+        replyText: insuranceTypeList?.body ?? composeInsuranceTypePrompt(insuranceServices),
+        interactiveList: insuranceTypeList,
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_type",
+          nextExpected: "insurance_type",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_type" },
+      };
+    }
+
+    if (contactMissing.includes("nombre")) {
+      return {
+        replyText: composeInsuranceContactPrompt(safeStr(currentInsurance.tipo_seguro)),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_name",
+          nextExpected: "insurance_name",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_name" },
+      };
+    }
+
+    if (contactMissing.includes("estado")) {
+      return {
+        replyText: composeInsuranceLocationPrompt(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_location",
+          nextExpected: "insurance_location",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_location" },
+      };
+    }
+
+    if (contactMissing.includes("email")) {
+      return {
+        replyText: composeInsuranceEmailPrompt(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_email",
+          nextExpected: "insurance_email",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_email" },
+      };
+    }
+
+    if (!currentInsurance.seguro_actual) {
+      return {
+        replyText: composeInsuranceCurrentCoveragePrompt(),
+        interactiveButtons: buildInsuranceCurrentCoverageButtons(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_current",
+          nextExpected: "insurance_current",
+        },
+        debug: { intent: interpreted.intent, phase: "QUALIFICATION", route: "insurance_ask_current" },
+      };
+    }
+
+    if (!safeStr(currentInsurance.presupuesto)) {
+      return {
+        replyText: composeInsuranceBudgetPrompt(),
+        interactiveButtons: buildInsuranceBudgetButtons(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_budget",
+          nextExpected: "insurance_budget",
+        },
+        debug: { intent: interpreted.intent, phase: "QUALIFICATION", route: "insurance_ask_budget" },
+      };
+    }
+
+    if (!safeStr(currentInsurance.horario_preferido)) {
+      return {
+        replyText: composeInsurancePreferredTimePrompt(),
+        interactiveButtons: buildInsurancePreferredTimeButtons(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_preferred_time",
+          nextExpected: "insurance_preferred_time",
+        },
+        debug: { intent: interpreted.intent, phase: "QUALIFICATION", route: "insurance_ask_preferred_time" },
+      };
+    }
+
+    const scoring = calculateInsuranceScoring(currentInsurance);
+    const savedInsurance: InsuranceCollected = {
+      ...currentInsurance,
+      scoring,
+      saved: true,
+    };
+    return {
+      replyText: composeInsuranceConfirmation({
+        typeName: safeStr(savedInsurance.tipo_seguro),
+        contact: (savedInsurance.contacto ?? {}) as Record<string, unknown>,
+        currentInsurance: formatInsuranceCurrentCoverageForCopy(savedInsurance.seguro_actual),
+        budget: safeStr(savedInsurance.presupuesto),
+        preferredTime: safeStr(savedInsurance.horario_preferido),
+        priority: scoring.prioridad,
+      }),
+      statePatch: {
+        stage: "CLOSED",
+        orgType: "insurance",
+        collected: { ...collected, insurance: savedInsurance },
+        lastIntent: "insurance_confirmed",
+        nextExpected: undefined,
+      },
+      debug: { intent: interpreted.intent, phase: "CLOSED", route: "insurance_saved_confirmed" },
     };
   }
 
@@ -7526,7 +7753,7 @@ export function runConversationEngine(args: {
 
     if (isRescheduleDateTimeExpected(state.nextExpected)) {
       const isDentalConversation =
-        safeStr(state.orgType, determineOrgType(args.organizationId)).toLowerCase() ===
+        safeStr(state.orgType, determineOrgType(args.organizationId, resolvedBusinessType)).toLowerCase() ===
           "dental" ||
         args.organizationId === "clinic-demo";
       const sameDayTimeMatch = normalizeTextForIntent(args.inboundText).match(

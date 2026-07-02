@@ -4,6 +4,8 @@ import {
   resolveInsuranceServiceOption,
 } from "./insuranceResponseComposer.ts";
 
+export type InsuranceCurrentCoverageStatus = "vence_pronto" | "comparando" | "no_tiene";
+
 export type InsuranceCollected = {
   tipo_seguro?: string;
   tipo_seguro_id?: string;
@@ -13,7 +15,7 @@ export type InsuranceCollected = {
     telefono?: string;
     email?: string;
   };
-  seguro_actual?: "si" | "no";
+  seguro_actual?: InsuranceCurrentCoverageStatus;
   presupuesto?: string;
   horario_preferido?: string;
   scoring?: {
@@ -33,7 +35,7 @@ export type InsuranceInterpretedTurn = {
     estado: string | null;
     telefono: string | null;
     email: string | null;
-    seguro_actual: "si" | "no" | null;
+    seguro_actual: InsuranceCurrentCoverageStatus | null;
     presupuesto: string | null;
     horario_preferido: string | null;
   };
@@ -99,13 +101,17 @@ function extractBudget(text: string): string | null {
   return null;
 }
 
-function extractCurrentInsurance(text: string): "si" | "no" | null {
+function extractCurrentInsurance(text: string): InsuranceCurrentCoverageStatus | null {
   const action = normalizeActionId(text);
-  if (action === "insurance_current:yes") return "si";
-  if (action === "insurance_current:no") return "no";
+  if (action === "insurance_current:vence_pronto") return "vence_pronto";
+  if (action === "insurance_current:comparando") return "comparando";
+  if (action === "insurance_current:no_tiene") return "no_tiene";
+  if (action === "insurance_current:yes") return "comparando";
+  if (action === "insurance_current:no") return "no_tiene";
   const normalized = normalizeText(text);
-  if (/\b(no tengo|sin seguro|no)\b/.test(normalized)) return "no";
-  if (/\b(si tengo|s[ií]|tengo|ya tengo|actualmente tengo)\b/.test(normalized)) return "si";
+  if (/\b(vence pronto|se vence|por vencer|renovar|renovacion|expira|caduca|vence)\b/.test(normalized)) return "vence_pronto";
+  if (/\b(no tengo|sin seguro|no)\b/.test(normalized)) return "no_tiene";
+  if (/\b(compar|cotiz|mejor precio|ya tengo|actualmente tengo|tengo|si tengo|s[ií])\b/.test(normalized)) return "comparando";
   return null;
 }
 
@@ -140,12 +146,15 @@ export function calculateInsuranceScoring(collected: InsuranceCollected): NonNul
     score += 15;
     razones.push("tipo de seguro definido");
   }
-  if (collected.seguro_actual === "no") {
+  if (collected.seguro_actual === "vence_pronto") {
+    score += 30;
+    razones.push("seguro actual vence pronto");
+  } else if (collected.seguro_actual === "comparando") {
+    score += 15;
+    razones.push("compara cobertura existente");
+  } else if (collected.seguro_actual === "no_tiene") {
     score += 20;
     razones.push("no tiene cobertura actual");
-  } else if (collected.seguro_actual === "si") {
-    score += 10;
-    razones.push("ya compara cobertura existente");
   }
   const budgetNumber = Number(safeStr(collected.presupuesto).replace(/[^\d.]/g, ""));
   if (Number.isFinite(budgetNumber) && budgetNumber > 0) {
