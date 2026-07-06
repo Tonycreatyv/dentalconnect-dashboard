@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useClinic } from "../context/ClinicContext";
 import { getDetectedVerticalConfig } from "../config/verticalConfig";
+import type { BusinessType } from "../config/verticalConfig";
 import { supabase } from "../lib/supabaseClient";
 
 const SELECTED_ORG_STORAGE_KEY = "selected_organization_id";
 const SELECTED_BUSINESS_TYPE_STORAGE_KEY = "selected_business_type";
 
-export const ORG_TYPE_FALLBACK: Record<string, "dental" | "barbershop"> = {
+export const ORG_TYPE_FALLBACK: Record<string, BusinessType> = {
   "barber-demo": "barbershop",
   "barber-demo-wimaeil": "barbershop",
+  "insurance-demo": "referral_hub",
   "clinic-demo": "dental",
   "creatyv-product": "dental",
   "testing-mxp0snq": "barbershop",
@@ -19,6 +21,7 @@ export const ORG_TYPE_FALLBACK: Record<string, "dental" | "barbershop"> = {
 export const ORG_NAME_FALLBACK: Record<string, string> = {
   "barber-demo": "BarberLine",
   "barber-demo-wimaeil": "Barbería WIMAEIL",
+  "insurance-demo": "Luis Gabriel Referral Hub",
   "clinic-demo": "Dental Demo",
   "creatyv-product": "Creatyv Product",
   "testing-mxp0snq": "Testing Barber Demo",
@@ -29,6 +32,7 @@ export const ORG_NAME_FALLBACK: Record<string, string> = {
 const BARBERSHOP_GENERIC_NAME_RE = /\b(cl[ií]nica|dentalconnect|dental demo|pacientes?|doctores?|dental)\b/i;
 const PREFERRED_BARBERSHOP_ORGS = ["barber-demo", "testing-mxp0snq", "testing-mnxp0snq", "barber-demo-wimaeil"];
 const PREFERRED_DENTAL_ORGS = ["clinic-demo", "creatyv-product", "org-359ba3c4", "irvin-mazariegos-clinic"];
+const PREFERRED_REFERRAL_HUB_ORGS = ["insurance-demo"];
 
 function readDevOverride() {
   try {
@@ -41,9 +45,11 @@ function readDevOverride() {
   }
 }
 
-function normalizeBusinessType(input: unknown): "dental" | "barbershop" | "" {
+function normalizeBusinessType(input: unknown): BusinessType | "" {
   const raw = String(input ?? "").trim().toLowerCase();
   if (raw === "barbershop") return "barbershop";
+  if (raw === "insurance") return "insurance";
+  if (raw === "referral_hub") return "referral_hub";
   if (raw === "dental" || raw === "clinic" || raw.includes("dental")) return "dental";
   return "";
 }
@@ -55,7 +61,7 @@ function displayNameFromSettings(row: any): string {
 export function resolveFrontendBusinessType(
   organizationId: string | null | undefined,
   candidate?: string | null,
-): "dental" | "barbershop" {
+): BusinessType {
   const orgId = String(organizationId ?? "").trim();
   const normalized = normalizeBusinessType(candidate);
   if (normalized) return normalized;
@@ -66,10 +72,11 @@ export function resolveFrontendBusinessType(
 
 export function resolveFrontendOrgName(
   organizationId: string | null | undefined,
-  businessType: "dental" | "barbershop",
+  businessType: BusinessType,
   candidate?: string | null,
 ): string {
   const orgId = String(organizationId ?? "").trim();
+  if (businessType === "referral_hub" && ORG_NAME_FALLBACK[orgId]) return ORG_NAME_FALLBACK[orgId];
   if (businessType === "barbershop" && ORG_NAME_FALLBACK[orgId]) return ORG_NAME_FALLBACK[orgId];
 
   const name = String(candidate ?? "").trim();
@@ -87,7 +94,7 @@ export function useActiveOrg() {
   const [override, setOverride] = useState(readDevOverride);
   const [settingsMeta, setSettingsMeta] = useState<{
     organizationId: string;
-    businessType: "dental" | "barbershop" | "";
+    businessType: BusinessType | "";
     name: string;
   }>({ organizationId: "", businessType: "", name: "" });
 
@@ -113,10 +120,14 @@ export function useActiveOrg() {
       const businessType = meta?.business_type ?? resolveFrontendBusinessType(id);
       return businessType === verticalType;
     };
-    const preferred = (verticalType === "barbershop" ? PREFERRED_BARBERSHOP_ORGS : PREFERRED_DENTAL_ORGS)
+    const preferred = (verticalType === "barbershop"
+      ? PREFERRED_BARBERSHOP_ORGS
+      : verticalType === "referral_hub"
+      ? PREFERRED_REFERRAL_HUB_ORGS
+      : PREFERRED_DENTAL_ORGS)
       .find((id) => availableOrgs.some((org) => org.organization_id === id && (!verticalType || org.business_type === verticalType)));
     const firstMatching = availableOrgs.find((org) => !verticalType || org.business_type === verticalType)?.organization_id;
-    const fallback = verticalType === "barbershop" ? "barber-demo" : "clinic-demo";
+    const fallback = verticalType === "barbershop" ? "barber-demo" : verticalType === "referral_hub" ? "insurance-demo" : "clinic-demo";
 
     if (isAdmin && matchesVertical(override.orgId)) return override.orgId;
     if (matchesVertical(activeOrgId)) return activeOrgId;
@@ -158,12 +169,12 @@ export function useActiveOrg() {
     };
   }, [resolvedOrgId]);
 
-  const resolvedBusinessType = useMemo<"dental" | "barbershop">(() => {
+  const resolvedBusinessType = useMemo<BusinessType>(() => {
     if (detectedVertical.businessType) return detectedVertical.businessType;
     const settingsBusinessType = settingsMeta.organizationId === resolvedOrgId ? settingsMeta.businessType : "";
     if (settingsBusinessType) return settingsBusinessType;
     const raw = (isAdmin ? override.businessType : "") || activeBusinessType || "";
-    if (raw === "barbershop" || raw === "dental") return raw;
+    if (raw === "barbershop" || raw === "dental" || raw === "insurance" || raw === "referral_hub") return raw;
     if (detectedVertical.businessType) return detectedVertical.businessType;
     return resolveFrontendBusinessType(resolvedOrgId);
   }, [settingsMeta, resolvedOrgId, isAdmin, override.businessType, activeBusinessType, detectedVertical.businessType]);

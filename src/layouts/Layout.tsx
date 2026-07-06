@@ -23,6 +23,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/patients": "Pacientes",
   "/billing": "Billing",
   "/settings": "Ajustes",
+  "/referral-hub": "Referral Hub",
 };
 
 export default function Layout() {

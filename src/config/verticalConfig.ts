@@ -1,5 +1,5 @@
-export type BusinessType = "dental" | "barbershop";
-export type VerticalId = "dental" | "barberline" | "creatyv";
+export type BusinessType = "dental" | "barbershop" | "insurance" | "referral_hub";
+export type VerticalId = "dental" | "barberline" | "insurance" | "referral_hub" | "creatyv";
 
 export type VerticalConfig = {
   id: VerticalId;
@@ -170,6 +170,113 @@ const BARBERSHOP_CONFIG: VerticalConfig = {
   ],
 };
 
+const INSURANCE_CONFIG: VerticalConfig = {
+  id: "insurance",
+  brandName: "InsuranceLine",
+  businessType: "insurance",
+  tagline: "Sistema operativo para agencias de seguros en WhatsApp.",
+  primaryCTA: "Entrar al panel de seguros",
+  dashboardLabel: "Panel InsuranceLine",
+  documentTitle: "InsuranceLine - Panel para agencias de seguros",
+  emailPlaceholder: "contacto@agencia.com",
+  orgSlugFallback: "seguros",
+  onboardingOrgQuestion: "¿Cómo se llama tu agencia?",
+  onboardingOrgNameLabel: "Nombre de la agencia *",
+  onboardingOrgInfoCopy: "Esta información aparecerá cuando el bot se comunique con tus prospectos.",
+  onboardingMessengerError: "Primero debemos crear la agencia antes de conectar Messenger.",
+  onboardingServicesCopy: "Activa los tipos de seguro que ofrece tu agencia. Puedes editar detalles.",
+  onboardingConnectCopy: "Para que el asistente pueda responder mensajes de tus prospectos, necesitamos conectar la página de Facebook de tu agencia.",
+  brandPlaceholder: "Ej: Seguros Central",
+  theme: {
+    accent: "#38BDF8",
+    accentSoft: "rgba(56,189,248,0.16)",
+    gradient: "from-[#38BDF8] via-[#3CBDB9] to-[#59E0B8]",
+  },
+  productName: "InsuranceLine",
+  verticalName: "Agencia de seguros",
+  organizationLabel: "Agencia",
+  customerLabel: "Prospecto",
+  customersLabel: "Prospectos",
+  providerLabel: "Asesor",
+  providersLabel: "Asesores",
+  serviceLabel: "Seguro",
+  servicesLabel: "Tipos de seguro",
+  scheduleLabel: "Horario",
+  settingsLabel: "Configuración",
+  agendaTitle: "Solicitudes",
+  settingsSubtitle: "Gestiona tu agencia, horarios, asesores, tipos de seguro e integraciones.",
+  defaultServices: [
+    { name: "Auto", notes: "Seguro de auto." },
+    { name: "Vida", notes: "Seguro de vida." },
+    { name: "Casa", notes: "Seguro de vivienda." },
+    { name: "Negocio", notes: "Seguro comercial." },
+  ],
+  defaultSpecialties: [
+    { value: "auto", label: "Auto" },
+    { value: "vida", label: "Vida" },
+    { value: "casa", label: "Casa" },
+    { value: "negocio", label: "Negocio" },
+  ],
+  defaultFaqs: [
+    { q: "¿Cotizan seguro de auto?", a: "Sí. ¿En qué estado estás y qué cobertura buscás?" },
+    { q: "¿Tienen seguro de vida?", a: "Sí. Te ayudamos a revisar opciones según tu presupuesto." },
+    { q: "¿Me puede llamar un asesor?", a: "Sí. ¿Qué horario preferís?" },
+  ],
+};
+
+const REFERRAL_HUB_CONFIG: VerticalConfig = {
+  ...INSURANCE_CONFIG,
+  id: "referral_hub",
+  brandName: "Referral Hub",
+  businessType: "referral_hub",
+  tagline: "Panel para conectar solicitudes de WhatsApp con aliados de confianza.",
+  primaryCTA: "Entrar al Referral Hub",
+  dashboardLabel: "Referral Hub",
+  documentTitle: "Creatyv Referral Hub - Panel de referidos",
+  emailPlaceholder: "contacto@luisgabriel.com",
+  orgSlugFallback: "referral-hub",
+  onboardingOrgQuestion: "¿Cómo se llama tu red de referidos?",
+  onboardingOrgNameLabel: "Nombre de la organización *",
+  onboardingOrgInfoCopy: "Esta información aparecerá cuando el bot se comunique con tu comunidad.",
+  onboardingMessengerError: "Primero debemos crear la organización antes de conectar Messenger.",
+  onboardingServicesCopy: "Activa los servicios y acciones que ofrece tu red de referidos.",
+  onboardingConnectCopy: "Para que Referral Hub pueda responder mensajes, necesitamos conectar WhatsApp/Facebook.",
+  brandPlaceholder: "Ej: Luis Gabriel",
+  theme: {
+    accent: "#25D366",
+    accentSoft: "rgba(37,211,102,0.16)",
+    gradient: "from-[#25D366] via-[#25D366] to-[#25D366]",
+  },
+  productName: "Creatyv Referral Hub",
+  verticalName: "Referral Hub",
+  organizationLabel: "Organización",
+  customerLabel: "Lead",
+  customersLabel: "Leads",
+  providerLabel: "Aliado",
+  providersLabel: "Aliados",
+  serviceLabel: "Servicio",
+  servicesLabel: "Servicios",
+  scheduleLabel: "Seguimiento",
+  settingsLabel: "Ajustes",
+  agendaTitle: "Referidos",
+  settingsSubtitle: "Gestiona servicios, aliados, códigos de canje y seguimiento.",
+  defaultServices: [
+    { name: "Accidente de Auto", notes: "Intake de accidente." },
+    { name: "Inmigración", notes: "Intake de inmigración." },
+    { name: "Cupón médico 20%", notes: "Acción estática con código de canje." },
+    { name: "Cupón $20 super", notes: "Acción estática con código de canje." },
+  ],
+  defaultSpecialties: [
+    { value: "auto_accident", label: "Accidente de Auto" },
+    { value: "immigration", label: "Inmigración" },
+    { value: "static_action", label: "Cupones y recursos" },
+  ],
+  defaultFaqs: [
+    { q: "¿Puedo hablar con alguien?", a: "Sí, te conectamos con un representante." },
+    { q: "¿Qué servicios tienen?", a: "Podemos ayudarte con accidente de auto, inmigración y recursos comunitarios." },
+  ],
+};
+
 const CREATYV_CONFIG: VerticalConfig = {
   ...DENTAL_CONFIG,
   id: "creatyv",
@@ -197,11 +304,16 @@ const CREATYV_CONFIG: VerticalConfig = {
 };
 
 export function getVerticalConfig(businessType: string | null | undefined): VerticalConfig {
-  return businessType === "barbershop" ? BARBERSHOP_CONFIG : DENTAL_CONFIG;
+  if (businessType === "barbershop") return BARBERSHOP_CONFIG;
+  if (businessType === "insurance") return INSURANCE_CONFIG;
+  if (businessType === "referral_hub") return REFERRAL_HUB_CONFIG;
+  return DENTAL_CONFIG;
 }
 
 export function getVerticalConfigById(id: VerticalId): VerticalConfig {
   if (id === "barberline") return BARBERSHOP_CONFIG;
+  if (id === "insurance") return INSURANCE_CONFIG;
+  if (id === "referral_hub") return REFERRAL_HUB_CONFIG;
   if (id === "creatyv") return CREATYV_CONFIG;
   return DENTAL_CONFIG;
 }
@@ -214,6 +326,8 @@ export function detectVerticalFromHostname(hostname: string): VerticalConfig {
   // Vertical routing lives here. Hosting should point every product subdomain
   // at the same React bundle; this function decides which experience to load.
   if (normalized.includes("barberline")) return BARBERSHOP_CONFIG;
+  if (normalized.includes("referralhub") || normalized.includes("referral") || normalized.includes("luisgabriel") || normalized.includes("luis-gabriel")) return REFERRAL_HUB_CONFIG;
+  if (normalized.includes("insurance")) return INSURANCE_CONFIG;
   if (normalized.includes("dental")) return DENTAL_CONFIG;
   if (normalized === "creatyv.io" || normalized === "www.creatyv.io") {
     return CREATYV_CONFIG;
@@ -227,6 +341,8 @@ export function getForcedDevVerticalConfig(): VerticalConfig | null {
   const normalize = (value: unknown): VerticalConfig | null => {
     const raw = String(value ?? "").trim().toLowerCase();
     if (raw === "barbershop" || raw === "barberline") return BARBERSHOP_CONFIG;
+    if (raw === "referral_hub" || raw === "referralhub" || raw === "referral" || raw === "luis" || raw === "luisgabriel") return REFERRAL_HUB_CONFIG;
+    if (raw === "insurance" || raw === "insuranceline") return INSURANCE_CONFIG;
     if (raw === "dental" || raw === "dentalconnect") return DENTAL_CONFIG;
     if (raw === "creatyv") return CREATYV_CONFIG;
     return null;

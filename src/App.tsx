@@ -20,6 +20,7 @@ import BillingSuccess from "./pages/BillingSuccess";
 import BillingCancel from "./pages/BillingCancel";
 import WhatsAppTemplates from "./pages/WhatsAppTemplates";
 import CommandCenter from "./pages/CommandCenter";
+import ReferralHubDashboard from "./pages/ReferralHubDashboard";
 import { AuthProvider } from "./context/AuthContext";
 import { ClinicProvider } from "./context/ClinicContext";
 import { useAuth } from "./context/AuthContext";
@@ -119,6 +120,7 @@ function AppRoutesInner() {
         <Route path="billing/success" element={<BillingSuccess />} />
         <Route path="billing/cancel" element={<BillingCancel />} />
         <Route path="command" element={<CommandCenter />} />
+        <Route path="referral-hub" element={<ReferralHubDashboard />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/hoy" replace />} />

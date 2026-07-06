@@ -7,9 +7,12 @@ const ACTIVE_ORG_STORAGE_KEY = "active_org_id";
 const SELECTED_ORG_STORAGE_KEY = "selected_organization_id";
 const SELECTED_BUSINESS_TYPE_STORAGE_KEY = "selected_business_type";
 const PLATFORM_ADMIN_EMAILS = new Set(["joseduran1791@gmail.com"]);
-const ORG_TYPE_FALLBACK: Record<string, "dental" | "barbershop"> = {
+type FrontendBusinessType = BusinessType;
+
+const ORG_TYPE_FALLBACK: Record<string, FrontendBusinessType> = {
   "barber-demo": "barbershop",
   "barber-demo-wimaeil": "barbershop",
+  "insurance-demo": "referral_hub",
   "clinic-demo": "dental",
   "creatyv-product": "dental",
   "testing-mxp0snq": "barbershop",
@@ -20,6 +23,7 @@ const ORG_TYPE_FALLBACK: Record<string, "dental" | "barbershop"> = {
 const ORG_NAME_FALLBACK: Record<string, string> = {
   "barber-demo": "BarberLine",
   "barber-demo-wimaeil": "Barbería WIMAEIL",
+  "insurance-demo": "Luis Gabriel Referral Hub",
   "clinic-demo": "Dental Demo",
   "creatyv-product": "Creatyv Product",
   "testing-mxp0snq": "Testing Barber Demo",
@@ -30,6 +34,7 @@ const ORG_NAME_FALLBACK: Record<string, string> = {
 const BARBERSHOP_GENERIC_NAME_RE = /\b(cl[ií]nica|dentalconnect|dental demo|pacientes?|doctores?|dental)\b/i;
 const PREFERRED_BARBERSHOP_ORGS = ["barber-demo", "testing-mxp0snq", "testing-mnxp0snq", "barber-demo-wimaeil"];
 const PREFERRED_DENTAL_ORGS = ["clinic-demo", "creatyv-product", "org-359ba3c4", "irvin-mazariegos-clinic"];
+const PREFERRED_REFERRAL_HUB_ORGS = ["insurance-demo"];
 
 export type ClinicProfile = {
   id: string;
@@ -41,7 +46,7 @@ export type ClinicProfile = {
 type OrgOption = {
   organization_id: string;
   role?: string | null;
-  business_type?: "dental" | "barbershop" | null;
+  business_type?: FrontendBusinessType | null;
   name?: string | null;
 };
 
@@ -49,7 +54,7 @@ type ClinicContextValue = {
   clinic: ClinicProfile | null;
   clinicId: string | null;
   activeOrgId: string | null;
-  activeBusinessType: "dental" | "barbershop" | null;
+  activeBusinessType: FrontendBusinessType | null;
   activeOrgName: string | null;
   isAdmin: boolean;
   availableOrgs: OrgOption[];
@@ -69,9 +74,10 @@ function fallbackBusinessType(organizationId: string): BusinessType {
 
 function safeOrgName(
   organizationId: string,
-  businessType: "dental" | "barbershop",
+  businessType: FrontendBusinessType,
   candidate?: string | null,
 ): string {
+  if (businessType === "referral_hub" && ORG_NAME_FALLBACK[organizationId]) return ORG_NAME_FALLBACK[organizationId];
   if (businessType === "barbershop" && ORG_NAME_FALLBACK[organizationId]) return ORG_NAME_FALLBACK[organizationId];
   const name = String(candidate ?? "").trim();
   if (businessType === "barbershop") {
@@ -90,7 +96,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const [clinic, setClinic] = useState<ClinicProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [availableOrgs, setAvailableOrgs] = useState<OrgOption[]>([]);
-  const [activeBusinessType, setActiveBusinessType] = useState<"dental" | "barbershop" | null>(null);
+  const [activeBusinessType, setActiveBusinessType] = useState<FrontendBusinessType | null>(null);
   const [activeOrgName, setActiveOrgName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -254,6 +260,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       if (relOrgId) orgCandidates.push(relOrgId);
       if (isPlatformAdmin) {
         orgCandidates.push(
+          "insurance-demo",
           "barber-demo-wimaeil",
           "barber-demo",
           "clinic-demo",
@@ -266,6 +273,9 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       }
       if ((import.meta.env.DEV || isPlatformAdmin) && detectedVertical.businessType === "barbershop") {
         orgCandidates.push(...PREFERRED_BARBERSHOP_ORGS);
+      }
+      if ((import.meta.env.DEV || isPlatformAdmin) && detectedVertical.businessType === "referral_hub") {
+        orgCandidates.push(...PREFERRED_REFERRAL_HUB_ORGS);
       }
       if ((import.meta.env.DEV || isPlatformAdmin) && detectedVertical.businessType === "dental") {
         orgCandidates.push(...PREFERRED_DENTAL_ORGS);
@@ -294,12 +304,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const orgMetaById = new Map(
         [...orgSettingsRows, ...organizationSettingsRows].map((row) => {
           const id = String(row?.organization_id ?? "").trim();
-          const rowBusinessType = String(row?.business_type ?? "").trim().toLowerCase() === "barbershop" ? "barbershop" : fallbackBusinessType(id);
+          const rawBusinessType = String(row?.business_type ?? "").trim().toLowerCase();
+          const rowBusinessType = rawBusinessType === "barbershop" || rawBusinessType === "insurance" || rawBusinessType === "referral_hub"
+            ? rawBusinessType
+            : fallbackBusinessType(id);
           const rawName =
             String(row?.display_name ?? row?.brand_name ?? row?.name ?? "").trim() ||
             orgNameById.get(id) ||
             null;
-          return [id, { business_type: rowBusinessType as "dental" | "barbershop", name: safeOrgName(id, rowBusinessType, rawName) }];
+          return [id, { business_type: rowBusinessType as FrontendBusinessType, name: safeOrgName(id, rowBusinessType as FrontendBusinessType, rawName) }];
         }),
       );
       const allOrgOptions = uniqOrgIds.map((organization_id) => ({
@@ -311,7 +324,11 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const visibleOrgOptions = detectedVertical.businessType
         ? allOrgOptions.filter((org) => org.business_type === detectedVertical.businessType)
         : allOrgOptions;
-      const preferredIds = detectedVertical.businessType === "barbershop" ? PREFERRED_BARBERSHOP_ORGS : PREFERRED_DENTAL_ORGS;
+      const preferredIds = detectedVertical.businessType === "barbershop"
+        ? PREFERRED_BARBERSHOP_ORGS
+        : detectedVertical.businessType === "referral_hub"
+        ? PREFERRED_REFERRAL_HUB_ORGS
+        : PREFERRED_DENTAL_ORGS;
       visibleOrgOptions.sort((a, b) => {
         const ai = preferredIds.indexOf(a.organization_id);
         const bi = preferredIds.indexOf(b.organization_id);

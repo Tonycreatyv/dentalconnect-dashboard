@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, CreditCard, Shield, Scissors, Clock, LogOut } from "lucide-react";
+import { LayoutDashboard, Inbox, CalendarDays, Users, Settings, CreditCard, Shield, Scissors, Clock, LogOut, Handshake } from "lucide-react";
 import { useClinic } from "../context/ClinicContext";
 import { useAuth } from "../context/AuthContext";
 import { resolveFrontendBusinessType, resolveFrontendOrgName, useActiveOrg } from "../hooks/useActiveOrg";
@@ -9,6 +9,7 @@ import { MobileStatusPill } from "./mobile/MobilePrimitives";
 function fallbackOrgLabel(organizationId: string): string {
   if (organizationId === "barber-demo") return "BarberLine";
   if (organizationId === "barber-demo-wimaeil") return "Barbería WIMAEIL";
+  if (organizationId === "insurance-demo") return "Luis Gabriel Referral Hub";
   if (organizationId === "clinic-demo") return "Dental Demo";
   if (organizationId === "creatyv-product") return "Creatyv Product";
   if (organizationId === "testing-mxp0snq") return "Testing Barber Demo";
@@ -19,10 +20,11 @@ function fallbackOrgLabel(organizationId: string): string {
 }
 
 function orgProductLabel(organizationId: string, businessType?: string | null): string {
+  if (businessType === "referral_hub" || organizationId === "insurance-demo") return "Referral Hub";
   return businessType === "barbershop" || organizationId.startsWith("barber-") ? "BarberLine" : "DentalConnect";
 }
 
-function isDevOrg(organizationId: string, currentBusinessType: "dental" | "barbershop"): boolean {
+function isDevOrg(organizationId: string, currentBusinessType: string): boolean {
   if (["testing-mxp0snq", "testing-mnxp0snq", "org-359ba3c4", "irvin-mazariegos-clinic", "creatyv-product"].includes(organizationId)) {
     return true;
   }
@@ -69,10 +71,11 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const vertical = getVerticalConfig(resolvedBusinessType);
 
   const isBarbershop = resolvedBusinessType === "barbershop";
+  const isReferralHub = resolvedBusinessType === "referral_hub";
   const shopName = resolvedOrgName ?? fallbackOrgLabel(resolvedOrgId ?? activeOrgId ?? "");
   const orgOptions = availableOrgs.map((org) => {
     const organizationId = String(org.organization_id ?? "").trim();
-    const businessType = org.business_type === "barbershop" ? "barbershop" : resolveFrontendBusinessType(organizationId);
+    const businessType = org.business_type ?? resolveFrontendBusinessType(organizationId);
     return {
       ...org,
       organization_id: organizationId,
@@ -153,6 +156,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="mt-4 grid gap-1.5">
         <NavItem to="/hoy" icon={LayoutDashboard} label="Hoy" active={isActivePlainPath("/hoy")} onNavigate={onNavigate} />
+        {isReferralHub ? (
+          <NavItem to="/referral-hub" icon={Handshake} label="Referral Hub" active={isActivePlainPath("/referral-hub")} onNavigate={onNavigate} />
+        ) : null}
         <NavItem to="/agenda" icon={CalendarDays} label={isBarbershop ? "Citas" : vertical.agendaTitle} active={isActivePlainPath("/agenda")} onNavigate={onNavigate} />
         <NavItem to="/leads" icon={Users} label={isBarbershop ? "Clientes" : vertical.customersLabel} active={isActivePlainPath("/leads")} onNavigate={onNavigate} />
         <NavItem to="/inbox" icon={Inbox} label="Inbox" active={location.pathname.startsWith("/inbox")} onNavigate={onNavigate} />

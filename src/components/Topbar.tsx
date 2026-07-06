@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useClinic } from "../context/ClinicContext";
 import { resolveFrontendBusinessType, resolveFrontendOrgName, useActiveOrg } from "../hooks/useActiveOrg";
 import { getDetectedVerticalConfig, getVerticalConfig } from "../config/verticalConfig";
+import type { BusinessType } from "../config/verticalConfig";
 
 const SELECTED_ORG_STORAGE_KEY = "selected_organization_id";
 const SELECTED_BUSINESS_TYPE_STORAGE_KEY = "selected_business_type";
 
 const DEV_ORG_OPTIONS = [
+  { label: "Luis Gabriel Referral Hub", organizationId: "insurance-demo", businessType: "referral_hub" },
   { label: "Barbería WIMAEIL", organizationId: "barber-demo-wimaeil", businessType: "barbershop" },
   { label: "BarberLine", organizationId: "barber-demo", businessType: "barbershop" },
   { label: "Dental Demo", organizationId: "clinic-demo", businessType: "dental" },
@@ -22,6 +24,7 @@ const DEV_ORG_OPTIONS = [
 function fallbackOrgLabel(organizationId: string): string {
   if (organizationId === "barber-demo") return "BarberLine";
   if (organizationId === "barber-demo-wimaeil") return "Barbería WIMAEIL";
+  if (organizationId === "insurance-demo") return "Luis Gabriel Referral Hub";
   if (organizationId === "clinic-demo") return "Dental Demo";
   if (organizationId === "creatyv-product") return "Creatyv Product";
   if (organizationId === "testing-mxp0snq") return "Testing Barber Demo";
@@ -31,11 +34,11 @@ function fallbackOrgLabel(organizationId: string): string {
   return organizationId;
 }
 
-function fallbackOrgBusinessType(organizationId: string): "dental" | "barbershop" {
+function fallbackOrgBusinessType(organizationId: string): BusinessType {
   return resolveFrontendBusinessType(organizationId);
 }
 
-function isDevOrg(organizationId: string, currentBusinessType: "dental" | "barbershop"): boolean {
+function isDevOrg(organizationId: string, currentBusinessType: BusinessType): boolean {
   if (["testing-mxp0snq", "testing-mnxp0snq", "org-359ba3c4", "irvin-mazariegos-clinic", "creatyv-product"].includes(organizationId)) {
     return true;
   }
@@ -75,7 +78,7 @@ export function Topbar({
   }, [selectedOrgId, resolvedOrgId, activeOrgId, resolvedOrgName, resolvedBusinessType, availableOrgs]);
 
   const orgOptions = useMemo(() => {
-    const map = new Map<string, { label: string; organizationId: string; businessType: "dental" | "barbershop" }>();
+    const map = new Map<string, { label: string; organizationId: string; businessType: BusinessType }>();
     for (const opt of DEV_ORG_OPTIONS) {
       if (detectedVertical.businessType && opt.businessType !== detectedVertical.businessType) continue;
       map.set(opt.organizationId, opt);
@@ -83,7 +86,7 @@ export function Topbar({
     for (const org of availableOrgs) {
       const organizationId = String(org.organization_id ?? "").trim();
       if (!organizationId) continue;
-      const businessType = org.business_type === "barbershop" ? "barbershop" : fallbackOrgBusinessType(organizationId);
+      const businessType = org.business_type ?? fallbackOrgBusinessType(organizationId);
       if (detectedVertical.businessType && businessType !== detectedVertical.businessType) continue;
       map.set(organizationId, {
         organizationId,
@@ -196,7 +199,7 @@ export function Topbar({
                 <optgroup label={resolvedBusinessType === "barbershop" ? "Barberías" : "Demos activos"}>
                   {operatorOrgOptions.map((opt) => (
                     <option key={opt.organizationId} value={opt.organizationId}>
-                      {opt.label} · {opt.businessType === "barbershop" ? "BarberLine" : "DentalConnect"}
+                      {opt.label} · {opt.businessType === "barbershop" ? "BarberLine" : opt.businessType === "referral_hub" ? "Referral Hub" : "DentalConnect"}
                     </option>
                   ))}
                 </optgroup>
