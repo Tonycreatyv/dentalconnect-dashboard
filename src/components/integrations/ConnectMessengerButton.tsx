@@ -1,16 +1,23 @@
 import { useState } from "react";
+import { supabase } from "../../lib/supabaseClient";
 
 const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
-const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://dental.creatyv.io";
+const APP_URL = import.meta.env.VITE_PUBLIC_URL || "https://referral.creatyv.io";
 const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
 
 export async function startMetaOAuth(organizationId: string) {
   if (!META_APP_ID) throw new Error("Falta VITE_META_APP_ID.");
   if (!organizationId) throw new Error("Falta organization_id.");
+  const session = await supabase.auth.getSession();
+  const accessToken = session.data.session?.access_token;
+  if (!accessToken) throw new Error("Inicia sesión antes de conectar Messenger.");
 
   const stateRes = await fetch(`${FN_BASE}/meta-oauth-state`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
     body: JSON.stringify({ organization_id: organizationId }),
   });
   const stateJson = await stateRes.json().catch(() => ({}));

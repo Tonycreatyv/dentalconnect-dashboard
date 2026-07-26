@@ -45,6 +45,234 @@
   --mobile-accent: #25D366;
 }
 
+@layer components {
+  .referral-page {
+    @apply mx-auto w-full max-w-3xl space-y-5 px-2 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-1 sm:px-3 lg:pb-10;
+    color: #F4F7FA;
+  }
+  .referral-page-with-actions { padding-bottom: calc(9.5rem + env(safe-area-inset-bottom, 0px)); }
+  .referral-eyebrow { @apply text-[10px] font-bold uppercase tracking-[0.17em] text-[#748291]; }
+  .referral-metric { @apply min-w-0 rounded-2xl bg-[#111F2B] px-3 py-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.045)]; }
+  .referral-metric strong { @apply block text-xl font-black tracking-tight text-[#F4F7FA]; }
+  .referral-metric span { @apply mt-0.5 block text-[10px] leading-tight text-[#7E8C99]; }
+  .referral-operations-home { @apply space-y-4 pt-0; }
+  .referral-home-header { @apply pt-1; }
+  .referral-home-header h1 { @apply mt-1 text-[22px] font-bold leading-tight tracking-[-0.025em] text-[#F4F7FA]; }
+  .referral-home-header > p:last-child { @apply mt-1 text-xs text-[#84919D]; }
+  .referral-order-metrics { @apply grid grid-cols-3 gap-2; }
+  .referral-order-metric { @apply grid min-h-[62px] grid-cols-[6px_1fr] items-center gap-x-2 rounded-xl border border-white/[0.045] bg-[#10151D] px-2.5 py-2; }
+  .referral-order-metric > span { @apply row-span-2 h-6 w-1 rounded-full bg-[#5B8CFF]; }
+  .referral-order-metric strong { @apply self-end text-lg font-bold leading-none tracking-tight text-[#F4F7FA]; }
+  .referral-order-metric small { @apply self-start truncate text-[10px] leading-tight text-[#7F8B97]; }
+  .referral-order-metric-preparing > span { @apply bg-amber-400; }
+  .referral-order-metric-delivery > span { @apply bg-[#25D366]; }
+  .referral-recent-orders { @apply min-w-0; }
+  .referral-compact-heading { @apply mb-2 flex items-end justify-between gap-3; }
+  .referral-compact-heading h2 { @apply mt-0.5 text-[15px] font-bold tracking-tight text-[#F4F7FA]; }
+  .referral-compact-heading button { @apply inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-[11px] font-bold text-[#72D596] transition hover:bg-[#25D366]/[0.07] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#25D366]; }
+  .referral-order-list { @apply overflow-hidden rounded-xl border border-white/[0.045] bg-[#10151D]; }
+  .referral-order-row { @apply grid min-h-[68px] w-full grid-cols-[30px_minmax(0,1fr)_auto_auto_14px] items-center gap-2 border-b border-white/[0.045] px-2.5 py-2 text-left transition last:border-0 hover:bg-white/[0.025] active:bg-white/[0.04] focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#25D366]; }
+  .referral-order-row-icon { @apply flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-[#19251F] text-[#72D596]; }
+  .referral-order-status { @apply hidden rounded-md px-1.5 py-1 text-[9px] font-bold sm:inline-flex; }
+  .referral-order-status-submitted, .referral-order-status-confirmed { @apply bg-sky-400/10 text-sky-200; }
+  .referral-order-status-preparing, .referral-order-status-ready { @apply bg-amber-400/10 text-amber-200; }
+  .referral-order-status-out_for_delivery, .referral-order-status-delivered { @apply bg-emerald-400/10 text-emerald-200; }
+  .referral-order-status-cancelled { @apply bg-rose-400/10 text-rose-200; }
+  .referral-orders-empty { @apply flex min-h-[58px] items-center gap-2.5 rounded-xl border border-dashed border-white/[0.07] bg-[#10151D] px-3 text-[#65727E]; }
+  .referral-orders-empty > span { @apply min-w-0; }
+  .referral-orders-empty strong { @apply block text-xs font-semibold text-[#BCC5CC]; }
+  .referral-orders-empty small { @apply mt-0.5 block text-[10px] text-[#697682]; }
+  .referral-home-feedback { @apply flex min-h-[58px] items-center gap-2 rounded-xl border border-white/[0.045] bg-[#10151D] px-3 text-xs text-[#84919D]; }
+  .referral-home-feedback-error { @apply border-rose-400/10 text-rose-200; }
+  .referral-home-feedback button { @apply ml-auto min-h-10 rounded-lg px-2 font-bold text-[#72D596]; }
+  .referral-next-card { @apply overflow-hidden border-[#274437] bg-[#13271F] shadow-[0_18px_45px_rgba(0,0,0,0.24)]; }
+  .referral-section-heading { @apply mb-3 flex items-end justify-between gap-3; }
+  .referral-section-heading h2 { @apply mt-0.5 text-base font-bold tracking-tight text-[#F4F7FA]; }
+  .referral-section-heading button, .referral-text-button { @apply min-h-9 rounded-xl px-2 text-xs font-bold text-[#78D99C] transition hover:bg-[#25D366]/10 active:scale-[0.98]; }
+  .referral-lead-card { @apply rounded-[20px] bg-[#111F2B] p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),0_10px_26px_rgba(0,0,0,0.14)] transition duration-200 hover:bg-[#142432] active:scale-[0.99]; }
+  .referral-service-icon { @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#1A2C27] text-lg shadow-[inset_0_0_0_1px_rgba(37,211,102,0.12)]; }
+  .referral-service-icon.large { @apply h-12 w-12 rounded-2xl text-xl; }
+  .referral-urgency { @apply shrink-0 rounded-full bg-amber-400/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.1em] text-amber-200; }
+  .referral-search { @apply flex min-h-12 items-center gap-3 rounded-2xl bg-[#111F2B] px-4 text-[#748291] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]; }
+  .referral-search input { @apply h-12 min-w-0 flex-1 bg-transparent text-sm text-[#F4F7FA] outline-none placeholder:text-[#5D6B78]; }
+  .referral-loading { @apply flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-3xl bg-[#111F2B] text-sm text-[#7E8C99]; }
+  .referral-error, .referral-warning, .referral-success { @apply rounded-2xl px-4 py-3 text-sm; }
+  .referral-error, .referral-warning { @apply bg-amber-400/10 text-amber-100 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.18)]; }
+  .referral-success { @apply bg-[#25D366]/10 text-[#A9EEC1]; }
+  .referral-error button, .referral-warning button { @apply mt-2 inline-flex min-h-9 items-center gap-2 rounded-xl bg-white/10 px-3 text-xs font-bold; }
+  .referral-panel, .referral-identity-card { @apply rounded-[22px] bg-[#111F2B] p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]; }
+  .referral-panel h2, .referral-identity-card h2 { @apply text-sm font-bold text-[#F4F7FA]; }
+  .referral-body-copy { @apply mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[#A8B3BE]; }
+  .referral-identity-card { @apply flex items-start gap-3.5; }
+  .referral-identity-card p { @apply mt-1 text-sm text-[#8D9AA8]; }
+  .referral-identity-card span { @apply inline-flex items-center gap-1 rounded-lg bg-white/[0.035] px-2 py-1 text-[11px] text-[#7E8C99]; }
+  .referral-activity { @apply flex items-start gap-3 text-[#6FD897]; }
+  .referral-activity div { @apply min-w-0; }
+  .referral-activity strong { @apply block text-sm font-semibold text-[#DCE4EA]; }
+  .referral-activity span { @apply mt-0.5 block text-xs text-[#748291]; }
+  .referral-back { @apply inline-flex min-h-10 items-center gap-2 rounded-xl px-1 text-sm font-semibold text-[#8D9AA8] transition hover:text-white active:scale-[0.98]; }
+  .referral-primary-button, .referral-secondary-button, .referral-danger-button { @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-bold transition duration-200 active:scale-[0.98] disabled:opacity-50; }
+  .referral-primary-button { @apply bg-[#25D366] text-[#07150C] shadow-[0_10px_24px_rgba(37,211,102,0.16)] hover:bg-[#32DC71]; }
+  .referral-secondary-button { @apply bg-[#182734] text-[#DDE5EC] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]; }
+  .referral-danger-button { @apply bg-rose-500 text-white; }
+  .referral-action-icon { @apply flex h-11 w-11 items-center justify-center rounded-[14px] bg-[#182734] text-[#C8D1DA] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition active:scale-95 disabled:opacity-35; }
+  .referral-sticky-actions { @apply fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] z-40 mx-auto max-w-3xl border-t border-white/[0.06] bg-[#0B1620]/95 px-4 pb-3 pt-3 shadow-[0_-16px_36px_rgba(0,0,0,0.26)] backdrop-blur-xl lg:bottom-0 lg:rounded-t-3xl; }
+  .referral-sheet { @apply max-h-[82vh] overflow-y-auto; animation: referral-sheet-in 180ms ease-out; }
+  .referral-sheet-handle { @apply mx-auto mb-4 h-1 w-10 rounded-full bg-white/15; }
+  .referral-sheet-title { @apply mt-1 text-xl font-black tracking-tight text-[#F4F7FA]; }
+  .referral-icon-button { @apply flex h-10 w-10 items-center justify-center rounded-full bg-[#111F2B] text-[#8D9AA8] transition active:scale-95; }
+  .referral-sheet-option { @apply flex min-h-12 w-full items-center gap-3 rounded-2xl bg-[#111F2B] px-3 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)] transition hover:bg-[#152633] active:scale-[0.99]; }
+  .referral-status-dot { @apply h-2.5 w-2.5 rounded-full bg-[#748291]; }
+  .referral-status-accent { @apply bg-sky-400; } .referral-status-warning { @apply bg-amber-400; } .referral-status-success { @apply bg-emerald-400; } .referral-status-danger { @apply bg-rose-400; } .referral-status-muted { @apply bg-slate-500; }
+  .referral-empty-compact { @apply flex min-h-14 items-center gap-2 rounded-2xl bg-white/[0.035] px-3 text-sm text-[#7E8C99]; }
+  .referral-stage-selector { @apply -mx-3 flex gap-2 overflow-x-auto px-3 pb-2; scrollbar-width: none; }
+  .referral-stage-selector button { @apply inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full bg-[#111F2B] px-3.5 text-xs font-bold text-[#7E8C99] transition; }
+  .referral-stage-selector button.active { @apply bg-[#20362D] text-[#A6EDBF] shadow-[inset_0_0_0_1px_rgba(37,211,102,0.18)]; }
+  .referral-stage-selector span { @apply rounded-full bg-black/20 px-1.5 py-0.5 text-[10px]; }
+  .referral-account-row { @apply flex min-h-16 items-center gap-3 border-b border-white/[0.06] text-[#70D998] last:border-0; }
+  .referral-account-row div { @apply min-w-0; } .referral-account-row span { @apply block text-[11px] text-[#748291]; } .referral-account-row strong { @apply mt-1 block truncate text-sm font-semibold text-[#E7EDF2]; }
+  .referral-logout { @apply flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-rose-500/10 text-sm font-bold text-rose-200 shadow-[inset_0_0_0_1px_rgba(251,113,133,0.14)] transition active:scale-[0.99]; }
+  .referral-confirm-overlay { @apply fixed inset-0 z-[80] flex items-end justify-center bg-black/65 p-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] backdrop-blur-sm; }
+  .referral-confirm-card { @apply w-full max-w-sm rounded-3xl bg-[#162838] p-5 shadow-2xl; }
+  .referral-confirm-card h2 { @apply text-lg font-bold text-[#F4F7FA]; } .referral-confirm-card p { @apply mt-2 text-sm leading-6 text-[#8D9AA8]; }
+  .referral-topbar { @apply flex min-h-[54px] items-center justify-between gap-3 border-b border-[#1C2A35] bg-[#0B1620]/95 px-4 py-2 backdrop-blur lg:rounded-2xl lg:border; }
+  .referral-topbar-account { @apply flex h-10 w-10 items-center justify-center rounded-full bg-[#111F2B] text-[#9BA8B4] transition active:scale-95; }
+}
+
+@keyframes referral-sheet-in { from { transform: translateY(18px); opacity: .7; } to { transform: translateY(0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .referral-sheet { animation: none; } }
+@media (min-width: 1024px) {
+  .referral-sheet { display: block !important; left: auto !important; right: 2rem !important; bottom: 2rem !important; width: 420px; border-radius: 1.5rem !important; }
+}
+
+.dc-bg:has(.referral-shell) {
+  background: #080C11;
+  background-image: none;
+}
+
+.dc-bg:has(.referral-shell) .dc-bg-overlay {
+  background: rgba(2, 5, 8, 0.18);
+}
+
+/* Referral Hub premium neutral system: background → surface → elevated. */
+.referral-shell {
+  --ref-bg: #080B10;
+  --ref-surface: #10151D;
+  --ref-elevated: #171D27;
+  --ref-accent: #5B8CFF;
+  --ref-accent-hover: #4A7AFF;
+  --ref-muted: #8A94A3;
+}
+
+.dc-bg:has(.referral-shell) { background: var(--ref-bg); }
+.referral-shell .referral-page { animation: referral-fade-in 200ms ease-out; }
+.referral-shell .referral-metric,
+.referral-shell .referral-lead-card,
+.referral-shell .referral-panel,
+.referral-shell .referral-identity-card,
+.referral-shell .referral-search,
+.referral-shell .referral-loading { background: var(--ref-surface); }
+.referral-shell .referral-next-card,
+.referral-shell .referral-elevated,
+.referral-shell .referral-sheet,
+.referral-shell .referral-confirm-card { background: var(--ref-elevated); }
+
+.referral-shell .referral-metric,
+.referral-shell .referral-lead-card,
+.referral-shell .referral-panel,
+.referral-shell .referral-identity-card {
+  border-color: rgba(255,255,255,.035);
+  box-shadow: 0 8px 22px rgba(0,0,0,.16), inset 0 0 0 1px rgba(255,255,255,.025);
+}
+.referral-shell .referral-lead-card:hover { background: #141A23; transform: translateY(-1px); }
+.referral-shell .referral-lead-card:active { transform: scale(.985); }
+.referral-shell .referral-next-card {
+  border-color: rgba(91,140,255,.12);
+  box-shadow: 0 16px 36px rgba(0,0,0,.22), inset 0 0 0 1px rgba(91,140,255,.06);
+}
+.referral-shell .referral-service-icon {
+  color: #8EACFF;
+  background: rgba(91,140,255,.09);
+  box-shadow: none;
+}
+.referral-shell .referral-section-heading button,
+.referral-shell .referral-text-button { color: #8EACFF; }
+.referral-shell .referral-section-heading button:hover,
+.referral-shell .referral-text-button:hover { background: rgba(91,140,255,.08); }
+.referral-shell .referral-primary-button {
+  min-height: 40px;
+  background: var(--ref-accent);
+  color: #F8FAFF;
+  box-shadow: 0 8px 20px rgba(48,87,180,.22);
+  transition: transform 190ms ease, background-color 190ms ease, box-shadow 190ms ease;
+}
+.referral-shell .referral-primary-button:hover { background: var(--ref-accent-hover); box-shadow: 0 10px 24px rgba(48,87,180,.28); }
+.referral-shell .referral-primary-button:active { transform: scale(.975); }
+.referral-shell .referral-secondary-button,
+.referral-shell .referral-action-icon { background: #171D27; border-color: rgba(255,255,255,.04); }
+.referral-shell .referral-action-icon { width: 40px; height: 40px; border-radius: 12px; transition: transform 190ms ease, background-color 190ms ease; }
+.referral-shell .referral-action-icon:hover { background: #1D2531; color: #FFFFFF; }
+.referral-shell .referral-sticky-actions {
+  left: 12px;
+  right: 12px;
+  bottom: calc(5.35rem + env(safe-area-inset-bottom, 0px));
+  width: auto;
+  max-width: 744px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 18px;
+  background: rgba(20,26,35,.94);
+  box-shadow: 0 16px 42px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.28);
+  backdrop-filter: blur(18px);
+}
+.referral-shell .referral-sticky-actions .grid { align-items: center; }
+.referral-shell .referral-activity { color: #7AA2FF; }
+.referral-shell .referral-stage-selector button.active {
+  color: #B8C9FF;
+  background: rgba(91,140,255,.12);
+  box-shadow: inset 0 0 0 1px rgba(91,140,255,.12);
+}
+.referral-shell .referral-account-row { color: #7AA2FF; border-color: rgba(255,255,255,.035); }
+.referral-shell .referral-pill-accent {
+  color: #C5D3FF !important;
+  border-color: rgba(91,140,255,.2) !important;
+  background: rgba(91,140,255,.1) !important;
+}
+.referral-shell .referral-pill-success {
+  color: #B9F6CA !important;
+  border-color: rgba(34,197,94,.18) !important;
+  background: rgba(34,197,94,.09) !important;
+}
+.referral-shell .referral-pill-warning { color: #FCD38D !important; border-color: rgba(245,158,11,.18) !important; background: rgba(245,158,11,.09) !important; }
+.referral-shell .referral-pill-danger { color: #FECACA !important; border-color: rgba(239,68,68,.18) !important; background: rgba(239,68,68,.09) !important; }
+.referral-shell .referral-status-accent { background: #5B8CFF; }
+.referral-shell .referral-status-success { background: #22C55E; }
+.referral-shell .referral-status-warning { background: #F59E0B; }
+.referral-shell .referral-status-danger { background: #EF4444; }
+.referral-shell .referral-sheet-option { background: #111720; box-shadow: inset 0 0 0 1px rgba(255,255,255,.035); transition: transform 190ms ease, background-color 190ms ease; }
+.referral-shell .referral-sheet-option:hover { background: #181F2A; }
+.referral-shell .referral-sheet-option:active { transform: scale(.985); }
+
+.dc-bg:has(.referral-shell) .mobile-primary-nav {
+  border-color: rgba(255,255,255,.045);
+  background: rgba(8,11,16,.92);
+  box-shadow: 0 -8px 24px rgba(0,0,0,.22);
+}
+.dc-bg:has(.referral-shell) .mobile-primary-nav a { transition: color 190ms ease, background-color 190ms ease, transform 190ms ease; }
+.dc-bg:has(.referral-shell) .mobile-primary-nav a[aria-current="page"] { color: #7EE3A3; background: rgba(37,211,102,.075); }
+.dc-bg:has(.referral-shell) .mobile-primary-nav a:active { transform: scale(.96); }
+
+@keyframes referral-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (min-width: 1024px) {
+  .referral-shell .referral-sticky-actions { bottom: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .referral-shell .referral-page,
+  .referral-shell .referral-lead-card,
+  .referral-shell .referral-primary-button,
+  .referral-shell .referral-sheet-option { animation: none; transition: none; }
+}
+
 *,
 *::before,
 *::after {
@@ -243,6 +471,60 @@ svg {
     background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
     background-size: 160px 160px;
   }
+  .barberline-shell {
+    color: #f0f4f8;
+  }
+  .barberline-shell .ui-card,
+  .barberline-shell .dc-card,
+  .barberline-shell .dc-card-soft {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    background: #0e1014 !important;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34) !important;
+    backdrop-filter: none !important;
+  }
+  .barberline-shell .dc-input,
+  .barberline-shell .dc-select {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    background: #05060a !important;
+    color: #e8ecf2 !important;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
+  }
+  .barberline-shell .dc-input:focus,
+  .barberline-shell .dc-select:focus {
+    border-color: rgba(24, 195, 126, 0.35) !important;
+    box-shadow: 0 0 0 4px rgba(24, 195, 126, 0.08), inset 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+  }
+  .barberline-shell .dc-btn-primary {
+    background: #18c37e !important;
+    color: #04100b !important;
+  }
+  .barberline-shell .dc-btn-secondary {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    background: #0e1014 !important;
+    color: #e8ecf2 !important;
+  }
+  .barberline-shell .id-chip {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: rgba(232, 236, 242, 0.62) !important;
+  }
+  .bl-card {
+    @apply rounded-2xl border p-4;
+    border-color: #1e2228;
+    background: #0e1014;
+  }
+  .bl-card-soft {
+    @apply rounded-xl border;
+    border-color: #181c22;
+    background: #0b0d0f;
+  }
+  .bl-muted {
+    color: #5a6270;
+  }
+  .bl-eyebrow {
+    @apply text-[10px] font-bold uppercase tracking-[0.18em];
+    color: #18c37e;
+  }
 }
 
 @layer base {
@@ -361,3 +643,5 @@ svg {
 .fc-whatsapp .fc .fc-highlight {
   background: rgba(8, 148, 193, 0.18) !important;
 }
+/* Referral Hub coupon surfaces */
+.coupon-public{min-height:100vh;background:#07111a;color:#f4f7fa;display:grid;place-items:center;padding:24px}.coupon-card{width:min(100%,420px);text-align:center;border-radius:28px;background:#101d28;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35)}.coupon-card h1{font-size:2rem;font-weight:900;margin:8px 0 14px}.coupon-eyebrow{color:#8ca0b2;font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.14em}.coupon-status{display:inline-flex;margin-bottom:20px;border-radius:999px;padding:6px 12px;font-size:.8rem;font-weight:800}.coupon-available{background:#22c55e22;color:#86efac}.coupon-used,.coupon-expired,.coupon-invalid{background:#ef444422;color:#fca5a5}.coupon-code{font-size:1.2rem;font-weight:900;letter-spacing:.08em;margin-top:16px}.coupon-terms,.coupon-notice{margin-top:16px;color:#9caab8;font-size:.82rem;line-height:1.5}.coupon-validator-card{margin-top:20px;display:grid;gap:16px;border-radius:24px;background:#101d28;padding:18px;box-shadow:0 16px 50px rgba(0,0,0,.25)}.coupon-input{min-height:48px;width:100%;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:#07111a;padding:0 14px;color:#f4f7fa;outline:none}.coupon-primary,.coupon-secondary{min-height:46px;border-radius:14px;padding:0 16px;font-weight:800;transition:180ms}.coupon-primary{width:100%;background:#5b8cff;color:white}.coupon-secondary{background:#182a39;color:#dce6ef}.coupon-primary:active,.coupon-secondary:active{transform:scale(.98)}.coupon-more-link{display:flex;align-items:center;gap:12px;border-radius:20px;background:#101d28;padding:16px;color:#f4f7fa}.coupon-more-link span{display:grid}.coupon-more-link small{color:#7e8c99;font-size:.72rem}

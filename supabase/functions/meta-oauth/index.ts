@@ -1,12 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const ALLOWED_ORIGIN = "https://dental.creatyv.io";
+const ALLOWED_PRODUCTION_ORIGINS = new Set([
+  ALLOWED_ORIGIN,
+  "https://referral.creatyv.io",
+]);
 const DEV_ORIGINS = new Set(["http://localhost:5173"]);
 
 function resolveOrigin(req: Request) {
   const origin = req.headers.get("origin") ?? "";
   if (!origin) return ALLOWED_ORIGIN;
-  if (origin === ALLOWED_ORIGIN) return origin;
+  if (ALLOWED_PRODUCTION_ORIGINS.has(origin)) return origin;
   if (DEV_ORIGINS.has(origin)) return origin;
   return ALLOWED_ORIGIN;
 }
@@ -32,6 +36,33 @@ function env(name: string) {
   const value = Deno.env.get(name);
   if (!value) throw new Error(`Missing env ${name}`);
   return value;
+}
+
+function isAllowedRedirectUri(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.pathname !== "/auth/meta/callback" || url.search || url.hash) return false;
+    return ALLOWED_PRODUCTION_ORIGINS.has(url.origin) || DEV_ORIGINS.has(url.origin);
+  } catch {
+    return false;
+  }
+}
+
+async function authorizeOrganizationAccess(
+  supabase: any,
+  req: Request,
+  organizationId: string,
+) {
+  const bearer = String(req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!bearer) return false;
+  const userResult = await supabase.auth.getUser(bearer);
+  const userId = String(userResult.data?.user?.id ?? "");
+  if (!userId) return false;
+  const [membership, profile] = await Promise.all([
+    supabase.from("org_members").select("organization_id").eq("organization_id", organizationId).eq("user_id", userId).maybeSingle(),
+    supabase.from("user_profiles").select("is_admin").eq("user_id", userId).maybeSingle(),
+  ]);
+  return Boolean(membership.data?.organization_id || profile.data?.is_admin === true);
 }
 
 function normalizeBaseUrl(url: string) {
@@ -142,7 +173,7 @@ async function fetchPages(userToken: string): Promise<MetaPage[]> {
 }
 
 async function upsertMetaPageToken(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   args: { organizationId: string; pageId: string; pageAccessToken: string; now: string }
 ) {
   const res = await supabase.from("org_settings").upsert(
@@ -166,9 +197,9 @@ async function upsertMetaPageToken(
   };
 }
 
-async function transferMetaPageLinkIfNeeded(
-  supabase: ReturnType<typeof createClient>,
-  args: { organizationId: string; pageId: string; now: string }
+async function assertMetaPageAvailable(
+  supabase: any,
+  args: { organizationId: string; pageId: string }
 ) {
   const linkedRes = await supabase
     .from("org_settings")
@@ -183,24 +214,15 @@ async function transferMetaPageLinkIfNeeded(
   const linkedOrgIds = (Array.isArray(linkedRes.data) ? linkedRes.data : [])
     .map((row: any) => String(row?.organization_id ?? "").trim())
     .filter(Boolean);
-
-  for (const linkedOrgId of linkedOrgIds) {
-    const releaseRes = await supabase
-      .from("org_settings")
-      .update({
-        meta_page_id: null,
-        messenger_enabled: false,
-        meta_connected_at: null,
-        updated_at: args.now,
-      })
-      .eq("organization_id", linkedOrgId);
-
-    if (releaseRes.error) {
-      return { ok: false as const, error: releaseRes.error.message };
-    }
+  if (linkedOrgIds.length > 0) {
+    return {
+      ok: false as const,
+      error: "meta_page_already_connected",
+      linkedOrganizationIds: linkedOrgIds,
+    };
   }
 
-  return { ok: true as const, transferredFrom: linkedOrgIds };
+  return { ok: true as const };
 }
 
 Deno.serve(async (req) => {
@@ -234,6 +256,9 @@ Deno.serve(async (req) => {
         details: "redirectUri (or redirect_uri) es requerido.",
       });
     }
+    if (actionNeedsRedirectUri && !isAllowedRedirectUri(redirectUri)) {
+      return json(req, 400, { error: "invalid_redirect_uri" });
+    }
 
     try {
       const parsedState = await verifySignedState(stateRaw, META_STATE_SECRET);
@@ -241,6 +266,22 @@ Deno.serve(async (req) => {
     } catch {
       return json(req, 400, { error: "invalid_state", details: "State inválido o expirado." });
     }
+    if (!await authorizeOrganizationAccess(supabase, req, organizationId)) {
+      return json(req, 403, { error: "organization_access_denied", details: "No tienes acceso a esta organización." });
+    }
+
+    const orgRes = await supabase
+      .from("org_settings")
+      .select("organization_id,business_type")
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (orgRes.error || !orgRes.data?.organization_id) {
+      return json(req, 400, {
+        error: "invalid_organization",
+        details: "La organización firmada no existe.",
+      });
+    }
+    const businessType = String(orgRes.data.business_type ?? "").trim() || "dental";
 
     if (action === "exchange") {
       if (!code || !organizationId) {
@@ -259,7 +300,7 @@ Deno.serve(async (req) => {
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
-            business_type: "dental",
+            business_type: businessType,
             messenger_enabled: false,
             meta_last_error: "No se encontraron páginas disponibles en Meta.",
             updated_at: new Date().toISOString(),
@@ -297,45 +338,37 @@ Deno.serve(async (req) => {
         });
       }
 
+      if (pages.length !== 1) {
+        return json(req, 409, {
+          error: "page_selection_required",
+          details: "Selecciona una sola página antes de continuar.",
+          pages: pages.map((p) => ({ id: p.id, name: p.name })),
+        });
+      }
       const page = pages[0];
       const now = new Date().toISOString();
       const displayName = page.name || organizationId;
 
-      const transferRes = await transferMetaPageLinkIfNeeded(supabase, {
+      const availability = await assertMetaPageAvailable(supabase, {
         organizationId,
         pageId: page.id,
-        now,
       });
-      if (!transferRes.ok) {
-        return json(req, 500, { error: "meta_page_transfer_failed", details: transferRes.error });
+      if (!availability.ok) {
+        return json(req, 409, { error: availability.error, details: "La página ya está conectada a otra organización." });
       }
 
       const settingsPayload = {
         organization_id: organizationId,
-        business_type: "dental",
+        business_type: businessType,
         meta_page_id: page.id,
+        meta_page_name: displayName,
         messenger_enabled: true,
         meta_connected_at: now,
         meta_last_error: null,
         updated_at: now,
-        brand_name: displayName,
       };
 
-      let settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
-      const isUniqueConflict =
-        settingsRes.error &&
-        ((settingsRes.error as any)?.code === "23505" || settingsRes.error.message.includes("org_settings_meta_page_id_unique"));
-      if (isUniqueConflict) {
-        const retryTransferRes = await transferMetaPageLinkIfNeeded(supabase, {
-          organizationId,
-          pageId: page.id,
-          now,
-        });
-        if (!retryTransferRes.ok) {
-          return json(req, 500, { error: "meta_page_transfer_failed", details: retryTransferRes.error });
-        }
-        settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
-      }
+      const settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
       if (settingsRes.error) {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
@@ -350,7 +383,7 @@ Deno.serve(async (req) => {
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
-            business_type: "dental",
+            business_type: businessType,
             messenger_enabled: false,
             meta_last_error: secretRes.error,
             updated_at: now,
@@ -394,41 +427,26 @@ Deno.serve(async (req) => {
       const now = new Date().toISOString();
       const displayName = pageName || organizationId;
 
-      const transferRes = await transferMetaPageLinkIfNeeded(supabase, {
+      const availability = await assertMetaPageAvailable(supabase, {
         organizationId,
         pageId,
-        now,
       });
-      if (!transferRes.ok) {
-        return json(req, 500, { error: "meta_page_transfer_failed", details: transferRes.error });
+      if (!availability.ok) {
+        return json(req, 409, { error: availability.error, details: "La página ya está conectada a otra organización." });
       }
 
       const settingsPayload = {
         organization_id: organizationId,
-        business_type: "dental",
+        business_type: businessType,
         meta_page_id: pageId,
+        meta_page_name: displayName,
         messenger_enabled: true,
         meta_connected_at: now,
         meta_last_error: null,
         updated_at: now,
-        brand_name: displayName,
       };
 
-      let settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
-      const isUniqueConflict =
-        settingsRes.error &&
-        ((settingsRes.error as any)?.code === "23505" || settingsRes.error.message.includes("org_settings_meta_page_id_unique"));
-      if (isUniqueConflict) {
-        const retryTransferRes = await transferMetaPageLinkIfNeeded(supabase, {
-          organizationId,
-          pageId,
-          now,
-        });
-        if (!retryTransferRes.ok) {
-          return json(req, 500, { error: "meta_page_transfer_failed", details: retryTransferRes.error });
-        }
-        settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
-      }
+      const settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
       if (settingsRes.error) {
         return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
       }
@@ -443,7 +461,7 @@ Deno.serve(async (req) => {
         await supabase.from("org_settings").upsert(
           {
             organization_id: organizationId,
-            business_type: "dental",
+            business_type: businessType,
             messenger_enabled: false,
             meta_last_error: secretRes.error,
             updated_at: now,
