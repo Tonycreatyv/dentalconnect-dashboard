@@ -316,6 +316,14 @@ Deno.serve(async (req) => {
     }
 
     if (action === "exchange_and_save") {
+      return json(req, 409, {
+        error: "page_selection_required",
+        details: "Usa action=exchange y selecciona explícitamente una página.",
+      });
+      /*
+       * Legacy implementation intentionally retained below for rollback
+       * reference, but unreachable while explicit Page selection is required.
+       */
       if (!code || !organizationId || !stateRaw) {
         return json(req, 400, {
           error: "missing_code_state_or_org",
@@ -370,7 +378,7 @@ Deno.serve(async (req) => {
 
       const settingsRes = await supabase.from("org_settings").upsert(settingsPayload, { onConflict: "organization_id" });
       if (settingsRes.error) {
-        return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error.message });
+        return json(req, 500, { error: "settings_upsert_failed", details: settingsRes.error?.message ?? "settings_upsert_failed" });
       }
 
       const secretRes = await upsertMetaPageToken(supabase, {

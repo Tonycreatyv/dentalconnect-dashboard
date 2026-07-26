@@ -85,6 +85,7 @@ import {
   type WhatsAppFlowCtaSpec,
   type WhatsAppInteractiveListSpec,
 } from "../_shared/metaMessageAdapter.ts";
+import { handleReferralHubProductTurn } from "../_products/referral-hub/index.ts";
 
 // =============================================================================
 // TYPES
@@ -126,6 +127,7 @@ interface GenerateReplyArgs {
   traceId: string;
   jobId: string;
   payloadAction?: string | null;
+  channel?: "messenger" | "whatsapp";
 }
 
 interface GenerateReplyResult {
@@ -137,6 +139,7 @@ interface GenerateReplyResult {
   flowCta?: WhatsAppFlowCtaSpec;
   interactiveButtons?: InteractiveButton[];
   interactiveList?: WhatsAppInteractiveListSpec;
+  outboundPrelude?: Array<{ text?: string; imageUrl?: string }>;
 }
 
 type BarbershopProviderOption = {
@@ -7807,9 +7810,8 @@ function extractRequestedPreconfirmData(statePatch: Json): {
     string,
     unknown
   >;
-  const pending =
-    ((collected.pending_booking ?? null) as Record<string, unknown> | null) ??
-      {};
+  const pending = (collected.pending_booking as Record<string, unknown> | null) ??
+    {};
   const service = safeStr(
     pending.service,
     safeStr(
@@ -12271,6 +12273,7 @@ export async function generateReply(
     traceId,
     jobId,
     payloadAction,
+    channel = "whatsapp",
   } = args;
 
   let leadState = initialLeadState;
@@ -12289,10 +12292,33 @@ export async function generateReply(
   const businessType = safeStr(orgSettings?.business_type, "").toLowerCase();
   const normalizedBusinessType = businessType === "barbershop"
     ? "barbershop"
+    : businessType === "referral_hub"
+    ? "referral_hub"
     : isDentalBusinessTypeValue(businessType)
     ? "dental"
     : "generic";
   let effectivePayloadAction = payloadAction ?? null;
+  if (normalizedBusinessType === "referral_hub") {
+    const referralResult = await handleReferralHubProductTurn({
+      supabase,
+      organizationId,
+      leadId,
+      leadState: leadState as Json | null,
+      inboundText,
+      payloadAction: effectivePayloadAction,
+      channelUserId: safeStr((leadState as any)?.channel_user_id, "") || null,
+      channel,
+    });
+    return {
+      reply: referralResult.reply,
+      statePatch: referralResult.statePatch,
+      leadPatch: referralResult.leadPatch ?? {},
+      debugNote: referralResult.debugNote,
+      interactiveButtons: referralResult.interactiveButtons,
+      interactiveList: referralResult.interactiveList,
+      outboundPrelude: referralResult.outboundPrelude,
+    };
+  }
   const isDentalOrg = isDentalBusinessTypeValue(businessType);
   if (isDentalOrg) {
     const dentalGuardChoice = normalizeDentalGuardChoiceActionValue(
@@ -16543,8 +16569,7 @@ async function activateHumanTakeoverForLead(args: {
     .eq("id", args.leadId)
     .maybeSingle();
   if (leadRes.error) return;
-  const prevState = ((leadRes.data?.state ?? {}) as Record<string, unknown>) ??
-    {};
+  const prevState = (leadRes.data?.state ?? {}) as Record<string, unknown>;
   const nextState = activateHumanTakeoverState({
     state: prevState,
     source: args.source,
@@ -17657,6 +17682,7 @@ async function processSingleJob(
     traceId,
     jobId,
     payloadAction: inboundPayloadAction || null,
+    channel: channel as "messenger" | "whatsapp",
   });
   const stateBeforeSnapshot = {
     stage_before: safeStr((leadState as any)?.stage, ""),
@@ -17777,7 +17803,37 @@ async function processSingleJob(
     }
   }
 
-  // 3) persist outbound before send
+  // 3) send ordered WhatsApp preludes before the main interactive response
+  for (const prelude of generated.outboundPrelude ?? []) {
+    const preludeText = safeStr(prelude?.text, "").trim();
+    const preludeImageUrl = safeStr(prelude?.imageUrl, "").trim() || undefined;
+    if ((!preludeText && !preludeImageUrl) || channel !== "whatsapp") continue;
+    const preludeMessageId = await insertOutboundMessage({
+      supabase,
+      organizationId: effectiveOrganizationId,
+      leadId,
+      channel,
+      actor: isOperatorOutbound ? "operator" : "bot",
+      recipientId: effectiveRecipientId,
+      reply: preludeText || "Imagen del cupón de supermercado",
+    });
+    const preludeResp = await sendViaMetaAdapter({
+      channel: "whatsapp",
+      graphVersion: metaGraphVersion,
+      recipientId: effectiveRecipientId,
+      text: preludeText || undefined,
+      imageUrl: preludeImageUrl,
+      pageAccessToken,
+      whatsappAccessToken,
+      whatsappPhoneNumberId,
+    });
+    if (!preludeResp?.ok) {
+      await deleteMessageIfExists(supabase, preludeMessageId);
+      throw new Error(`meta_prelude_send_failed:${preludeResp?.status}`);
+    }
+  }
+
+  // persist the main outbound before send
   outboundMessageId = await insertOutboundMessage({
     supabase,
     organizationId: effectiveOrganizationId,
@@ -17798,7 +17854,7 @@ async function processSingleJob(
     ? generated.interactiveList
     : undefined;
   const interactiveButtons = !generatedList && generatedButtons.length > 0
-    ? generatedButtons.slice(0, 3)
+    ? (channel === "messenger" ? generatedButtons.slice(0, 13) : generatedButtons.slice(0, 3))
     : (!generatedList ? buildInteractiveButtonsForState(statePatch) : []);
   let flowCtaPayload: WhatsAppFlowCtaSpec | undefined;
   if (flowCtaSpec && channel === "whatsapp") {
@@ -18019,9 +18075,7 @@ if (import.meta.main) {
 
       const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-      let pageAccessToken = normalizeSecretValue(
-        safeStr(Deno.env.get("META_PAGE_ACCESS_TOKEN"), ""),
-      );
+      let pageAccessToken = "";
       let whatsappAccessToken = normalizeSecretValue(
         safeStr(Deno.env.get("WHATSAPP_ACCESS_TOKEN"), ""),
       );
@@ -18048,7 +18102,7 @@ if (import.meta.main) {
       const orgSettingsRes = await supabase
         .from("org_settings")
         .select(
-          "llm_brain_enabled, system_prompt, business_type, brand_name, automation_enabled, messenger_enabled, whatsapp_phone_number_id, whatsapp_access_token, whatsapp_enabled",
+          "llm_brain_enabled, system_prompt, business_type, brand_name, automation_enabled, messenger_enabled, meta_page_access_token, whatsapp_phone_number_id, whatsapp_access_token, whatsapp_enabled",
         )
         .eq("organization_id", organization_id)
         .maybeSingle();
@@ -18061,6 +18115,9 @@ if (import.meta.main) {
       }
 
       const orgSettings = (orgSettingsRes.data as any) ?? {};
+      pageAccessToken = normalizeSecretValue(
+        safeStr(orgSettings.meta_page_access_token, pageAccessToken),
+      );
       const llmEnabled = Boolean(orgSettings.llm_brain_enabled);
 
       const productKnowledge = await loadProductKnowledge(

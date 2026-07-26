@@ -47,6 +47,31 @@ import {
   mergeConversationContext,
   normalizeInboundRuntime,
 } from "./domain/conversationRuntime.ts";
+import {
+  calculateInsuranceScoring,
+  interpretInsuranceTurn,
+  type InsuranceCollected,
+} from "./domain/insurance/insuranceInterpreter.ts";
+import {
+  buildInsuranceBudgetButtons,
+  buildInsuranceClosedActionButtons,
+  buildInsuranceCurrentCoverageButtons,
+  buildInsurancePreferredTimeButtons,
+  buildInsuranceTypeList,
+  composeInsuranceBudgetPrompt,
+  composeInsuranceConfirmation,
+  composeInsuranceContactPrompt,
+  composeInsuranceCurrentCoveragePrompt,
+  composeInsuranceEmailPrompt,
+  composeInsuranceLocationPrompt,
+  composeInsurancePreferredTimePrompt,
+  composeInsuranceTypePrompt,
+  getInsuranceServiceOptions,
+} from "./domain/insurance/insuranceResponseComposer.ts";
+import type {
+  InteractiveButton,
+  WhatsAppInteractiveListSpec,
+} from "../_shared/metaMessageAdapter.ts";
 
 export type Stage =
   | "INITIAL"
@@ -68,7 +93,7 @@ export type ConversationState = {
   nextExpected?: string;
   collected?: Record<string, unknown>;
   asked?: Record<string, boolean>;
-  orgType?: "creatyv" | "dental" | "barbershop" | "generic";
+  orgType?: "creatyv" | "dental" | "barbershop" | "insurance" | "generic";
   name?: string | null;
   full_name?: string | null;
   collected_name?: boolean;
@@ -78,6 +103,8 @@ export type ConversationResult = {
   replyText: string;
   /** Patch to merge into lead state (index and tests use statePatch). */
   statePatch: Record<string, unknown>;
+  interactiveButtons?: InteractiveButton[];
+  interactiveList?: WhatsAppInteractiveListSpec;
   debug: {
     intent: string;
     phase: string;
@@ -148,6 +175,13 @@ const RESPONSES = {
     emergency: ["Si querés, te ayudo a buscar el primer horario disponible."],
     handoff: ["Te comunico con recepción en un momento."],
     fallback: ["¿Querés que te ayude con corte, barba o una cita?"],
+  },
+  insurance: {
+    greeting: ["Hola. Te ayudo con tu seguro. ¿En qué te puedo ayudar?"],
+    pricing: ["Te ayudo a revisar opciones de seguro."],
+    services: ["Decime qué tipo de seguro necesitás."],
+    handoff: ["Te conecto con alguien del equipo."],
+    fallback: ["Gracias por escribir. ¿Buscás cotizar un seguro?"],
   },
   generic: {
     greeting: ["¡Hola! 👋 ¿En qué te puedo ayudar?"],
@@ -471,6 +505,23 @@ function getBarbershopServicesFromSettings(
       };
     })
     .filter((row) => row.name);
+}
+
+function getBarbershopProvidersFromSettings(
+  clinicSettings?: Record<string, unknown>,
+): Array<{ id: string; name: string }> {
+  const raw = Array.isArray((clinicSettings ?? {}).providers)
+    ? ((clinicSettings ?? {}).providers as Array<Record<string, unknown>>)
+    : (Array.isArray((clinicSettings ?? {}).barbers)
+      ? ((clinicSettings ?? {}).barbers as Array<Record<string, unknown>>)
+      : []);
+  return raw
+    .filter((row) => row?.active !== false && row?.is_active !== false)
+    .map((row) => ({
+      id: safeStr(row?.id, safeStr(row?.barber_id, safeStr(row?.name, ""))).trim(),
+      name: safeStr(row?.name, "").trim(),
+    }))
+    .filter((row) => row.id && row.name);
 }
 
 function findBarbershopFaqAnswer(
@@ -831,16 +882,30 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function determineOrgType(orgId: string): "creatyv" | "dental" | "barbershop" | "generic" {
-  const id = orgId.toLowerCase();
-  if (id.includes("creatyv") || id.includes("product")) return "creatyv";
-  if (id.includes("dental") || id.includes("clinic")) return "dental";
-  if (id.includes("barber") || id.includes("barberia")) return "barbershop";
+function determineOrgType(
+  _orgId: string,
+  businessType?: string | null,
+): "creatyv" | "dental" | "barbershop" | "insurance" | "generic" {
+  const type = safeStr(businessType, "").trim().toLowerCase();
+  if (type === "creatyv") return "creatyv";
+  if (type === "dental") return "dental";
+  if (type === "barbershop") return "barbershop";
+  if (type === "insurance") return "insurance";
   return "generic";
 }
 
-function getResponses(orgType: "creatyv" | "dental" | "barbershop" | "generic") {
+function getResponses(orgType: "creatyv" | "dental" | "barbershop" | "insurance" | "generic") {
   return RESPONSES[orgType] ?? RESPONSES.generic;
+}
+
+function formatInsuranceCurrentCoverageForCopy(value: unknown): string {
+  const normalized = safeStr(value).toLowerCase();
+  if (normalized === "vence_pronto") return "Vence pronto";
+  if (normalized === "comparando") return "Ya tengo, comparo";
+  if (normalized === "no_tiene") return "No tengo";
+  if (normalized === "si") return "Sí";
+  if (normalized === "no") return "No";
+  return safeStr(value);
 }
 
 function buildRecoveryContextFromState(state: ConversationState): ConversationContext {
@@ -1014,6 +1079,9 @@ function isBusinessHoursQuestionText(input: string): boolean {
   if (/\b(que horas tenes disponible|horarios disponibles|hay cupo|hay espacio|tenes espacio|tienes espacio)\b/.test(text)) {
     return false;
   }
+  if (/\b(que horarios tenes|que horarios tienes|que horas tenes|que horas tienes)\b/.test(text)) {
+    return false;
+  }
   return /\b(horario|horarios|horario de atencion|a que hora abren|a que hora cierran|cuando abren|cuando cierran|abren|cierran)\b/i
     .test(text);
 }
@@ -1133,6 +1201,24 @@ function resolveBarbershopPublicLocation(clinicSettings?: Record<string, unknown
   return candidates.find((v) => v.length > 0) ?? "Barrio Los Andes, San Pedro Sula, frente al parque principal";
 }
 
+function resolveConfiguredBarbershopPublicLocation(clinicSettings?: Record<string, unknown>): string {
+  const locationRaw = clinicSettings?.location;
+  const locationObj = (locationRaw && typeof locationRaw === "object")
+    ? (locationRaw as Record<string, unknown>)
+    : null;
+  const integrations = (clinicSettings?.integrations && typeof clinicSettings.integrations === "object")
+    ? (clinicSettings.integrations as Record<string, unknown>)
+    : null;
+  const candidates = [
+    typeof locationRaw === "string" ? locationRaw : "",
+    safeStr(locationObj?.address, ""),
+    safeStr(locationObj?.label, ""),
+    safeStr(clinicSettings?.address, ""),
+    safeStr(integrations?.public_location, ""),
+  ].map((v) => safeStr(v, "").trim());
+  return candidates.find((v) => v.length > 0) ?? "";
+}
+
 function getBarbershopBusinessHoursReply(
   input: string,
   clinicSettings?: Record<string, unknown>,
@@ -1157,6 +1243,197 @@ function getBarbershopBusinessHoursReply(
     return `Cerramos a las ${closeMon}.`;
   }
   return `Horario:\nLunes a viernes: ${openMon} – ${closeMon}\nSábado: ${openSat} – ${closeSat}\nDomingo: ${sunClosed ? "cerrado" : `${formatHourForReply(safeStr(sun.open, "09:00"))} – ${formatHourForReply(safeStr(sun.close, "17:00"))}`}\n\n¿Querés que revise espacios disponibles?`;
+}
+
+function getConfiguredHoursEntry(
+  hours: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const aliases: Record<string, string[]> = {
+    mon: ["mon", "monday", "lunes", "1"],
+    tue: ["tue", "tuesday", "martes", "2"],
+    wed: ["wed", "wednesday", "miercoles", "miércoles", "3"],
+    thu: ["thu", "thursday", "jueves", "4"],
+    fri: ["fri", "friday", "viernes", "5"],
+    sat: ["sat", "saturday", "sabado", "sábado", "6"],
+    sun: ["sun", "sunday", "domingo", "0", "7"],
+  };
+  for (const alias of aliases[key] ?? [key]) {
+    const entry = hours[alias];
+    if (entry && typeof entry === "object") return entry as Record<string, unknown>;
+  }
+  return null;
+}
+
+function formatBarbershopConfiguredHoursReply(
+  clinicSettings?: Record<string, unknown>,
+): string {
+  const brandName = getBarbershopCopyBrandName(clinicSettings);
+  const hours = (clinicSettings?.hours && typeof clinicSettings.hours === "object")
+    ? (clinicSettings.hours as Record<string, unknown>)
+    : {};
+  if (Object.keys(hours).length === 0) {
+    return `Por ahora no tengo los horarios exactos de ${brandName} configurados. Podés tocar "Hablar con alguien" para que te ayuden.`;
+  }
+  const dayKeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const dayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+  const rows = dayKeys.map((key, index) => {
+    const entry = getConfiguredHoursEntry(hours, key) ??
+      (index > 0 && index < 5 ? getConfiguredHoursEntry(hours, "mon") : null);
+    const open = safeStr(entry?.open ?? entry?.open_time, "");
+    const close = safeStr(entry?.close ?? entry?.close_time, "");
+    const closed = !entry || Boolean(entry.closed ?? entry.is_closed) || !open || !close;
+    return {
+      label: dayNames[index],
+      value: closed ? "cerrado" : `${formatHourForReply(open)} – ${formatHourForReply(close)}`,
+    };
+  });
+  const weekdays = rows.slice(0, 5);
+  const sameWeekdays = weekdays.every((row) => row.value === weekdays[0].value);
+  const lines = sameWeekdays
+    ? [
+      `Lunes a viernes: ${weekdays[0].value}`,
+      `Sábado: ${rows[5].value}`,
+      `Domingo: ${rows[6].value}`,
+    ]
+    : rows.map((row) => `${row.label}: ${row.value}`);
+  return `Horario:\n${brandName} atiende:\n\n${lines.join("\n")}`;
+}
+
+function formatBarbershopServicesPricesReply(
+  input: string,
+  clinicSettings?: Record<string, unknown>,
+): string {
+  const brandName = getBarbershopCopyBrandName(clinicSettings);
+  const services = getBarbershopServicesFromSettings(clinicSettings);
+  const priceShort = (price: unknown) => {
+    const num = Number(price);
+    return Number.isFinite(num) && num > 0 ? `L${Math.round(num)}` : "precio por confirmar";
+  };
+  if (services.length === 0) {
+    return `Por ahora no tengo servicios configurados para ${brandName}. Podés tocar "Hablar con alguien" para que te ayuden.`;
+  }
+  const specific = resolveBarbershopServiceFromSettings(input, clinicSettings);
+  const normalized = normalizeTextForIntent(input);
+  const asksSpecific = specific &&
+    /\b(corte|barba|limpieza|facial|cejas|servicio|cuanto|cuánto|precio|vale|cuesta)\b/.test(normalized) &&
+    !/\b(precios|servicios|que servicios tienen|lista de precios)\b/.test(normalized);
+  if (asksSpecific && specific) {
+    return `${specific.name}: ${priceShort(specific.price)} · ${formatBarbershopDurationLabel(specific.durationMin)}.\n\nPara agendar, tocá "Agendar cita" o escribí el servicio que querés.`;
+  }
+  const lines = services.slice(0, 8).map((service) =>
+    `${getBarbershopServiceEmoji(service.name)} ${service.name} — ${priceShort(service.price)}`
+  );
+  return `Estos son los servicios disponibles en ${brandName}:\n\n${lines.join("\n")}\n\nPara agendar, tocá "Agendar cita" o escribí el servicio que querés.`;
+}
+
+function formatBarbershopProvidersReply(
+  clinicSettings?: Record<string, unknown>,
+): string {
+  const providers = getBarbershopProvidersFromSettings(clinicSettings);
+  if (providers.length === 0) {
+    return 'Por ahora no tengo barberos configurados para mostrar. Podés tocar "Hablar con alguien" para que te ayuden.';
+  }
+  return `Estos barberos están disponibles:\n\n${providers.map((provider) => `💈 ${provider.name}`).join("\n")}\n\nPodés escoger uno o elegir “cualquiera disponible”.`;
+}
+
+function formatBarbershopPendingBookingConfirmationReminder(
+  pendingBooking: Record<string, unknown>,
+  bookingCollected: Record<string, unknown>,
+  state: ConversationState,
+): string {
+  const service = safeStr(
+    pendingBooking.service_name,
+    safeStr(pendingBooking.service, safeStr(bookingCollected.service, "Cita barbería")),
+  );
+  const provider = safeStr(
+    pendingBooking.provider_name,
+    safeStr(
+      pendingBooking.preferred_barber,
+      safeStr(bookingCollected.preferred_barber, "Barbero disponible"),
+    ),
+  );
+  const date = formatHumanDay(
+    safeStr(pendingBooking.appointment_date, safeStr(bookingCollected.preferred_date, "")),
+  );
+  const time = formatHourLabel(
+    safeStr(pendingBooking.appointment_time, safeStr(bookingCollected.preferred_time, "")),
+  );
+  const customerName = toDisplayPersonName(
+    safeStr(
+      pendingBooking.patient_name,
+      safeStr(
+        pendingBooking.customer_name,
+        safeStr(
+          pendingBooking.client_name,
+          safeStr(
+            bookingCollected.patient_name,
+            safeStr(
+              bookingCollected.customer_name,
+              safeStr(bookingCollected.client_name, safeStr(resolveAppointmentPatientName(bookingCollected, state), "")),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  const nameLine = safeStr(customerName, "").trim() ? `\n👤 Nombre: ${customerName}` : "";
+  return `Tenés esta cita pendiente:
+
+✂️ Servicio: ${service}
+💈 Barbero: ${provider}
+📅 Fecha: ${date}
+🕝 Hora: ${time}${nameLine}
+
+¿Confirmamos?`;
+}
+
+function classifyBarbershopGlobalInfoInterrupt(input: string): "hours" | "location" | "services_prices" | "providers" | "availability" | null {
+  const text = normalizeTextForIntent(input);
+  if (!text) return null;
+  if (
+    /^(disponibilidad)$/.test(text) ||
+    /\b(tienen|tienes|tenes|hay|que|qué|cual|cuál|quien|quién)\b.*\b(cupo|cupos|espacio|espacios|disponibilidad|chance)\b/.test(text) ||
+    /\b(que horas disponibles|horas disponibles|horarios disponibles|quien esta disponible|quien está disponible)\b/.test(text)
+  ) {
+    return "availability";
+  }
+  if (
+    /^(hora|horario|horarios)$/.test(text) ||
+    /\b(que horarios tienen|que horario tienen|horario de atencion|a que hora abren|a que hora cierran|cuando abren|cuando cierran|hasta que hora trabajan|hasta que hora atienden|hoy hasta que hora)\b/.test(text)
+  ) {
+    return "hours";
+  }
+  if (/\b(ubicacion|ubicación|direccion|dirección|donde estan|donde están|donde quedan|ubicados|me pasan ubicacion|me pasan ubicación|como llego|cómo llego)\b/.test(text)) {
+    return "location";
+  }
+  if (/\b(que barberos hay|barberos disponibles|barberos|quien corta|quienes cortan|con quien puedo agendar|con quien puedo reservar)\b/.test(text)) {
+    return "providers";
+  }
+  if (
+    /\b(precio|precios|cuanto cuesta|cuánto cuesta|cuanto vale|cuánto vale|costo|costos|tarifa|tarifas|servicios|que servicios tienen|que ofrecen|tienen limpieza facial|limpieza facial)\b/.test(text)
+  ) {
+    return "services_prices";
+  }
+  return null;
+}
+
+function hasActiveBarbershopBookingContext(
+  state: ConversationState,
+  bookingCollected: Record<string, unknown>,
+): boolean {
+  return Boolean(
+    state.nextExpected ||
+      state.stage === "BOOKING" ||
+      state.stage === "CONFIRMING" ||
+      bookingCollected.activeBookingFlow ||
+      bookingCollected.lastBookingStep ||
+      bookingCollected.pending_booking ||
+      bookingCollected.current_service_name ||
+      bookingCollected.service ||
+      bookingCollected.preferred_date ||
+      bookingCollected.current_date,
+  );
 }
 
 function isBarbershopPricingFollowup(input: string): boolean {
@@ -2174,20 +2451,25 @@ export function maybeHandleNameCapture(args: {
 export function runConversationEngine(args: {
   organizationId: string;
   leadId?: string;
+  channelUserId?: string | null;
   leadState: ConversationState | null;
   inboundText: string;
   channel?: string;
   knowledge?: Record<string, unknown>;
   clinicKnowledge?: Record<string, unknown>;
   clinicSettings?: Record<string, unknown>;
+  businessType?: string | null;
   dentalInterpreterResult?: DentalInterpreterResult | null;
   barbershopInterpreterResult?: BarbershopInterpretedTurn | null;
 }): ConversationResult | null {
   const text = normalizeText(args.inboundText);
   if (!text) return null;
 
-  const orgType = args.leadState?.orgType ??
-    determineOrgType(args.organizationId);
+  const resolvedBusinessType = safeStr(
+    args.businessType,
+    safeStr(args.clinicSettings?.business_type, safeStr(args.leadState?.orgType, "")),
+  );
+  const orgType = determineOrgType(args.organizationId, resolvedBusinessType);
   const responses: any = getResponses(orgType);
   const state: ConversationState = {
     stage: "INITIAL",
@@ -2210,13 +2492,15 @@ export function runConversationEngine(args: {
       debug: { intent: "book_appointment", phase: "BOOKING", route: "state_correction_reset_datetime" },
     };
   }
-  const nameCapture = maybeHandleNameCapture({
-    organizationId: args.organizationId,
-    leadState: state,
-    inboundText: args.inboundText,
-    channel: args.channel,
-  });
-  if (nameCapture) return nameCapture;
+  if (orgType !== "insurance") {
+    const nameCapture = maybeHandleNameCapture({
+      organizationId: args.organizationId,
+      leadState: state,
+      inboundText: args.inboundText,
+      channel: args.channel,
+    });
+    if (nameCapture) return nameCapture;
+  }
 
   const needsName = !hasCollectedName(state);
   const normalizedIntentText = normalizeTextForIntent(text);
@@ -2268,6 +2552,368 @@ export function runConversationEngine(args: {
         collected: {},
       },
       debug: { intent: "reset", phase: "DISCOVERY", route: "explicit_reset" },
+    };
+  }
+
+  if (orgType === "insurance") {
+    const insuranceServices = getInsuranceServiceOptions(args.clinicSettings?.services);
+    const insuranceAgencyName = safeStr(
+      args.clinicSettings?.brand_name,
+      safeStr(args.clinicSettings?.name, "nuestra agencia"),
+    );
+    const insuranceTypeList = buildInsuranceTypeList(insuranceServices, insuranceAgencyName);
+    const existingInsurance = ((collected.insurance ?? {}) as InsuranceCollected);
+    const interpreted = interpretInsuranceTurn({
+      inboundText: args.inboundText,
+      nextExpected: state.nextExpected,
+      services: insuranceServices,
+      collected: existingInsurance,
+    });
+    const currentInsurance: InsuranceCollected = {
+      ...existingInsurance,
+      contacto: { ...(existingInsurance.contacto ?? {}) },
+    };
+    const channelPhone = safeStr(args.channelUserId, "");
+    if (channelPhone && !safeStr(currentInsurance.contacto?.telefono)) {
+      currentInsurance.contacto!.telefono = channelPhone;
+    }
+    if (interpreted.fields_found.tipo_seguro) {
+      currentInsurance.tipo_seguro = interpreted.fields_found.tipo_seguro;
+      currentInsurance.tipo_seguro_id = interpreted.fields_found.tipo_seguro_id ?? undefined;
+    }
+    if (interpreted.fields_found.nombre) currentInsurance.contacto!.nombre = interpreted.fields_found.nombre;
+    if (interpreted.fields_found.estado) currentInsurance.contacto!.estado = interpreted.fields_found.estado;
+    if (interpreted.fields_found.telefono) currentInsurance.contacto!.telefono = interpreted.fields_found.telefono;
+    if (interpreted.fields_found.email) currentInsurance.contacto!.email = interpreted.fields_found.email;
+    if (interpreted.fields_found.seguro_actual) currentInsurance.seguro_actual = interpreted.fields_found.seguro_actual;
+    if (interpreted.fields_found.presupuesto) currentInsurance.presupuesto = interpreted.fields_found.presupuesto;
+    if (
+      safeStr(state.nextExpected, "") === "insurance_preferred_time" &&
+      interpreted.fields_found.horario_preferido
+    ) {
+      currentInsurance.horario_preferido = interpreted.fields_found.horario_preferido;
+    }
+
+    const contactMissing = ["nombre", "estado", "email"].filter((field) =>
+      !safeStr((currentInsurance.contacto as Record<string, unknown> | undefined)?.[field])
+    );
+    const baseCollected = { ...collected, insurance: currentInsurance };
+    const stateBase = {
+      stage: "DISCOVERY" as Stage,
+      orgType: "insurance" as const,
+      collected: baseCollected,
+    };
+    const appendInsuranceNote = (insurance: InsuranceCollected): InsuranceCollected => {
+      const previousNotes = Array.isArray(insurance.notes) ? insurance.notes : [];
+      return {
+        ...insurance,
+        notes: [
+          ...previousNotes,
+          {
+            pregunta: safeStr(args.inboundText),
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      };
+    };
+    const closedActionButtons = buildInsuranceClosedActionButtons();
+    const closedAction = safeStr(args.inboundText).toLowerCase().replace(/^action:/, "");
+    if (safeStr(state.stage) === "CLOSED" && closedAction === "insurance_closed:quote_other") {
+      const resetInsurance: InsuranceCollected = {
+        contacto: { ...(currentInsurance.contacto ?? {}) },
+      };
+      return {
+        replyText: insuranceTypeList?.body ?? composeInsuranceTypePrompt(insuranceServices, insuranceAgencyName),
+        interactiveList: insuranceTypeList,
+        statePatch: {
+          stage: "DISCOVERY",
+          orgType: "insurance",
+          collected: { ...collected, insurance: resetInsurance },
+          lastIntent: "insurance_quote_other",
+          nextExpected: "insurance_type",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_closed_quote_other" },
+      };
+    }
+    if (safeStr(state.stage) === "CLOSED" && closedAction === "insurance_closed:advisor") {
+      const prioritizedInsurance: InsuranceCollected = {
+        ...currentInsurance,
+        scoring: {
+          prioridad: "alta",
+          score: Math.max(Number(currentInsurance.scoring?.score ?? 0), 90),
+          razones: [
+            ...(Array.isArray(currentInsurance.scoring?.razones) ? currentInsurance.scoring.razones : []),
+            "pidió hablar con asesor",
+          ],
+        },
+      };
+      return {
+        replyText: "Listo, le marco prioridad alta a tu solicitud para que un asesor te contacte 🙌",
+        statePatch: {
+          stage: "CLOSED",
+          orgType: "insurance",
+          collected: { ...collected, insurance: prioritizedInsurance },
+          lastIntent: "insurance_advisor_requested",
+          nextExpected: undefined,
+        },
+        debug: { intent: interpreted.intent, phase: "CLOSED", route: "insurance_closed_advisor" },
+      };
+    }
+    if (safeStr(state.stage) === "CLOSED" && closedAction === "insurance_closed:done") {
+      return {
+        replyText: "Perfecto, gracias. Quedamos atentos si necesitás algo más.",
+        statePatch: {
+          stage: "CLOSED",
+          orgType: "insurance",
+          collected: { ...collected, insurance: currentInsurance },
+          lastIntent: "insurance_done",
+          nextExpected: undefined,
+        },
+        debug: { intent: interpreted.intent, phase: "CLOSED", route: "insurance_closed_done" },
+      };
+    }
+    const repeatPendingInsuranceQuestion = () => {
+      const pending = safeStr(state.nextExpected);
+      if (pending === "insurance_type") {
+        return {
+          replyText: insuranceTypeList?.body ?? composeInsuranceTypePrompt(insuranceServices, insuranceAgencyName),
+          interactiveList: insuranceTypeList,
+        };
+      }
+      if (pending === "insurance_name") {
+        return { replyText: composeInsuranceContactPrompt(safeStr(currentInsurance.tipo_seguro)) };
+      }
+      if (pending === "insurance_location") {
+        return { replyText: composeInsuranceLocationPrompt(safeStr(currentInsurance.contacto?.nombre)) };
+      }
+      if (pending === "insurance_email") {
+        return { replyText: composeInsuranceEmailPrompt() };
+      }
+      if (pending === "insurance_current") {
+        return {
+          replyText: composeInsuranceCurrentCoveragePrompt(),
+          interactiveButtons: buildInsuranceCurrentCoverageButtons(),
+        };
+      }
+      if (pending === "insurance_budget") {
+        return {
+          replyText: composeInsuranceBudgetPrompt(),
+          interactiveButtons: buildInsuranceBudgetButtons(),
+        };
+      }
+      if (pending === "insurance_preferred_time") {
+        return {
+          replyText: composeInsurancePreferredTimePrompt(),
+          interactiveButtons: buildInsurancePreferredTimeButtons(),
+        };
+      }
+      return {
+        replyText: insuranceTypeList?.body ?? composeInsuranceTypePrompt(insuranceServices, insuranceAgencyName),
+        interactiveList: insuranceTypeList,
+      };
+    };
+
+    if (interpreted.faq_match) {
+      if (safeStr(state.stage) === "CLOSED") {
+        return {
+          replyText: `${interpreted.faq_match.answer}\n\n¿Querés hacer algo más?`,
+          interactiveButtons: closedActionButtons,
+          statePatch: {
+            stage: "CLOSED",
+            orgType: "insurance",
+            collected: { ...collected, insurance: currentInsurance },
+            lastIntent: "insurance_closed_faq_answered",
+            nextExpected: undefined,
+          },
+          debug: {
+            intent: interpreted.intent,
+            phase: "CLOSED",
+            route: "insurance_closed_faq_actions",
+          },
+        };
+      }
+      const pendingQuestion = repeatPendingInsuranceQuestion();
+      return {
+        ...pendingQuestion,
+        replyText: `${interpreted.faq_match.answer}\n\n¿Seguimos con tu solicitud?\n\n${pendingQuestion.replyText}`,
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_faq_answered",
+          nextExpected: state.nextExpected,
+        },
+        debug: {
+          intent: interpreted.intent,
+          phase: "DISCOVERY",
+          route: "insurance_faq_repeat_pending",
+        },
+      };
+    }
+
+    if (interpreted.invalid_expected_answer) {
+      const pendingQuestion = repeatPendingInsuranceQuestion();
+      const notedInsurance = appendInsuranceNote(currentInsurance);
+      return {
+        ...pendingQuestion,
+        replyText: `Buena pregunta — no tengo ese dato, se lo anoto a tu asesor 🙌\n\n${pendingQuestion.replyText}`,
+        statePatch: {
+          ...stateBase,
+          collected: { ...collected, insurance: notedInsurance },
+          lastIntent: "insurance_unknown_repeat_pending",
+          nextExpected: state.nextExpected,
+        },
+        debug: {
+          intent: interpreted.intent,
+          phase: "DISCOVERY",
+          route: "insurance_unknown_repeat_pending",
+        },
+      };
+    }
+
+    if (safeStr(state.stage) === "CLOSED") {
+      const notedInsurance = appendInsuranceNote(currentInsurance);
+      return {
+        replyText: "Buena pregunta — no tengo ese dato, se lo anoto a tu asesor 🙌\n\n¿Querés hacer algo más?",
+        interactiveButtons: closedActionButtons,
+        statePatch: {
+          stage: "CLOSED",
+          orgType: "insurance",
+          collected: { ...collected, insurance: notedInsurance },
+          lastIntent: "insurance_closed_unknown_note",
+          nextExpected: undefined,
+        },
+        debug: {
+          intent: interpreted.intent,
+          phase: "CLOSED",
+          route: "insurance_closed_unknown_actions",
+        },
+      };
+    }
+
+    if (interpreted.intent === "restart") {
+      return {
+        replyText: insuranceTypeList?.body ?? composeInsuranceTypePrompt(insuranceServices, insuranceAgencyName),
+        interactiveList: insuranceTypeList,
+        statePatch: {
+          ...stateBase,
+          collected: { ...collected, insurance: {} },
+          lastIntent: "insurance_restart",
+          nextExpected: "insurance_type",
+        },
+        debug: { intent: "restart", phase: "DISCOVERY", route: "insurance_restart" },
+      };
+    }
+
+    if (!safeStr(currentInsurance.tipo_seguro)) {
+      return {
+        replyText: insuranceTypeList?.body ?? composeInsuranceTypePrompt(insuranceServices, insuranceAgencyName),
+        interactiveList: insuranceTypeList,
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_type",
+          nextExpected: "insurance_type",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_type" },
+      };
+    }
+
+    if (contactMissing.includes("nombre")) {
+      return {
+        replyText: composeInsuranceContactPrompt(safeStr(currentInsurance.tipo_seguro)),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_name",
+          nextExpected: "insurance_name",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_name" },
+      };
+    }
+
+    if (contactMissing.includes("estado")) {
+      return {
+        replyText: composeInsuranceLocationPrompt(safeStr(currentInsurance.contacto?.nombre)),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_location",
+          nextExpected: "insurance_location",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_location" },
+      };
+    }
+
+    if (contactMissing.includes("email")) {
+      return {
+        replyText: composeInsuranceEmailPrompt(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_email",
+          nextExpected: "insurance_email",
+        },
+        debug: { intent: interpreted.intent, phase: "DISCOVERY", route: "insurance_ask_email" },
+      };
+    }
+
+    if (!currentInsurance.seguro_actual) {
+      return {
+        replyText: composeInsuranceCurrentCoveragePrompt(),
+        interactiveButtons: buildInsuranceCurrentCoverageButtons(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_current",
+          nextExpected: "insurance_current",
+        },
+        debug: { intent: interpreted.intent, phase: "QUALIFICATION", route: "insurance_ask_current" },
+      };
+    }
+
+    if (!safeStr(currentInsurance.presupuesto)) {
+      return {
+        replyText: composeInsuranceBudgetPrompt(),
+        interactiveButtons: buildInsuranceBudgetButtons(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_budget",
+          nextExpected: "insurance_budget",
+        },
+        debug: { intent: interpreted.intent, phase: "QUALIFICATION", route: "insurance_ask_budget" },
+      };
+    }
+
+    if (!safeStr(currentInsurance.horario_preferido)) {
+      return {
+        replyText: composeInsurancePreferredTimePrompt(),
+        interactiveButtons: buildInsurancePreferredTimeButtons(),
+        statePatch: {
+          ...stateBase,
+          lastIntent: "insurance_preferred_time",
+          nextExpected: "insurance_preferred_time",
+        },
+        debug: { intent: interpreted.intent, phase: "QUALIFICATION", route: "insurance_ask_preferred_time" },
+      };
+    }
+
+    const scoring = calculateInsuranceScoring(currentInsurance);
+    const savedInsurance: InsuranceCollected = {
+      ...currentInsurance,
+      scoring,
+      saved: true,
+    };
+    return {
+      replyText: composeInsuranceConfirmation({
+        typeName: safeStr(savedInsurance.tipo_seguro),
+        contact: (savedInsurance.contacto ?? {}) as Record<string, unknown>,
+        currentInsurance: formatInsuranceCurrentCoverageForCopy(savedInsurance.seguro_actual),
+        budget: safeStr(savedInsurance.presupuesto),
+        preferredTime: safeStr(savedInsurance.horario_preferido),
+        priority: scoring.prioridad,
+      }),
+      statePatch: {
+        stage: "CLOSED",
+        orgType: "insurance",
+        collected: { ...collected, insurance: savedInsurance },
+        lastIntent: "insurance_confirmed",
+        nextExpected: undefined,
+      },
+      debug: { intent: interpreted.intent, phase: "CLOSED", route: "insurance_saved_confirmed" },
     };
   }
 
@@ -2783,6 +3429,126 @@ export function runConversationEngine(args: {
         safeStr((bookingCollected as any)?.pending_booking?.service_name, "").trim() ||
         safeStr((bookingCollected as any)?.pending_booking_request?.service, "").trim(),
     );
+    const globalInfoInterrupt = classifyBarbershopGlobalInfoInterrupt(args.inboundText);
+    const globalInfoActiveContext = hasActiveBarbershopBookingContext(state, bookingCollected);
+    const globalServicesPriceListQuestion = /\b(precios|servicios|que servicios tienen|qué servicios tienen|lista de precios|que precios tienen|qué precios tienen)\b/
+      .test(normalizedBarbershopInbound);
+    const shouldSkipGlobalInfoInterrupt = (
+      globalInfoInterrupt === "services_prices" &&
+      (
+        getBarbershopServicesFromSettings(args.clinicSettings).length === 0 ||
+        (
+          !globalInfoActiveContext &&
+          (!globalServicesPriceListQuestion || !/^(precios|servicios)$/.test(normalizedBarbershopInbound))
+        )
+      )
+    ) || (
+      !globalInfoActiveContext &&
+      (
+        globalInfoInterrupt === "location" ||
+        (globalInfoInterrupt === "services_prices" && !/^(precios|servicios)$/.test(normalizedBarbershopInbound))
+      )
+    );
+    if (globalInfoInterrupt && !shouldSkipGlobalInfoInterrupt) {
+      const pending = ((bookingCollected as any).pending_booking ?? null) as Record<string, unknown> | null;
+      const serviceForAvailability = (
+        detectedServiceName ||
+        safeStr(bookingCollected.service, "").trim() ||
+        safeStr((bookingCollected as any).current_service_name, "").trim() ||
+        safeStr((bookingCollected as any)?.pending_booking_request?.service, "").trim()
+      ).trim();
+      const dateForAvailability = (
+        parsedDateTime?.date ||
+        parsedDateOnly ||
+        safeStr((bookingCollected as any).preferred_date, "").trim() ||
+        safeStr((bookingCollected as any).current_date, "").trim()
+      ).trim();
+      const providerForAvailability = (
+        safeStr((bookingCollected as any).preferred_barber, "").trim() ||
+        safeStr((bookingCollected as any).provider_name, "").trim() ||
+        safeStr((bookingCollected as any).preferred_provider_id, "").trim()
+      ).trim();
+      const providerPreference = safeStr((bookingCollected as any).provider_preference, "").trim();
+      if (globalInfoInterrupt === "availability" && !serviceForAvailability) {
+        if (!serviceForAvailability) {
+          const serviceMenu = formatBarbershopServiceMenuFromSettings(getBarbershopServicesFromSettings(args.clinicSettings));
+          return {
+            replyText: `Claro 💈 ¿Qué servicio querés revisar?\n\n${serviceMenu}`,
+            statePatch: {
+              stage: "BOOKING",
+              lastIntent: "availability",
+              nextExpected: "service",
+              orgType: "barbershop",
+              collected: {
+                ...bookingCollected,
+                activeBookingFlow: true,
+                lastBookingStep: "select_service",
+                ...(dateForAvailability ? { preferred_date: dateForAvailability, current_date: dateForAvailability } : {}),
+              },
+            },
+            debug: withInterpreterDebug({ intent: "availability", phase: "BOOKING", route: "barbershop_global_availability_ask_service" }, "shadow"),
+          };
+        }
+      }
+      if (globalInfoInterrupt === "availability") {
+        // Service/date/provider availability is already handled by the booking engine below.
+      } else {
+      const infoReply = globalInfoInterrupt === "hours"
+        ? (!globalInfoActiveContext && /\b(a que hora abren|cuando abren|a que hora cierran|cuando cierran)\b/.test(normalizedBarbershopInbound)
+          ? getBarbershopBusinessHoursReply(args.inboundText, args.clinicSettings)
+          : formatBarbershopConfiguredHoursReply(args.clinicSettings))
+        : globalInfoInterrupt === "location"
+        ? (() => {
+          const address = resolveConfiguredBarbershopPublicLocation(args.clinicSettings);
+          return address
+            ? `Estamos ubicados en:\n${address}`
+            : 'Por ahora no tengo la ubicación exacta configurada. Podés tocar "Hablar con alguien" para que te ayuden.';
+        })()
+        : globalInfoInterrupt === "providers"
+        ? formatBarbershopProvidersReply(args.clinicSettings)
+        : formatBarbershopServicesPricesReply(args.inboundText, args.clinicSettings);
+      if (
+        safeStr(state.nextExpected, "") === "confirm_booking" &&
+        hasValidPendingForConfirm &&
+        !pendingIsStale &&
+        pending
+      ) {
+        const pendingReminder = formatBarbershopPendingBookingConfirmationReminder(pending, bookingCollected, state);
+        return {
+          replyText: `${infoReply}\n\n${pendingReminder}`,
+          statePatch: {
+            stage: "CONFIRMING",
+            lastIntent: globalInfoInterrupt,
+            nextExpected: "confirm_booking",
+            orgType: "barbershop",
+            collected: {
+              ...bookingCollected,
+              pending_booking: pending,
+              pending_booking_stale: false,
+              last_bot_step: "barbershop_preconfirm",
+            },
+          },
+          debug: withInterpreterDebug({ intent: globalInfoInterrupt, phase: "CONFIRMING", route: "barbershop_global_info_pending_confirm" }, "shadow"),
+        };
+      }
+      return {
+        replyText: globalInfoActiveContext
+          ? `${infoReply}\n\nPodés continuar con la cita cuando querás.`
+          : `${infoReply}\n\n¿Querés agendar una cita?`,
+        statePatch: {
+          stage: globalInfoActiveContext ? safeStr(state.stage, "BOOKING") as Stage : "DISCOVERY",
+          lastIntent: globalInfoInterrupt,
+          nextExpected: globalInfoActiveContext ? state.nextExpected : "main_menu_selection",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            ...(globalInfoActiveContext ? {} : { activeBookingFlow: false }),
+          },
+        },
+        debug: withInterpreterDebug({ intent: globalInfoInterrupt, phase: globalInfoActiveContext ? "BOOKING" : "DISCOVERY", route: globalInfoActiveContext ? "barbershop_global_info_preserve_flow" : "barbershop_global_info_menu" }, "shadow"),
+      };
+      }
+    }
     const plainAppointmentRequest = isBarbershopGenericBookingRequestText(args.inboundText) ||
       /\b(agendar cita|agendar una cita|reservar cita|reservar una cita)\b/.test(normalizedBarbershopInbound);
     const thirdPartySignalBeforeRouting = /\b(para mi hijo|para mi hija|para mi hermano|para mi hermana|para mi mama|para mi mamá|para mi papa|para mi papá|para otra persona|para alguien mas|para alguien más)\b/
@@ -4071,6 +4837,47 @@ export function runConversationEngine(args: {
       };
     }
 
+    if (
+      state.nextExpected === "confirm_booking" &&
+      hasValidPendingForConfirm &&
+      !pendingIsStale &&
+      (isBusinessHoursQuestionText(args.inboundText) || barbershopLocationQuestion)
+    ) {
+      const pending = ((bookingCollected as any).pending_booking ?? {}) as Record<string, unknown>;
+      const pendingReminder = formatBarbershopPendingBookingConfirmationReminder(pending, bookingCollected, state);
+      const infoReply = isBusinessHoursQuestionText(args.inboundText)
+        ? getBarbershopBusinessHoursReply(args.inboundText, args.clinicSettings)
+          .replace(/\n\n¿Querés que revise espacios disponibles\?$/, "")
+        : (() => {
+          const address = resolveConfiguredBarbershopPublicLocation(args.clinicSettings);
+          return address
+            ? `Estamos ubicados en:\n${address}`
+            : 'Por ahora no tengo la ubicación exacta configurada. Podés tocar "Hablar con alguien" para que te ayuden.';
+        })();
+      return {
+        replyText: `${infoReply}\n\n${pendingReminder}`,
+        statePatch: {
+          stage: "CONFIRMING",
+          lastIntent: isBusinessHoursQuestionText(args.inboundText) ? "hours" : "location",
+          nextExpected: "confirm_booking",
+          orgType: "barbershop",
+          collected: {
+            ...bookingCollected,
+            pending_booking: pending,
+            pending_booking_stale: false,
+            last_bot_step: "barbershop_preconfirm",
+          },
+        },
+        debug: withInterpreterDebug({
+          intent: isBusinessHoursQuestionText(args.inboundText) ? "hours" : "location",
+          phase: "CONFIRMING",
+          route: isBusinessHoursQuestionText(args.inboundText)
+            ? "barbershop_pending_booking_hours_answer"
+            : "barbershop_pending_booking_location_answer",
+        }, "shadow"),
+      };
+    }
+
     if (!state.nextExpected && (isVagueTime || routedIntent === "vague_time")) {
       return {
         replyText: "Decime el día y la hora completos para revisar, por ejemplo: lunes a las 3 o mañana a las 5.",
@@ -4129,6 +4936,7 @@ export function runConversationEngine(args: {
       (isAvailabilityInquiryText(args.inboundText) ||
         isAvailabilityDiscoveryIntentText(args.inboundText) ||
         runtimeIntent === "availability_question") &&
+      !isBusinessHoursQuestionText(args.inboundText) &&
       state.nextExpected !== "confirm_booking"
     ) {
       console.log(JSON.stringify({
@@ -7135,7 +7943,7 @@ export function runConversationEngine(args: {
 
     if (isRescheduleDateTimeExpected(state.nextExpected)) {
       const isDentalConversation =
-        safeStr(state.orgType, determineOrgType(args.organizationId)).toLowerCase() ===
+        safeStr(state.orgType, determineOrgType(args.organizationId, resolvedBusinessType)).toLowerCase() ===
           "dental" ||
         args.organizationId === "clinic-demo";
       const sameDayTimeMatch = normalizeTextForIntent(args.inboundText).match(

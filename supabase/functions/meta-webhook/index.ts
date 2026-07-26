@@ -1,7 +1,16 @@
 /// <reference lib="deno.unstable" />
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { ensureConversationState, resolveMode, stripTestDentalTag } from "../_shared/conversationEngine.ts";
+import {
+  ensureConversationState,
+  resolveMode,
+  stripTestDentalTag,
+} from "../_shared/conversationEngine.ts";
+import { normalizeWhatsAppInboundMessage } from "../shared/whatsappNormalization.ts";
+import {
+  extractMessengerEvents,
+  validateMetaSignature,
+} from "./messenger.ts";
 
 type Json = Record<string, unknown>;
 
@@ -14,6 +23,11 @@ function json(status: number, body: Json) {
   });
 }
 
+function isBotAutoReplyPaused(): boolean {
+  return String(Deno.env.get("BOT_AUTO_REPLY_PAUSED") ?? "").trim()
+    .toLowerCase() === "true";
+}
+
 function ensureState(state: any): any {
   const s = state && typeof state === "object" ? state : {};
   if (!s.stage) s.stage = "collecting";
@@ -22,10 +36,19 @@ function ensureState(state: any): any {
   if (!("service" in s)) s.service = null;
   if (!("phone" in s)) s.phone = null;
   if (!("availability" in s)) s.availability = null;
-  if (!("asked" in s)) s.asked = { full_name: false, service: false, phone: false, availability: false };
+  if (!("asked" in s)) {
+    s.asked = {
+      full_name: false,
+      service: false,
+      phone: false,
+      availability: false,
+    };
+  }
   if (!("last_bot_step" in s)) s.last_bot_step = null;
   if (!("intent" in s)) s.intent = null;
-  if (!("last_seen_inbound_message_id" in s)) s.last_seen_inbound_message_id = null;
+  if (!("last_seen_inbound_message_id" in s)) {
+    s.last_seen_inbound_message_id = null;
+  }
   return s;
 }
 
@@ -42,8 +65,25 @@ type InboundEvent = {
   sender_id: string;
   mid: string;
   text: string;
+  payload_action?: string | null;
   timestamp: number;
   sender_name?: string | null;
+};
+
+type WhatsAppHumanEchoEvent = {
+  channel: "whatsapp";
+  phone_number_id: string;
+  to: string;
+  mid: string;
+  text: string;
+  timestamp: number;
+  source: "smb_message_echoes";
+};
+
+type LeadRoutingDiagnostics = {
+  scopedLead: Record<string, any> | null;
+  staleLeads: Array<Record<string, unknown>>;
+  duplicateCount: number;
 };
 
 function normalizePsid(input: unknown) {
@@ -54,6 +94,103 @@ function normalizePsid(input: unknown) {
     return String(input).trim();
   }
   return "";
+}
+
+function normalizeChannelUserId(
+  channel: "messenger" | "whatsapp",
+  input: unknown,
+) {
+  const value = safeString(input);
+  if (channel !== "whatsapp") return value;
+  return value.replace(/\D/g, "");
+}
+
+function isArchivedChannelUserId(input: unknown) {
+  return safeString(input).toLowerCase().startsWith("archived_");
+}
+
+function chooseLeadForInbound(
+  rows: Array<Record<string, any>>,
+  defaultOrg: string,
+) {
+  const sorted = [...rows].sort((a, b) => {
+    const aActive = String(a?.status ?? "").toLowerCase() === "active" ? 0 : 1;
+    const bActive = String(b?.status ?? "").toLowerCase() === "active" ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+
+    const aHandoff = a?.handoff_to_human === true ? 1 : 0;
+    const bHandoff = b?.handoff_to_human === true ? 1 : 0;
+    if (aHandoff !== bHandoff) return aHandoff - bHandoff;
+
+    const aDefaultOrg = safeString(a?.organization_id) === defaultOrg ? 1 : 0;
+    const bDefaultOrg = safeString(b?.organization_id) === defaultOrg ? 1 : 0;
+    if (aDefaultOrg !== bDefaultOrg) return aDefaultOrg - bDefaultOrg;
+
+    const aUpdated = Date.parse(String(a?.updated_at ?? "")) || 0;
+    const bUpdated = Date.parse(String(b?.updated_at ?? "")) || 0;
+    return bUpdated - aUpdated;
+  });
+  return sorted[0] ?? null;
+}
+
+async function findWhatsAppLeadRoutingDiagnostics(args: {
+  supabase: any;
+  channelUserId: string;
+  rawChannelUserId?: string;
+  selectedOrganizationId: string;
+  defaultOrg: string;
+}): Promise<LeadRoutingDiagnostics> {
+  const channelUserId = normalizeChannelUserId("whatsapp", args.channelUserId);
+  if (!channelUserId) {
+    return { scopedLead: null, staleLeads: [], duplicateCount: 0 };
+  }
+
+  const res = await args.supabase
+    .from("leads")
+    .select(
+      "id, organization_id, state, full_name, channel, channel_user_id, status, handoff_to_human, updated_at",
+    )
+    .eq("channel", "whatsapp")
+    .eq("channel_user_id", channelUserId)
+    .order("updated_at", { ascending: false })
+    .limit(20);
+  if (res.error) throw res.error;
+
+  const rows = (Array.isArray(res.data) ? res.data : [])
+    .filter((row: Record<string, any>) =>
+      !isArchivedChannelUserId(row?.channel_user_id)
+    );
+  const selectedOrgRows = rows.filter((row: Record<string, any>) =>
+    safeString(row?.organization_id) === args.selectedOrganizationId
+  );
+  const scopedLead = chooseLeadForInbound(selectedOrgRows, args.defaultOrg);
+  const staleLeads = rows
+    .filter((row: Record<string, any>) =>
+      safeString(row?.organization_id) !== args.selectedOrganizationId
+    )
+    .map((row: Record<string, any>) => ({
+      id: row?.id,
+      organization_id: row?.organization_id,
+      status: row?.status,
+      handoff_to_human: row?.handoff_to_human,
+      state_org_type: (row?.state && typeof row.state === "object")
+        ? safeString(row.state.orgType ?? row.state.business_type)
+        : "",
+      updated_at: row?.updated_at,
+    }))
+    .filter((row: Record<string, unknown>) => row.id);
+
+  if (staleLeads.length > 0) {
+    console.log("[meta-webhook] stale_whatsapp_leads_detected", {
+      inbound_from: args.rawChannelUserId ?? args.channelUserId,
+      channel_user_id: channelUserId,
+      selected_organization_id: args.selectedOrganizationId,
+      stale_lead_count: staleLeads.length,
+      stale_leads: staleLeads,
+    });
+  }
+
+  return { scopedLead, staleLeads, duplicateCount: rows.length };
 }
 
 function collectTesterPsids(target: Set<string>, raw: unknown) {
@@ -82,37 +219,6 @@ function collectTesterPsids(target: Set<string>, raw: unknown) {
   }
 }
 
-function extractMessengerTextEvents(body: any): InboundEvent[] {
-  const events: InboundEvent[] = [];
-  const entries = Array.isArray(body?.entry) ? body.entry : [];
-
-  for (const entry of entries) {
-    const pageId = String(entry?.id ?? "");
-    const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
-    for (const m of messaging) {
-      const psid = m?.sender?.id;
-      const msg = m?.message;
-      const text = msg?.text;
-      const mid = msg?.mid;
-      const ts = m?.timestamp ?? Date.now();
-
-      if (!psid || !mid) continue;
-      if (msg?.is_echo) continue;
-      if (typeof text !== "string" || !text.trim()) continue;
-
-      events.push({
-        channel: "messenger",
-        page_id: pageId,
-        sender_id: String(psid),
-        mid: String(mid),
-        text: text.trim(),
-        timestamp: Number(ts),
-      });
-    }
-  }
-  return events;
-}
-
 function extractWhatsAppTextEvents(body: any): InboundEvent[] {
   const events: InboundEvent[] = [];
   const entries = Array.isArray(body?.entry) ? body.entry : [];
@@ -127,24 +233,71 @@ function extractWhatsAppTextEvents(body: any): InboundEvent[] {
       const messages = Array.isArray(value?.messages) ? value.messages : [];
       const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
       for (const msg of messages) {
-        const senderId = safeString(msg?.from);
+        const senderId = normalizeChannelUserId("whatsapp", msg?.from);
         const mid = safeString(msg?.id);
-        const text = safeString(msg?.text?.body);
+        const normalized = normalizeWhatsAppInboundMessage(msg);
+        const text = normalized?.content ?? "";
+        const payloadAction = normalized?.payload_action ?? null;
         if (!senderId || !mid || !text) continue;
-        const contact = contacts.find((item: any) => safeString(item?.wa_id) === senderId) ?? contacts[0];
+        const contact = contacts.find((item: any) =>
+          normalizeChannelUserId("whatsapp", item?.wa_id) === senderId
+        ) ?? contacts[0];
         events.push({
           channel: "whatsapp",
           phone_number_id: phoneNumberId,
           sender_id: senderId,
           mid,
           text,
-          timestamp: Number(msg?.timestamp ? Number(msg.timestamp) * 1000 : Date.now()),
+          payload_action: payloadAction,
+          timestamp: Number(
+            msg?.timestamp ? Number(msg.timestamp) * 1000 : Date.now(),
+          ),
           sender_name: safeString(contact?.profile?.name) || null,
         });
       }
     }
   }
 
+  return events;
+}
+
+function extractWhatsAppHumanEchoEvents(body: any): WhatsAppHumanEchoEvent[] {
+  const events: WhatsAppHumanEchoEvent[] = [];
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
+  for (const entry of entries) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    for (const change of changes) {
+      if (String(change?.field ?? "") !== "messages") continue;
+      const value = change?.value ?? {};
+      const metadata = value?.metadata ?? {};
+      const phoneNumberId = safeString(metadata?.phone_number_id);
+      const echoes = Array.isArray(value?.smb_message_echoes)
+        ? value.smb_message_echoes
+        : [];
+      for (const echo of echoes) {
+        const to = normalizeChannelUserId(
+          "whatsapp",
+          echo?.to?.[0]?.wa_id || echo?.to || echo?.recipient_id,
+        );
+        const mid = safeString(echo?.id || echo?.message_id);
+        const text = safeString(
+          echo?.text?.body || echo?.message?.text || echo?.content,
+        );
+        if (!to || !mid || !text) continue;
+        events.push({
+          channel: "whatsapp",
+          phone_number_id: phoneNumberId,
+          to,
+          mid,
+          text,
+          timestamp: Number(
+            echo?.timestamp ? Number(echo.timestamp) * 1000 : Date.now(),
+          ),
+          source: "smb_message_echoes",
+        });
+      }
+    }
+  }
   return events;
 }
 
@@ -163,9 +316,220 @@ function safeString(input: unknown) {
   return "";
 }
 
+import {
+  LEGACY_DEFAULT_ORGANIZATION_ID,
+  LEGACY_DEMO_CONTACT_ROUTES,
+} from "../_shared/tenancy/legacyCompatibility.ts";
+
+function parseDemoContactRoutes(input: string): Record<string, string> {
+  const routes: Record<string, string> = { ...LEGACY_DEMO_CONTACT_ROUTES };
+  const raw = String(input ?? "").trim();
+  if (!raw) return routes;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [channelUserId, organizationId] of Object.entries(parsed)) {
+        const normalizedChannelUserId = normalizeChannelUserId(
+          "whatsapp",
+          channelUserId,
+        );
+        const normalizedOrg = safeString(organizationId);
+        if (normalizedChannelUserId && normalizedOrg) {
+          routes[normalizedChannelUserId] = normalizedOrg;
+        }
+      }
+      return routes;
+    }
+  } catch {
+    // fall back to comma separated contact:organization pairs
+  }
+  for (const chunk of raw.split(",")) {
+    const [channelUserId, organizationId] = chunk.split(":");
+    const normalizedChannelUserId = normalizeChannelUserId(
+      "whatsapp",
+      channelUserId,
+    );
+    const normalizedOrg = safeString(organizationId);
+    if (normalizedChannelUserId && normalizedOrg) {
+      routes[normalizedChannelUserId] = normalizedOrg;
+    }
+  }
+  return routes;
+}
+
+function getDemoSharedPhoneNumberIds(): Set<string> {
+  return parseCsvSet(
+    [
+      Deno.env.get("DEMO_SHARED_WHATSAPP_PHONE_NUMBER_ID") ?? "",
+      Deno.env.get("DEMO_WHATSAPP_PHONE_NUMBER_ID") ?? "",
+      Deno.env.get("DEMO_SHARED_PHONE_NUMBER_ID") ?? "",
+    ].filter(Boolean).join(","),
+  );
+}
+
+function resolveDemoContactRoute(args: {
+  phoneNumberId: string;
+  channelUserId: string;
+}) {
+  const phoneNumberId = safeString(args.phoneNumberId);
+  const channelUserId = normalizeChannelUserId("whatsapp", args.channelUserId);
+  if (!phoneNumberId || !channelUserId) return null;
+  if (!getDemoSharedPhoneNumberIds().has(phoneNumberId)) return null;
+  const routes = parseDemoContactRoutes(
+    Deno.env.get("DEMO_CONTACT_ROUTES") ?? "",
+  );
+  const organizationId = safeString(routes[channelUserId]);
+  return organizationId ? { organizationId } : null;
+}
+
+function normalizeBooleanFlag(input: unknown): boolean {
+  if (input === true) return true;
+  if (typeof input === "number") return input === 1;
+  const value = safeString(input).toLowerCase();
+  return value === "true" || value === "1" || value === "yes" ||
+    value === "on";
+}
+
+function promptKeyForBusinessType(input: unknown) {
+  const businessType = safeString(input).toLowerCase();
+  return businessType === "barbershop" ? "barbershop_v1" : "dental_v1";
+}
+
+function summarizeRoutingCandidates(rows: Array<Record<string, any>>) {
+  return rows.map((row) => ({
+    organization_id: safeString(row?.organization_id),
+    business_type: safeString(row?.business_type),
+    whatsapp_enabled: normalizeBooleanFlag(row?.whatsapp_enabled),
+    bot_enabled: normalizeBooleanFlag(row?.bot_enabled),
+    updated_at: safeString(row?.updated_at),
+  }));
+}
+
+async function resolveOrganizationForInbound(args: {
+  supabase: any;
+  channel: "messenger" | "whatsapp";
+  pageId: string;
+  phoneNumberId: string;
+  channelUserId?: string;
+  defaultOrg: string;
+}) {
+  const { supabase, channel, pageId, phoneNumberId, defaultOrg } = args;
+  let organizationId: string | null = channel === "messenger" ? null : defaultOrg;
+  let businessType = "";
+  let source:
+    | "demo_contact_route"
+    | "org_settings"
+    | "messenger_meta_page_id"
+    | "default_org" = "default_org";
+  let routingCandidates: Array<Record<string, unknown>> = [];
+
+  if (channel === "messenger" && pageId) {
+    const orgLookup = await supabase
+      .from("org_settings")
+      .select("organization_id,business_type")
+      .eq("meta_page_id", pageId)
+      .eq("messenger_enabled", true)
+      .maybeSingle();
+    if (!orgLookup.error && orgLookup.data?.organization_id) {
+      organizationId = String(orgLookup.data.organization_id);
+      businessType = String(orgLookup.data.business_type ?? "").trim();
+      source = "messenger_meta_page_id";
+    }
+  } else if (channel === "whatsapp" && phoneNumberId) {
+    const orgSettingsLookup = await supabase
+      .from("org_settings")
+      .select(
+        "organization_id,business_type,whatsapp_enabled,bot_enabled,updated_at",
+      )
+      .eq("whatsapp_phone_number_id", phoneNumberId)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    const orgSettingsRows =
+      !orgSettingsLookup.error && Array.isArray(orgSettingsLookup.data)
+        ? orgSettingsLookup.data
+        : [];
+    routingCandidates = summarizeRoutingCandidates(orgSettingsRows);
+    const activeRows = orgSettingsRows.filter((row: Record<string, any>) =>
+      row?.organization_id &&
+      normalizeBooleanFlag(row?.whatsapp_enabled) &&
+      normalizeBooleanFlag(row?.bot_enabled)
+    );
+    if (activeRows.length > 0) {
+      if (activeRows.length > 1) {
+        console.warn("[meta-webhook] whatsapp_org_routing_ambiguous", {
+          phone_number_id: phoneNumberId,
+          active_candidate_count: activeRows.length,
+          selected_organization_id: activeRows[0]?.organization_id ?? null,
+          candidate_orgs: summarizeRoutingCandidates(activeRows),
+          resolution: "updated_at_desc",
+        });
+      }
+      const selected = activeRows[0];
+      organizationId = String(selected.organization_id);
+      businessType = String(selected.business_type ?? "").trim();
+      source = "org_settings";
+    } else {
+      const demoRoute = resolveDemoContactRoute({
+        phoneNumberId,
+        channelUserId: args.channelUserId ?? "",
+      });
+      if (demoRoute?.organizationId) {
+        organizationId = demoRoute.organizationId;
+        source = "demo_contact_route";
+      } else {
+        const canonicalLookup = await supabase
+          .from("organization_settings")
+          .select("organization_id,business_type,integrations")
+          .filter(
+            "integrations->>whatsapp_phone_number_id",
+            "eq",
+            phoneNumberId,
+          )
+          .limit(2);
+        const canonicalRows =
+          !canonicalLookup.error && Array.isArray(canonicalLookup.data)
+            ? canonicalLookup.data
+            : [];
+        if (canonicalRows.length === 1 && canonicalRows[0]?.organization_id) {
+          organizationId = String(canonicalRows[0].organization_id);
+          businessType = String(canonicalRows[0].business_type ?? "").trim();
+          source = "org_settings";
+        }
+      }
+    }
+    if (source === "demo_contact_route" && organizationId) {
+      const typeLookup = await supabase
+        .from("org_settings")
+        .select("organization_id,business_type")
+        .eq("organization_id", organizationId)
+        .maybeSingle();
+      if (!typeLookup.error) {
+        businessType = String(typeLookup.data?.business_type ?? "").trim();
+      }
+    }
+  }
+
+  return {
+    organizationId,
+    businessType,
+    source,
+    routingCandidates,
+    promptKey: promptKeyForBusinessType(businessType),
+  };
+}
+
 function shouldScheduleFollowup(text: string) {
   const t = String(text ?? "").toLowerCase();
-  const keys = ["precio", "precios", "costo", "costos", "agenda", "agendar", "cita", "horario"];
+  const keys = [
+    "precio",
+    "precios",
+    "costo",
+    "costos",
+    "agenda",
+    "agendar",
+    "cita",
+    "horario",
+  ];
   return keys.some((k) => t.includes(k));
 }
 
@@ -179,11 +543,18 @@ function waitlistDecision(text: string): "accept" | "decline" | null {
   return null;
 }
 
-async function fetchMetaProfileDetails(args: { pageAccessToken: string; psid: string }) {
+async function fetchMetaProfileDetails(
+  args: { pageAccessToken: string; psid: string },
+) {
   if (!args.pageAccessToken || !args.psid) return null;
   try {
-    const url = new URL(`https://graph.facebook.com/v19.0/${encodeURIComponent(args.psid)}`);
-    url.searchParams.set("fields", "first_name,last_name,profile_pic,locale,timezone,gender");
+    const url = new URL(
+      `https://graph.facebook.com/v19.0/${encodeURIComponent(args.psid)}`,
+    );
+    url.searchParams.set(
+      "fields",
+      "first_name,last_name,profile_pic,locale,timezone,gender",
+    );
     url.searchParams.set("access_token", args.pageAccessToken);
     const res = await fetch(url.toString());
     const data = await res.json();
@@ -191,7 +562,9 @@ async function fetchMetaProfileDetails(args: { pageAccessToken: string; psid: st
     const first = String(data?.first_name ?? "").trim() || null;
     const last = String(data?.last_name ?? "").trim() || null;
     const locale = String(data?.locale ?? "").trim() || null;
-    const timezone = typeof data?.timezone === "number" ? String(data?.timezone) : null;
+    const timezone = typeof data?.timezone === "number"
+      ? String(data?.timezone)
+      : null;
     const gender = String(data?.gender ?? "").trim() || null;
     const profilePic = String(data?.profile_pic ?? "").trim() || null;
     const full = [first, last].filter(Boolean).join(" ").trim() || null;
@@ -211,8 +584,8 @@ async function fetchMetaProfileDetails(args: { pageAccessToken: string; psid: st
 }
 
 async function resolvePageToken(
-  supabase: ReturnType<typeof createClient>,
-  organizationId: string
+  supabase: any,
+  organizationId: string,
 ) {
   const { data } = await supabase
     .from("org_settings")
@@ -224,11 +597,17 @@ async function resolvePageToken(
 
 serve(async (req) => {
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    "";
   const META_VERIFY_TOKEN = Deno.env.get("META_VERIFY_TOKEN") ?? "";
-  const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ?? "clinic-demo";
+  const DEFAULT_ORG = Deno.env.get("DEFAULT_ORG") ??
+    LEGACY_DEFAULT_ORGANIZATION_ID;
   const RUN_REPLIES_SECRET = Deno.env.get("RUN_REPLIES_SECRET") ?? "";
-  const TESTDENTAL_ALLOWED_PSIDS = parseCsvSet(Deno.env.get("TESTDENTAL_ALLOWED_PSIDS") ?? "");
+  const META_APP_SECRET = Deno.env.get("META_APP_SECRET") ?? "";
+  const TESTDENTAL_ALLOWED_PSIDS = parseCsvSet(
+    Deno.env.get("TESTDENTAL_ALLOWED_PSIDS") ?? "",
+  );
+  const botAutoReplyPaused = isBotAutoReplyPaused();
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !META_VERIFY_TOKEN) {
     return json(200, { ok: false, error: "missing_env" });
@@ -251,14 +630,116 @@ serve(async (req) => {
       return new Response("Forbidden", { status: 403 });
     }
 
-    if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
+    if (req.method !== "POST") {
+      return json(405, { ok: false, error: "method_not_allowed" });
+    }
 
-    const body = await req.json();
+    const rawBody = await req.text();
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return json(400, { ok: false, error: "invalid_json" });
+    }
+    if (String(body?.object ?? "") === "page") {
+      const signatureValid = await validateMetaSignature({
+        rawBody,
+        signatureHeader: req.headers.get("x-hub-signature-256"),
+        appSecret: META_APP_SECRET,
+      });
+      if (!signatureValid) {
+        return json(401, { ok: false, error: "invalid_meta_signature" });
+      }
+    }
+    const echoEvents = extractWhatsAppHumanEchoEvents(body);
+    if (echoEvents.length > 0) {
+      for (const echo of echoEvents) {
+        const resolvedOrg = await resolveOrganizationForInbound({
+          supabase,
+          channel: "whatsapp",
+          pageId: "",
+          phoneNumberId: echo.phone_number_id,
+          channelUserId: echo.to,
+          defaultOrg: DEFAULT_ORG,
+        });
+        const organization_id = resolvedOrg.organizationId;
+        console.log("[meta-webhook] human_echo_routing", {
+          phone_number_id: echo.phone_number_id,
+          channel_user_id: echo.to,
+          candidate_orgs: resolvedOrg.routingCandidates,
+          selected_organization_id: organization_id,
+          selected_business_type: resolvedOrg.businessType,
+          selected_prompt_key: resolvedOrg.promptKey,
+          organization_source: resolvedOrg.source,
+        });
+        const leadRes = await supabase
+          .from("leads")
+          .select("id,state")
+          .eq("organization_id", organization_id)
+          .eq("channel", "whatsapp")
+          .eq("channel_user_id", echo.to)
+          .maybeSingle();
+        if (!leadRes.error && leadRes.data?.id) {
+          const nowIso = new Date(echo.timestamp).toISOString();
+          const pausedUntil = new Date(echo.timestamp + 60 * 60 * 1000)
+            .toISOString();
+          const prevState =
+            leadRes.data.state && typeof leadRes.data.state === "object"
+              ? (leadRes.data.state as Record<string, unknown>)
+              : {};
+          const nextState = {
+            ...prevState,
+            conversation_mode: "human_active",
+            bot_paused_until: pausedUntil,
+            paused_reason: "human_replied_from_whatsapp_app",
+            last_human_message_at: nowIso,
+            last_human_actor: "whatsapp_app",
+          };
+          await supabase
+            .from("leads")
+            .update({
+              state: nextState,
+              last_message_at: nowIso,
+              last_message_preview: echo.text.slice(0, 140),
+            })
+            .eq("id", leadRes.data.id);
+          await supabase
+            .from("messages")
+            .insert({
+              organization_id,
+              lead_id: leadRes.data.id,
+              channel: "whatsapp",
+              role: "assistant",
+              actor: "human",
+              content: echo.text,
+              created_at: nowIso,
+              provider_message_id: echo.mid,
+              channel_user_id: echo.to,
+            });
+          console.log("[meta-webhook] human_takeover_activated", {
+            organization_id,
+            lead_id: leadRes.data.id,
+            human_takeover_source: "human_replied_from_whatsapp_app",
+            bot_paused_until: pausedUntil,
+            provider_message_id: echo.mid,
+          });
+        } else {
+          console.log("[meta-webhook] human_echo_detected_no_lead_match", {
+            organization_id,
+            channel_user_id: echo.to,
+            provider_message_id: echo.mid,
+            source: echo.source,
+          });
+        }
+      }
+    }
     const events = [
-      ...extractMessengerTextEvents(body),
+      ...extractMessengerEvents(body),
       ...extractWhatsAppTextEvents(body),
     ];
-    if (!events.length) return json(200, { ok: true, received: 0, organization_ids: [] });
+    if (!events.length) {
+      return json(200, { ok: true, received: 0, organization_ids: [] });
+    }
 
     let received = 0;
     let created_jobs = 0;
@@ -270,8 +751,9 @@ serve(async (req) => {
 
       const channel = ev.channel;
       const pageId = ev.page_id ?? "";
-      const phoneNumberId = ev.phone_number_id ?? "";
-      const senderId = ev.sender_id;
+      const phoneNumberId = (ev as InboundEvent).phone_number_id ?? "";
+      const rawSenderId = safeString(ev.sender_id);
+      const senderId = normalizeChannelUserId(channel, ev.sender_id);
       const providerMid = ev.mid;
       const traceId = providerMid || crypto.randomUUID();
       const rawText = ev.text;
@@ -280,36 +762,65 @@ serve(async (req) => {
       const hasResetTag = lowerText.includes("#reset");
       const cleanedText = stripTestDentalTag(rawText);
       const text = cleanedText || rawText;
+      const payloadAction = safeString((ev as any).payload_action);
       const isoTime = new Date(ev.timestamp).toISOString();
 
       let organization_id = DEFAULT_ORG;
       let orgBusinessType = "";
       let orgTesterPsids = new Set<string>();
-      if (channel === "messenger" && pageId) {
-        const orgLookup = await supabase
-          .from("org_settings")
-          .select("organization_id,business_type,tester_psids")
-          .eq("meta_page_id", pageId)
-          .eq("messenger_enabled", true)
-          .maybeSingle();
-        if (!orgLookup.error && orgLookup.data?.organization_id) {
-          organization_id = String(orgLookup.data.organization_id);
-          orgBusinessType = String(orgLookup.data.business_type ?? "").trim();
-          collectTesterPsids(orgTesterPsids, orgLookup.data?.tester_psids);
-        }
-      } else if (channel === "whatsapp" && phoneNumberId) {
-        const orgLookup = await supabase
-          .from("org_settings")
-          .select("organization_id,business_type")
-          .eq("whatsapp_phone_number_id", phoneNumberId)
-          .eq("whatsapp_enabled", true)
-          .maybeSingle();
-        if (!orgLookup.error && orgLookup.data?.organization_id) {
-          organization_id = String(orgLookup.data.organization_id);
-          orgBusinessType = String(orgLookup.data.business_type ?? "").trim();
-        }
+      let organizationSource = "default_org";
+      let defaultOrgUsed = false;
+      let duplicateLeadCount = 0;
+      let staleLeadCount = 0;
+      let staleLeads: Array<Record<string, unknown>> = [];
+      const resolvedOrg = await resolveOrganizationForInbound({
+        supabase,
+        channel,
+        pageId,
+        phoneNumberId,
+        channelUserId: senderId,
+        defaultOrg: DEFAULT_ORG,
+      });
+      if (channel === "messenger" && !resolvedOrg.organizationId) {
+        console.warn("[meta-webhook] unknown_messenger_page_rejected", {
+          page_id: pageId,
+          provider_message_id: providerMid,
+        });
+        return json(404, { ok: false, error: "unknown_messenger_page" });
+      }
+      const resolvedOrganizationId = resolvedOrg.organizationId as string;
+      let existingLead: Record<string, any> | null = null;
+
+      if (resolvedOrg.source === "demo_contact_route") {
+        organization_id = resolvedOrganizationId;
+        orgBusinessType = resolvedOrg.businessType;
+        organizationSource = resolvedOrg.source;
+        defaultOrgUsed = false;
+      } else if (resolvedOrg.source === "org_settings") {
+        organization_id = resolvedOrganizationId;
+        orgBusinessType = resolvedOrg.businessType;
+        organizationSource = resolvedOrg.source;
+        defaultOrgUsed = false;
+      } else {
+        organization_id = resolvedOrganizationId;
+        orgBusinessType = resolvedOrg.businessType;
+        organizationSource = resolvedOrg.source;
+        defaultOrgUsed = resolvedOrg.source === "default_org";
       }
       orgIds.add(organization_id);
+      if (channel === "whatsapp") {
+        const leadDiagnostics = await findWhatsAppLeadRoutingDiagnostics({
+          supabase,
+          channelUserId: senderId,
+          rawChannelUserId: rawSenderId,
+          selectedOrganizationId: organization_id,
+          defaultOrg: DEFAULT_ORG,
+        });
+        existingLead = leadDiagnostics.scopedLead;
+        duplicateLeadCount = leadDiagnostics.duplicateCount;
+        staleLeads = leadDiagnostics.staleLeads;
+        staleLeadCount = staleLeads.length;
+      }
       if (!orgBusinessType) {
         const typeRes = await supabase
           .from("org_settings")
@@ -333,8 +844,18 @@ serve(async (req) => {
       const isTester = channel === "messenger" && orgTesterPsids.has(senderId);
       console.log("[meta-webhook] inbound", {
         organization_id,
+        organization_source: organizationSource,
+        default_org: DEFAULT_ORG,
+        candidate_orgs: resolvedOrg.routingCandidates,
+        selected_business_type: orgBusinessType,
+        selected_prompt_key: promptKeyForBusinessType(orgBusinessType),
         page_id: pageId,
         phone_number_id: phoneNumberId,
+        inbound_from: rawSenderId,
+        normalized_channel_user_id: senderId,
+        existing_lead_found_under_selected_org: Boolean(existingLead?.id),
+        stale_lead_count: staleLeadCount,
+        stale_leads: staleLeads,
         sender_id: senderId,
         channel,
         provider_message_id: providerMid,
@@ -342,18 +863,26 @@ serve(async (req) => {
         is_tester: isTester,
       });
 
-      const { data: existingLead, error: selErr } = await supabase
-        .from("leads")
-        .select("id, state, full_name, channel")
-        .eq("organization_id", organization_id)
-        .eq("channel", channel)
-        .eq("channel_user_id", senderId)
-        .maybeSingle();
-      if (selErr) throw selErr;
+      if (!existingLead?.id) {
+        const { data: scopedLead, error: selErr } = await supabase
+          .from("leads")
+          .select(
+            "id, organization_id, state, full_name, channel, status, handoff_to_human, updated_at",
+          )
+          .eq("organization_id", organization_id)
+          .eq("channel", channel)
+          .eq("channel_user_id", senderId)
+          .maybeSingle();
+        if (selErr) throw selErr;
+        existingLead = scopedLead ?? null;
+      }
 
-      const nextState = ensureConversationState(ensureState(existingLead?.state));
+      const nextState = ensureConversationState(
+        ensureState(existingLead?.state),
+      );
       const existingMode = safeString(nextState.mode);
-      const resetTriggered = organization_id === "creatyv-product" && isTester && hasResetTag;
+      const resetTriggered = organization_id === "creatyv-product" &&
+        isTester && hasResetTag;
       if (resetTriggered) {
         nextState.mode = "creatyv_product";
         nextState.phase = "new";
@@ -373,8 +902,7 @@ serve(async (req) => {
         orgBusinessType,
         hasTestDentalTag: isTester && hasTestdentalTag,
       });
-      const shouldActivateDental =
-        organization_id === "creatyv-product" &&
+      const shouldActivateDental = organization_id === "creatyv-product" &&
         isTester &&
         hasTestdentalTag &&
         !existingMode &&
@@ -393,27 +921,39 @@ serve(async (req) => {
       }
       const existingFullName = String(existingLead?.full_name ?? "").trim();
       const stateName = String(nextState?.name ?? "").trim();
-      const existingRealName = existingFullName && !existingFullName.startsWith("Usuario ") ? existingFullName : "";
-      const stateRealName = stateName && !stateName.startsWith("Usuario ") ? stateName : "";
+      const existingRealName =
+        existingFullName && !existingFullName.startsWith("Usuario ")
+          ? existingFullName
+          : "";
+      const stateRealName = stateName && !stateName.startsWith("Usuario ")
+        ? stateName
+        : "";
       const hasRealName = Boolean(existingRealName || stateRealName);
-      let resolvedName: string | null = existingRealName || stateRealName || null;
+      let resolvedName: string | null = existingRealName || stateRealName ||
+        null;
       let resolvedFirstName: string | null = null;
       let resolvedLastName: string | null = null;
-      let resolvedProfilePic: string | null = String(nextState?.profile_pic ?? "").trim() || null;
+      let resolvedProfilePic: string | null =
+        String(nextState?.profile_pic ?? "").trim() || null;
       let metaProfileLookupAttempted = false;
       let metaProfileLookupSucceeded = false;
 
-      if (!hasRealName && (channel === "messenger" || channel === "instagram")) {
+      if (!hasRealName && channel === "messenger") {
         metaProfileLookupAttempted = true;
         try {
           const token = await resolvePageToken(supabase, organization_id);
           if (token) {
-            const profile = await fetchMetaProfileDetails({ pageAccessToken: token, psid: senderId });
+            const profile = await fetchMetaProfileDetails({
+              pageAccessToken: token,
+              psid: senderId,
+            });
             if (profile?.firstName) resolvedFirstName = profile.firstName;
             if (profile?.lastName) resolvedLastName = profile.lastName;
             if (profile?.fullName) resolvedName = profile.fullName;
             if (profile?.profilePic) resolvedProfilePic = profile.profilePic;
-            metaProfileLookupSucceeded = Boolean(profile?.fullName || profile?.firstName || profile?.lastName);
+            metaProfileLookupSucceeded = Boolean(
+              profile?.fullName || profile?.firstName || profile?.lastName,
+            );
           }
         } catch (err) {
           console.warn("[meta-webhook] graph_api_profile_fetch_failed", {
@@ -427,7 +967,9 @@ serve(async (req) => {
       if (!resolvedName && channel === "whatsapp") {
         resolvedName = safeString(ev.sender_name) || null;
       }
-      const graphGotName = Boolean(resolvedName && !resolvedName.startsWith("Usuario "));
+      const graphGotName = Boolean(
+        resolvedName && !resolvedName.startsWith("Usuario "),
+      );
       nextState.name = resolvedName;
       nextState.full_name = resolvedName;
       nextState.collected_name = hasRealName || graphGotName;
@@ -435,7 +977,10 @@ serve(async (req) => {
       nextState.meta_profile_lookup_succeeded = metaProfileLookupSucceeded;
       if (graphGotName) {
         nextState.asked = { ...(nextState.asked ?? {}), full_name: true };
-        nextState.collected = { ...(nextState.collected ?? {}), full_name: resolvedName };
+        nextState.collected = {
+          ...(nextState.collected ?? {}),
+          full_name: resolvedName,
+        };
       }
       if (resolvedProfilePic) nextState.profile_pic = resolvedProfilePic;
 
@@ -459,17 +1004,44 @@ serve(async (req) => {
 
       const { data: lead, error: leadErr } = await supabase
         .from("leads")
-        .upsert(upsertPayload, { onConflict: "organization_id,channel,channel_user_id" })
+        .upsert(upsertPayload, {
+          onConflict: "organization_id,channel,channel_user_id",
+        })
         .select("id")
         .single();
       if (leadErr) throw leadErr;
       updated_leads++;
+      console.log("[meta-webhook] inbound_lead_routing", {
+        channel,
+        inbound_from: rawSenderId,
+        normalized_channel_user_id: senderId,
+        inbound_channel_user_id: senderId,
+        selected_lead_id: lead.id,
+        selected_organization_id: organization_id,
+        organization_source: organizationSource,
+        inbound_phone_number_id: phoneNumberId,
+        candidate_orgs: resolvedOrg.routingCandidates,
+        selected_business_type: orgBusinessType,
+        selected_prompt_key: promptKeyForBusinessType(orgBusinessType),
+        default_org: DEFAULT_ORG,
+        default_org_used: defaultOrgUsed,
+        used_existing_lead: Boolean(existingLead?.id),
+        existing_lead_found_under_selected_org: Boolean(existingLead?.id),
+        stale_lead_count: staleLeadCount,
+        stale_leads: staleLeads,
+        used_default_org: defaultOrgUsed,
+        duplicate_lead_count: duplicateLeadCount,
+        duplicate_lead_detected: duplicateLeadCount > 1,
+        fallback_default_org_used: defaultOrgUsed,
+      });
 
       const decision = waitlistDecision(text);
       if (decision) {
         const activeHold = await supabase
           .from("slot_holds")
-          .select("id, slot_key, slot_start, slot_end, service_type, hold_until, status")
+          .select(
+            "id, slot_key, slot_start, slot_end, service_type, hold_until, status",
+          )
           .eq("organization_id", organization_id)
           .eq("lead_id", lead.id)
           .eq("slot_hold_scope", "lead")
@@ -482,16 +1054,17 @@ serve(async (req) => {
         if (!activeHold.error && activeHold.data?.id) {
           const hold = activeHold.data as any;
           if (decision === "accept") {
-            const appointmentInsert = await supabase.from("appointments").insert({
-              organization_id,
-              lead_id: lead.id,
-              start_at: hold.slot_start ?? null,
-              starts_at: hold.slot_start ?? null,
-              status: "confirmed",
-              title: hold.service_type ?? "Cita",
-              reason: hold.service_type ?? "Servicio",
-              patient_name: resolvedName,
-            });
+            const appointmentInsert = await supabase.from("appointments")
+              .insert({
+                organization_id,
+                lead_id: lead.id,
+                start_at: hold.slot_start ?? null,
+                starts_at: hold.slot_start ?? null,
+                status: "confirmed",
+                title: hold.service_type ?? "Cita",
+                reason: hold.service_type ?? "Servicio",
+                patient_name: resolvedName,
+              });
             if (!appointmentInsert.error) {
               await supabase
                 .from("slot_holds")
@@ -530,7 +1103,7 @@ serve(async (req) => {
                   .eq("organization_id", organization_id)
                   .in("id", otherLeadIds);
                 const rows = leadsRows.data ?? [];
-                if (rows.length > 0) {
+                if (rows.length > 0 && !botAutoReplyPaused) {
                   await supabase.from("reply_outbox").insert(
                     rows.map((l: any) => ({
                       organization_id,
@@ -539,22 +1112,34 @@ serve(async (req) => {
                       channel_user_id: l.channel_user_id,
                       status: "queued",
                       scheduled_for: new Date().toISOString(),
-                      message_text: "Ese turno ya fue tomado. Si querés, te compartimos nuevas opciones.",
+                      message_text:
+                        "Ese turno ya fue tomado. Si querés, te compartimos nuevas opciones.",
                       payload: {
                         source: "waitlist_offer_closed",
                         provider: "meta",
-                        text: "Ese turno ya fue tomado. Si querés, te compartimos nuevas opciones.",
+                        text:
+                          "Ese turno ya fue tomado. Si querés, te compartimos nuevas opciones.",
                         slot_key: hold.slot_key,
                       },
-                    }))
+                    })),
                   );
+                } else if (rows.length > 0) {
+                  console.log("[bot_auto_reply_paused_webhook]", {
+                    organization_id,
+                    lead_id: lead.id,
+                    skipped: "waitlist_reply_outbox",
+                    skipped_count: rows.length,
+                  });
                 }
               }
             }
           } else if (decision === "decline") {
             await supabase
               .from("slot_holds")
-              .update({ status: "cancelled", updated_at: new Date().toISOString() })
+              .update({
+                status: "cancelled",
+                updated_at: new Date().toISOString(),
+              })
               .eq("organization_id", organization_id)
               .eq("id", hold.id);
           }
@@ -609,7 +1194,8 @@ serve(async (req) => {
       }
       const insertedMessageId = (msgInsert.data as any)?.id ?? null;
 
-      const canEnqueue = Boolean(text && text.trim()) && Boolean(providerMid);
+      const canEnqueue = !botAutoReplyPaused && Boolean(text && text.trim()) &&
+        Boolean(providerMid);
       if (canEnqueue) {
         const outboxPayload = {
           organization_id,
@@ -621,6 +1207,7 @@ serve(async (req) => {
           inbound_provider_message_id: providerMid,
           payload: {
             text,
+            payload_action: payloadAction || null,
             channel,
             channel_user_id: senderId,
             organization_id,
@@ -630,21 +1217,32 @@ serve(async (req) => {
         };
         const outboxInsert = await supabase
           .from("reply_outbox")
-          .insert(outboxPayload, {
-            onConflict: "organization_id,inbound_provider_message_id",
-            ignoreDuplicates: true,
-          })
+          .insert([outboxPayload])
           .select("id")
           .maybeSingle();
         let enqueueStatus: "enqueued" | "duplicate_skip" = "duplicate_skip";
         let enqueuedOutboxId: string | null = null;
         if (outboxInsert.error) {
           const em = String(outboxInsert.error.message ?? "").toLowerCase();
-          if (!em.includes("duplicate")) throw outboxInsert.error;
+          const code = String((outboxInsert.error as any)?.code ?? "");
+          if (!em.includes("duplicate") && code !== "23505") {
+            throw outboxInsert.error;
+          }
         } else if (outboxInsert.data?.id) {
           created_jobs += 1;
           enqueueStatus = "enqueued";
           enqueuedOutboxId = String(outboxInsert.data.id);
+        }
+        if (enqueueStatus === "enqueued") {
+          console.log("[meta_webhook:inbound_enqueued]", {
+            organization_id,
+            lead_id: lead.id,
+            message_id: insertedMessageId,
+            reply_outbox_id: enqueuedOutboxId,
+            channel,
+            channel_user_id: senderId,
+            phone_number_id: phoneNumberId || null,
+          });
         }
         console.log("[meta-webhook] enqueue", {
           organization_id,
@@ -658,11 +1256,25 @@ serve(async (req) => {
           organization_id,
           sender_id: senderId,
           provider_message_id: providerMid,
-          reason: !providerMid ? "missing_mid" : "missing_text",
+          reason: botAutoReplyPaused
+            ? "bot_auto_reply_paused"
+            : !providerMid
+            ? "missing_mid"
+            : "missing_text",
         });
+        if (botAutoReplyPaused) {
+          console.log("[bot_auto_reply_paused_webhook]", {
+            organization_id,
+            lead_id: lead.id,
+            message_id: insertedMessageId,
+            channel,
+            channel_user_id: senderId,
+            provider_message_id: providerMid,
+          });
+        }
       }
 
-      if (shouldScheduleFollowup(text)) {
+      if (!botAutoReplyPaused && shouldScheduleFollowup(text)) {
         const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupRes = await supabase
           .from("followup_outbox")
@@ -687,13 +1299,16 @@ serve(async (req) => {
             {
               onConflict: "organization_id,lead_id,reason,step",
               ignoreDuplicates: true,
-            }
+            },
           )
           .select("id")
           .maybeSingle();
         if (followupRes.error) {
           const msg = String(followupRes.error.message ?? "");
-          if (!msg.toLowerCase().includes("duplicate") && !msg.toLowerCase().includes("does not exist")) {
+          if (
+            !msg.toLowerCase().includes("duplicate") &&
+            !msg.toLowerCase().includes("does not exist")
+          ) {
             console.log("[meta-webhook] followup_enqueue_warn", {
               organization_id,
               lead_id: lead.id,
@@ -709,7 +1324,7 @@ serve(async (req) => {
           });
         }
       }
-      if (RUN_REPLIES_SECRET) {
+      if (RUN_REPLIES_SECRET && !botAutoReplyPaused) {
         const RUN_REPLIES_URL = `${SUPABASE_URL}/functions/v1/run-replies`;
         await fetch(RUN_REPLIES_URL, {
           method: "POST",
@@ -718,6 +1333,12 @@ serve(async (req) => {
             "x-run-replies-secret": RUN_REPLIES_SECRET,
           },
           body: JSON.stringify({ organization_id, limit: 5 }),
+        });
+      } else if (RUN_REPLIES_SECRET && botAutoReplyPaused) {
+        console.log("[bot_auto_reply_paused_webhook]", {
+          organization_id,
+          lead_id: lead.id,
+          skipped: "run_replies_trigger",
         });
       }
     }
