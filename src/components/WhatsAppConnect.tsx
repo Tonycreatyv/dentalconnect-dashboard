@@ -6,8 +6,8 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createMetaEmbeddedSignupAttempt } from "../lib/metaEmbeddedSignupAttempt";
 import { supabase } from "../lib/supabaseClient";
-import { captureNextMetaSdkRedirect } from "../lib/metaSdkRedirect";
 
 const PUBLIC_APP_URL = import.meta.env.VITE_PUBLIC_APP_URL;
 const FB_APP_ID = import.meta.env.VITE_META_APP_ID;
@@ -198,7 +198,7 @@ export default function WhatsAppConnect(
   const [error, setError] = useState("");
   const [sdkReady, setSdkReady] = useState(false);
   const connecting = useRef(false);
-  const restorePopupCapture = useRef<(() => void) | null>(null);
+  const cancelActiveAttempt = useRef<(() => void) | null>(null);
 
   const loadStatus = useCallback(async () => {
     const result = await supabase.from("org_settings").select(
@@ -227,8 +227,8 @@ export default function WhatsAppConnect(
     });
   }, [loadStatus]);
   useEffect(() => () => {
-    restorePopupCapture.current?.();
-    restorePopupCapture.current = null;
+    cancelActiveAttempt.current?.();
+    cancelActiveAttempt.current = null;
   }, []);
 
   const exchange = useCallback(
@@ -236,7 +236,6 @@ export default function WhatsAppConnect(
       input: {
         code: string;
         state: string;
-        metaRedirectUri: string;
         wabaId: string;
         phoneNumberId: string;
         replaceExisting: boolean;
@@ -247,7 +246,6 @@ export default function WhatsAppConnect(
           action: "exchange",
           code: input.code,
           state: input.state,
-          meta_redirect_uri: input.metaRedirectUri,
           waba_id: input.wabaId,
           phone_number_id: input.phoneNumberId,
           replace_existing: input.replaceExisting,
@@ -331,64 +329,77 @@ export default function WhatsAppConnect(
       setError(`${failure.message}${diagnostic}`);
       return;
     }
-    restorePopupCapture.current?.();
-    const popupCapture = captureNextMetaSdkRedirect();
-    restorePopupCapture.current = popupCapture.restore;
+    cancelActiveAttempt.current?.();
+    let handler = (() => {}) as (event: MessageEvent) => void;
+    let cancelAttempt = () => {};
+    let attemptTimeout = 0;
+    const cleanup = () => {
+      window.removeEventListener("message", handler);
+      window.clearTimeout(attemptTimeout);
+      cancelAttempt();
+      if (cancelActiveAttempt.current === cleanup) {
+        cancelActiveAttempt.current = null;
+      }
+    };
+    const failAttempt = (message: string) => {
+      cleanup();
+      connecting.current = false;
+      setStatus("error");
+      setError(message);
+    };
+    const attempt = createMetaEmbeddedSignupAttempt((result) => {
+      cleanup();
+      connecting.current = false;
+      void exchange({
+        ...result,
+        state: signupState,
+        replaceExisting,
+      });
+    });
+    cancelAttempt = attempt.cancel;
+    handler = (event: MessageEvent) => {
+      if (
+        !["https://www.facebook.com", "https://web.facebook.com"].includes(
+          event.origin,
+        )
+      ) return;
+      try {
+        const data = typeof event.data === "string"
+          ? JSON.parse(event.data)
+          : event.data;
+        const result = attempt.acceptEvent(data);
+        if (result === "cancel") {
+          cleanup();
+          connecting.current = false;
+          setStatus(deriveStatus(row));
+          setError("Conexión cancelada.");
+        } else if (result === "invalid_finish") {
+          failAttempt(
+            "Meta no devolvió una cuenta y un número de WhatsApp válidos.",
+          );
+        }
+      } catch { /* Ignore unrelated Meta messages. */ }
+    };
+    window.addEventListener("message", handler);
+    cancelActiveAttempt.current = cleanup;
+    attemptTimeout = window.setTimeout(() => {
+      failAttempt("La conexión con Meta venció. Inténtalo nuevamente.");
+    }, 10 * 60 * 1_000);
     try {
       window.FB.login((response) => {
-        popupCapture.restore();
-        restorePopupCapture.current = null;
         if (response.status !== "connected" || !response.authResponse?.code) {
+          cleanup();
           connecting.current = false;
           setStatus(deriveStatus(row));
           setError("Conexión cancelada o no autorizada.");
           return;
         }
-        const metaRedirectUri = popupCapture.getCaptured();
-        if (!metaRedirectUri) {
-          connecting.current = false;
-          setStatus("error");
-          setError(
-            "Meta no devolvió un inicio de conexión válido. Inténtalo nuevamente.",
-          );
-          return;
+        if (
+          !attempt.acceptCode(response.authResponse.code) &&
+          cancelActiveAttempt.current === cleanup
+        ) {
+          failAttempt("Meta no devolvió un código de conexión válido.");
         }
-        const code = response.authResponse.code;
-        let completed = false;
-        const finish = async (wabaId: string, phoneNumberId: string) => {
-          if (completed) return;
-          completed = true;
-          window.removeEventListener("message", handler);
-          connecting.current = false;
-          await exchange({
-            code,
-            state: signupState,
-            metaRedirectUri,
-            wabaId,
-            phoneNumberId,
-            replaceExisting,
-          });
-        };
-        const handler = (event: MessageEvent) => {
-          if (
-            !["https://www.facebook.com", "https://web.facebook.com"].includes(
-              event.origin,
-            )
-          ) return;
-          try {
-            const data = typeof event.data === "string"
-              ? JSON.parse(event.data)
-              : event.data;
-            if (data?.type === "WA_EMBEDDED_SIGNUP") {
-              void finish(
-                String(data.data?.waba_id ?? ""),
-                String(data.data?.phone_number_id ?? ""),
-              );
-            }
-          } catch { /* Ignore unrelated Meta messages. */ }
-        };
-        window.addEventListener("message", handler);
-        window.setTimeout(() => void finish("", ""), 8_000);
       }, {
         config_id: FB_CONFIG_ID,
         response_type: "code",
@@ -397,11 +408,7 @@ export default function WhatsAppConnect(
         extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
       });
     } catch {
-      popupCapture.restore();
-      restorePopupCapture.current = null;
-      connecting.current = false;
-      setStatus("error");
-      setError("No se pudo abrir Meta Embedded Signup.");
+      failAttempt("No se pudo abrir Meta Embedded Signup.");
     }
   }, [exchange, row, sdkReady]);
 

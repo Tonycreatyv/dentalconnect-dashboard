@@ -65,9 +65,6 @@ type MetaOAuthDiagnostic = {
   trace_id?: string;
 };
 
-const META_REDIRECT_HOST = "staticxx.facebook.com";
-const META_REDIRECT_PATH = "/x/connect/xd_arbiter/";
-
 function safeMetaType(value: unknown) {
   return typeof value === "string" &&
       /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(value)
@@ -147,7 +144,6 @@ export function buildMetaTokenUrl(
   appId: string,
   appSecret: string,
   code: string,
-  redirectUri: string,
 ) {
   const tokenUrl = new URL(
     `https://graph.facebook.com/${graphVersion}/oauth/access_token`,
@@ -155,38 +151,7 @@ export function buildMetaTokenUrl(
   tokenUrl.searchParams.set("client_id", appId);
   tokenUrl.searchParams.set("client_secret", appSecret);
   tokenUrl.searchParams.set("code", code);
-  tokenUrl.searchParams.set("redirect_uri", redirectUri);
   return tokenUrl;
-}
-
-export function validateMetaRedirectUri(value: unknown): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > 4096) {
-    return null;
-  }
-  if (value !== value.trim() || /[\u0000-\u001F\u007F]/.test(value)) {
-    return null;
-  }
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol !== "https:" || url.hostname !== META_REDIRECT_HOST ||
-      url.pathname !== META_REDIRECT_PATH
-    ) return null;
-    if (
-      url.username || url.password || url.port || !url.pathname.endsWith("/")
-    ) return null;
-    const queryEntries = [...url.searchParams.entries()];
-    if (
-      queryEntries.length !== 1 || queryEntries[0][0] !== "version" ||
-      !/^\d{1,4}$/.test(queryEntries[0][1])
-    ) return null;
-    if (!url.hash || url.hash.length <= 1 || url.hash.length - 1 > 2048) {
-      return null;
-    }
-    return value;
-  } catch {
-    return null;
-  }
 }
 
 if (import.meta.main) {
@@ -268,30 +233,15 @@ if (import.meta.main) {
 
       const code = text(body.code, 2_000);
       const state = text(body.state, 4_000);
-      if (body.redirect_uri !== undefined || body.redirectUri !== undefined) {
-        return json(req, 400, {
-          ok: false,
-          error: "invalid_meta_redirect_uri",
-        });
-      }
-      const metaRedirectUri = validateMetaRedirectUri(body.meta_redirect_uri);
       if (!code) return json(req, 400, { ok: false, error: "missing_code" });
       if (
         !state || !await verifySignupState(state, userId, metaAppSecret)
       ) return json(req, 400, { ok: false, error: "invalid_state" });
-      if (!metaRedirectUri) {
-        return json(req, 400, {
-          ok: false,
-          error: "invalid_meta_redirect_uri",
-        });
-      }
-
       const tokenUrl = buildMetaTokenUrl(
         graphVersion,
         metaAppId,
         metaAppSecret,
         code,
-        metaRedirectUri,
       );
       const tokenRes = await fetch(tokenUrl);
       const tokenData = await tokenRes.json();

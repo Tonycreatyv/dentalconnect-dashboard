@@ -1,12 +1,8 @@
 import {
-  assert,
   assertEquals,
   assertStringIncludes,
 } from "https://deno.land/std@0.223.0/assert/mod.ts";
-import {
-  captureNextMetaSdkRedirect,
-  validateMetaSdkRedirectUri,
-} from "../src/lib/metaSdkRedirect.ts";
+import { createMetaEmbeddedSignupAttempt } from "../src/lib/metaEmbeddedSignupAttempt.ts";
 
 const frontendSource = await Deno.readTextFile(
   new URL("../src/components/WhatsAppConnect.tsx", import.meta.url),
@@ -15,109 +11,112 @@ const functionSource = await Deno.readTextFile(
   new URL("../supabase/functions/whatsapp-signup/index.ts", import.meta.url),
 );
 
-Deno.test("Embedded Signup preserves the Meta SDK redirect contract", () => {
-  assertStringIncludes(frontendSource, "captureNextMetaSdkRedirect()");
-  assertStringIncludes(
-    frontendSource,
-    "meta_redirect_uri: input.metaRedirectUri",
-  );
-  assertStringIncludes(
-    functionSource,
-    "validateMetaRedirectUri(body.meta_redirect_uri)",
-  );
-  assertStringIncludes(
-    functionSource,
-    'tokenUrl.searchParams.set("redirect_uri", redirectUri)',
-  );
-});
-
-Deno.test("frontend accepts only a bounded dynamic Meta XD redirect", () => {
-  const valid =
-    "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=current-attempt";
-  assertEquals(validateMetaSdkRedirectUri(valid), valid);
-  for (
-    const invalid of [
-      "https://example.com/x/connect/xd_arbiter/?version=46#cb=x",
-      "https://staticxx.facebook.com/x/connect/xd_arbiter?version=46#cb=x",
-      "https://staticxx.facebook.com/wrong/?version=46#cb=x",
-      "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46",
-      "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46&extra=1#cb=x",
-      "https://user:pass@staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=x",
-      `https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#${
-        "x".repeat(2049)
-      }`,
-    ]
-  ) assertEquals(validateMetaSdkRedirectUri(invalid), null);
-});
-
-Deno.test("popup capture retains the current attempt URI and restores window.open", async () => {
-  const redirect =
-    "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=attempt-two";
-  const popupUrl = `https://www.facebook.com/v21.0/dialog/oauth?redirect_uri=${
-    encodeURIComponent(redirect)
-  }`;
-  const originalWindow = globalThis.window;
-  const openCalls: unknown[][] = [];
-  const originalOpen = (...args: unknown[]) => {
-    openCalls.push(args);
-    return { closed: false };
-  };
-  const fakeWindow = {
-    location: { href: "https://referral.creatyv.io/integrations" },
-    open: originalOpen,
-    setTimeout,
-    clearTimeout,
-  };
-  Object.defineProperty(globalThis, "window", {
-    value: fakeWindow,
-    configurable: true,
-  });
-  try {
-    const capture = captureNextMetaSdkRedirect(100);
-    const popup = fakeWindow.open(popupUrl, "_blank", "width=600");
-    await Promise.resolve();
-    assert(popup);
-    assertEquals(capture.getCaptured(), redirect);
-    assertEquals(fakeWindow.open, originalOpen);
-    assertEquals(openCalls.length, 1);
-  } finally {
-    Object.defineProperty(globalThis, "window", {
-      value: originalWindow,
-      configurable: true,
-    });
-  }
-});
-
-Deno.test("popup capture rejects missing redirect and restores defensively", () => {
-  const originalWindow = globalThis.window;
-  const originalOpen = (() => null) as (...args: unknown[]) => null;
-  const fakeWindow = {
-    location: { href: "https://referral.creatyv.io/integrations" },
-    open: originalOpen,
-    setTimeout,
-    clearTimeout,
-  };
-  Object.defineProperty(globalThis, "window", {
-    value: fakeWindow,
-    configurable: true,
-  });
-  try {
-    const capture = captureNextMetaSdkRedirect(100);
-    fakeWindow.open("https://www.facebook.com/v21.0/dialog/oauth", "_blank");
-    assertEquals(capture.getCaptured(), null);
-    capture.restore();
-    assertEquals(fakeWindow.open, originalOpen);
-  } finally {
-    Object.defineProperty(globalThis, "window", {
-      value: originalWindow,
-      configurable: true,
-    });
-  }
-});
-
-Deno.test("Embedded Signup requests session information version 3 as a string", () => {
+Deno.test("Embedded Signup follows the official code exchange contract", () => {
+  assertStringIncludes(frontendSource, "attempt.acceptEvent");
+  assertStringIncludes(frontendSource, "attempt.acceptCode");
   assertStringIncludes(frontendSource, 'sessionInfoVersion: "3"');
-  assertEquals(frontendSource.includes("sessionInfoVersion: 3"), false);
-  assertEquals(frontendSource.includes("console.log(metaRedirectUri"), false);
-  assertEquals(functionSource.includes("console.log(metaRedirectUri"), false);
+  assertEquals(frontendSource.includes("meta_redirect_uri"), false);
+  assertEquals(frontendSource.includes("captureNextMetaSdkRedirect"), false);
+  assertEquals(
+    functionSource.includes('searchParams.set("redirect_uri"'),
+    false,
+  );
+  assertEquals(functionSource.includes("meta_redirect_uri"), false);
+  for (
+    const sdkArgument of [
+      "config_id: FB_CONFIG_ID",
+      'response_type: "code"',
+      "override_default_response_type: true",
+      "state: signupState",
+      'extras: { setup: {}, featureType: "", sessionInfoVersion: "3" }',
+      "response.authResponse.code",
+    ]
+  ) assertStringIncludes(frontendSource, sdkArgument);
+  for (const source of [frontendSource, functionSource]) {
+    assertEquals(source.includes("console.log("), false);
+    assertEquals(source.includes("console.error(code"), false);
+    assertEquals(source.includes("console.error(state"), false);
+  }
+});
+
+Deno.test("attempt pairs callback-first code with the matching finish event once", () => {
+  const results: unknown[] = [];
+  const attempt = createMetaEmbeddedSignupAttempt((result) =>
+    results.push(result)
+  );
+  assertEquals(attempt.acceptCode("one-time-code"), true);
+  assertEquals(results, []);
+  assertEquals(
+    attempt.acceptEvent({
+      type: "WA_EMBEDDED_SIGNUP",
+      event: "FINISH",
+      data: { waba_id: "waba-1", phone_number_id: "phone-1" },
+    }),
+    "finish",
+  );
+  assertEquals(results, [{
+    code: "one-time-code",
+    wabaId: "waba-1",
+    phoneNumberId: "phone-1",
+  }]);
+  assertEquals(attempt.acceptCode("second-code"), false);
+  assertEquals(results.length, 1);
+});
+
+Deno.test("attempt pairs finish-first assets with the matching callback code once", () => {
+  const results: unknown[] = [];
+  const attempt = createMetaEmbeddedSignupAttempt((result) =>
+    results.push(result)
+  );
+  assertEquals(
+    attempt.acceptEvent({
+      type: "WA_EMBEDDED_SIGNUP",
+      event: "FINISH",
+      data: { waba_id: "waba-2", phone_number_id: "phone-2" },
+    }),
+    "finish",
+  );
+  assertEquals(results, []);
+  assertEquals(attempt.acceptCode("one-time-code"), true);
+  assertEquals(results.length, 1);
+});
+
+Deno.test("cancel and incomplete finish never trigger exchange", () => {
+  const results: unknown[] = [];
+  const incomplete = createMetaEmbeddedSignupAttempt((result) =>
+    results.push(result)
+  );
+  assertEquals(incomplete.acceptCode("one-time-code"), true);
+  assertEquals(
+    incomplete.acceptEvent({
+      type: "WA_EMBEDDED_SIGNUP",
+      event: "FINISH",
+      data: { waba_id: "waba-1" },
+    }),
+    "invalid_finish",
+  );
+  assertEquals(results, []);
+
+  const cancelled = createMetaEmbeddedSignupAttempt((result) =>
+    results.push(result)
+  );
+  assertEquals(
+    cancelled.acceptEvent({
+      type: "WA_EMBEDDED_SIGNUP",
+      event: "CANCEL",
+      data: {},
+    }),
+    "cancel",
+  );
+  assertEquals(cancelled.acceptCode("late-code"), false);
+  assertEquals(results, []);
+});
+
+Deno.test("frontend installs the session listener before opening FB.login", () => {
+  const listener = frontendSource.indexOf(
+    'window.addEventListener("message", handler)',
+  );
+  const login = frontendSource.indexOf("window.FB.login");
+  assertEquals(listener >= 0 && login > listener, true);
+  assertEquals(frontendSource.includes("8_000"), false);
 });
