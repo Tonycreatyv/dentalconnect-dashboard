@@ -7,6 +7,7 @@ import {
   buildMetaTokenUrl,
   classifyMetaOAuthMessage,
   safeMetaOAuthDiagnostic,
+  validateMetaRedirectUri,
 } from "./index.ts";
 
 const source = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
@@ -149,7 +150,7 @@ Deno.test("unsafe provider metadata is omitted from diagnostics", () => {
 
 Deno.test("token exchange uses one safely encoded trusted redirect URI", () => {
   const redirectUri =
-    "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46";
+    "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=attempt-one";
   const tokenUrl = buildMetaTokenUrl(
     "v21.0",
     "public-app-id",
@@ -164,14 +165,37 @@ Deno.test("token exchange uses one safely encoded trusted redirect URI", () => {
   );
   assertStringIncludes(
     tokenUrl.toString(),
-    "redirect_uri=https%3A%2F%2Fstaticxx.facebook.com%2Fx%2Fconnect%2Fxd_arbiter%2F%3Fversion%3D46",
+    "redirect_uri=https%3A%2F%2Fstaticxx.facebook.com%2Fx%2Fconnect%2Fxd_arbiter%2F%3Fversion%3D46%23cb%3Dattempt-one",
   );
 });
 
-Deno.test("caller input cannot override the server redirect URI", () => {
-  assertStringIncludes(source, 'env("META_WHATSAPP_REDIRECT_URI")');
-  assertStringIncludes(source, "metaWhatsAppRedirectUri");
-  assertEquals(source.includes("body.redirect_uri"), false);
-  assertEquals(source.includes("body.redirectUri"), false);
-  assertStringIncludes(source, '"missing_configuration"');
+Deno.test("dynamic Meta redirect validation is narrow and preserves exact bytes", () => {
+  const valid =
+    "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=attempt-one&frame=abc";
+  assertEquals(validateMetaRedirectUri(valid), valid);
+  for (
+    const invalid of [
+      "https://attacker.example/x/connect/xd_arbiter/?version=46#cb=x",
+      "https://staticxx.facebook.com/x/connect/xd_arbiter?version=46#cb=x",
+      "https://staticxx.facebook.com/wrong/?version=46#cb=x",
+      "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46",
+      "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46&extra=1#cb=x",
+      " https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=x",
+      "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=x\n",
+      `https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#${
+        "x".repeat(2049)
+      }`,
+    ]
+  ) assertEquals(validateMetaRedirectUri(invalid), null);
+});
+
+Deno.test("caller must supply only the dedicated dynamic redirect field", () => {
+  assertStringIncludes(
+    source,
+    "validateMetaRedirectUri(body.meta_redirect_uri)",
+  );
+  assertStringIncludes(source, "body.redirect_uri !== undefined");
+  assertStringIncludes(source, "body.redirectUri !== undefined");
+  assertStringIncludes(source, 'error: "invalid_meta_redirect_uri"');
+  assertEquals(source.includes('env("META_WHATSAPP_REDIRECT_URI")'), false);
 });
