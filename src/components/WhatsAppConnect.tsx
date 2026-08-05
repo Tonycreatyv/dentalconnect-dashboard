@@ -132,7 +132,7 @@ export default function WhatsAppConnect({ organizationId, onConnected, businessT
       };
       const handler = (event: MessageEvent) => { if (!["https://www.facebook.com", "https://web.facebook.com"].includes(event.origin)) return; try { const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data; if (data?.type === "WA_EMBEDDED_SIGNUP") void finish(String(data.data?.waba_id ?? ""), String(data.data?.phone_number_id ?? "")); } catch { /* Ignore unrelated Meta messages. */ } };
       window.addEventListener("message", handler); window.setTimeout(() => void finish("", ""), 8_000);
-    }, { config_id: FB_CONFIG_ID, response_type: "code", override_default_response_type: true, state: signupState, extras: { setup: {}, featureType: "", sessionInfoVersion: 3 } });
+    }, { config_id: FB_CONFIG_ID, response_type: "code", override_default_response_type: true, state: signupState, extras: { setup: {}, featureType: "", sessionInfoVersion: "3" } });
   }, [exchange, row, sdkReady]);
 
   return <div className="rounded-lg border border-[#272a30] bg-[#101114] p-4">

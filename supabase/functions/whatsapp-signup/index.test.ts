@@ -3,7 +3,11 @@ import {
   assertEquals,
   assertStringIncludes,
 } from "https://deno.land/std@0.223.0/assert/mod.ts";
-import { classifyMetaOAuthMessage, safeMetaOAuthDiagnostic } from "./index.ts";
+import {
+  buildMetaTokenUrl,
+  classifyMetaOAuthMessage,
+  safeMetaOAuthDiagnostic,
+} from "./index.ts";
 
 const source = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 
@@ -43,7 +47,10 @@ Deno.test("signup never enables before registration and webhook success", () => 
 
 Deno.test("signup responses and logs omit credentials", () => {
   assertEquals(source.includes("token exchanged"), false);
-  assertEquals(source.includes("metaAppSecret,"), false);
+  const logCalls =
+    source.match(/console\.(?:error|log|warn)\([\s\S]*?\);/g)?.join("\n") ?? "";
+  assertEquals(logCalls.includes("metaAppSecret"), false);
+  assertEquals(logCalls.includes("tokenUrl"), false);
   assertStringIncludes(source, 'return_to: "/integrations"');
 });
 
@@ -138,4 +145,33 @@ Deno.test("unsafe provider metadata is omitted from diagnostics", () => {
       safe_message_category: "unknown_meta_oauth_error",
     },
   );
+});
+
+Deno.test("token exchange uses one safely encoded trusted redirect URI", () => {
+  const redirectUri =
+    "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46";
+  const tokenUrl = buildMetaTokenUrl(
+    "v21.0",
+    "public-app-id",
+    "test-secret",
+    "code with reserved &=? characters",
+    redirectUri,
+  );
+  assertEquals(tokenUrl.searchParams.getAll("redirect_uri"), [redirectUri]);
+  assertEquals(
+    tokenUrl.searchParams.get("code"),
+    "code with reserved &=? characters",
+  );
+  assertStringIncludes(
+    tokenUrl.toString(),
+    "redirect_uri=https%3A%2F%2Fstaticxx.facebook.com%2Fx%2Fconnect%2Fxd_arbiter%2F%3Fversion%3D46",
+  );
+});
+
+Deno.test("caller input cannot override the server redirect URI", () => {
+  assertStringIncludes(source, 'env("META_WHATSAPP_REDIRECT_URI")');
+  assertStringIncludes(source, "metaWhatsAppRedirectUri");
+  assertEquals(source.includes("body.redirect_uri"), false);
+  assertEquals(source.includes("body.redirectUri"), false);
+  assertStringIncludes(source, '"missing_configuration"');
 });

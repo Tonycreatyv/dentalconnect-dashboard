@@ -139,6 +139,23 @@ export function safeMetaOAuthDiagnostic(
   };
 }
 
+export function buildMetaTokenUrl(
+  graphVersion: string,
+  appId: string,
+  appSecret: string,
+  code: string,
+  redirectUri: string,
+) {
+  const tokenUrl = new URL(
+    `https://graph.facebook.com/${graphVersion}/oauth/access_token`,
+  );
+  tokenUrl.searchParams.set("client_id", appId);
+  tokenUrl.searchParams.set("client_secret", appSecret);
+  tokenUrl.searchParams.set("code", code);
+  tokenUrl.searchParams.set("redirect_uri", redirectUri);
+  return tokenUrl;
+}
+
 if (import.meta.main) {
   Deno.serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -156,6 +173,7 @@ if (import.meta.main) {
       const serviceRole = env("SUPABASE_SERVICE_ROLE_KEY");
       const metaAppId = env("META_APP_ID");
       const metaAppSecret = env("META_APP_SECRET");
+      const metaWhatsAppRedirectUri = env("META_WHATSAPP_REDIRECT_URI");
       const graphVersion = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
       const bearer = (req.headers.get("authorization") ?? "").replace(
         /^Bearer\s+/i,
@@ -223,12 +241,13 @@ if (import.meta.main) {
         !state || !await verifySignupState(state, userId, metaAppSecret)
       ) return json(req, 400, { ok: false, error: "invalid_state" });
 
-      const tokenUrl = new URL(
-        `https://graph.facebook.com/${graphVersion}/oauth/access_token`,
+      const tokenUrl = buildMetaTokenUrl(
+        graphVersion,
+        metaAppId,
+        metaAppSecret,
+        code,
+        metaWhatsAppRedirectUri,
       );
-      tokenUrl.searchParams.set("client_id", metaAppId);
-      tokenUrl.searchParams.set("client_secret", metaAppSecret);
-      tokenUrl.searchParams.set("code", code);
       const tokenRes = await fetch(tokenUrl);
       const tokenData = await tokenRes.json();
       if (!tokenRes.ok || !tokenData.access_token) {
