@@ -5,7 +5,9 @@ import {
   fetchReferralOrders,
   fetchReferralOrderStatusEvents,
   type ReferralOrderListItem,
+  type ReferralOrderEventsClient,
   type ReferralOrdersClient,
+  type ReferralOrderStatusClient,
   type ReferralOrderStatusEvent,
   updateReferralOrderStatus,
 } from "./orders";
@@ -34,12 +36,13 @@ export function useReferralOrders() {
     setError(null);
     const result = await fetchReferralOrders(supabase as unknown as ReferralOrdersClient, organizationId);
     if (result.error) {
+      console.warn("[Referral Hub] No se pudieron cargar pedidos", { organizationId });
       setOrders([]);
       setError("No pudimos cargar los pedidos. Intenta de nuevo.");
     } else {
       setOrders(result.data);
       const eventsResult = await fetchReferralOrderStatusEvents(
-        supabase,
+        supabase as unknown as ReferralOrderEventsClient,
         organizationId,
         result.data.map((order) => order.id),
       );
@@ -48,7 +51,7 @@ export function useReferralOrders() {
           (groups[event.order_id] ??= []).push(event);
           return groups;
         }, {}));
-      }
+      } else console.warn("[Referral Hub] No se pudo cargar el historial de pedidos", { organizationId });
     }
     setLoading(false);
   }, [organizationId]);
@@ -59,7 +62,7 @@ export function useReferralOrders() {
     if (!organizationId || updatingOrderId) return false;
     setUpdatingOrderId(orderId);
     setActionError(null);
-    const result = await updateReferralOrderStatus(supabase, organizationId, orderId, nextStatus);
+    const result = await updateReferralOrderStatus(supabase as unknown as ReferralOrderStatusClient, organizationId, orderId, nextStatus);
     if (result.error) {
       setActionError("No pudimos actualizar el estado. Recarga e intenta nuevamente.");
       setUpdatingOrderId(null);

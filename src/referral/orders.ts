@@ -45,7 +45,7 @@ export type ReferralOrderListItem = {
   delivery_postal_code: string;
   coverage_status: ReferralOrderCoverageStatus;
   customer_notes: string | null;
-  source_channel: "web" | "whatsapp" | "qr" | "admin";
+  source_channel: "web" | "whatsapp" | "voice" | "qr" | "admin";
   campaign_code: string | null;
   created_at: string;
 };
@@ -121,6 +121,28 @@ export type ReferralOrdersClient = {
   };
 };
 
+export type ReferralOrderEventsClient = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        in: (column: string, values: string[]) => {
+          order: (column: string, options: { ascending: boolean }) => PromiseLike<{
+            data: unknown[] | null;
+            error: unknown;
+          }>;
+        };
+      };
+    };
+  };
+};
+
+export type ReferralOrderStatusClient = {
+  rpc: (name: string, params: Record<string, unknown>) => PromiseLike<{
+    data: unknown;
+    error: unknown;
+  }>;
+};
+
 export async function fetchReferralOrders(client: ReferralOrdersClient, organizationId: string) {
   if (!organizationId) return { data: [] as ReferralOrderListItem[], error: null };
   const result = await client
@@ -136,7 +158,7 @@ export async function fetchReferralOrders(client: ReferralOrdersClient, organiza
 }
 
 export async function fetchReferralOrderStatusEvents(
-  client: any,
+  client: ReferralOrderEventsClient,
   organizationId: string,
   orderIds: string[],
 ) {
@@ -155,7 +177,7 @@ export async function fetchReferralOrderStatusEvents(
 }
 
 export async function updateReferralOrderStatus(
-  client: any,
+  client: ReferralOrderStatusClient,
   organizationId: string,
   orderId: string,
   nextStatus: ReferralOrderStatus,

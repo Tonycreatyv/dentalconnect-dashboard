@@ -2,7 +2,7 @@ import { useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
 const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
-const APP_URL = import.meta.env.VITE_PUBLIC_URL || "https://referral.creatyv.io";
+const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://referral.creatyv.io";
 const META_APP_ID = import.meta.env.VITE_META_APP_ID as string | undefined;
 
 export async function startMetaOAuth(organizationId: string) {
@@ -46,6 +46,10 @@ export async function startMetaOAuth(organizationId: string) {
   window.location.href = authUrl;
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function ConnectMessengerButton({
   organizationId,
   className = "",
@@ -61,10 +65,9 @@ export default function ConnectMessengerButton({
     try {
       setBusy(true);
       await startMetaOAuth(organizationId);
-    } catch (e: any) {
+    } catch (error: unknown) {
       setBusy(false);
-      const msg = String(e?.message ?? e);
-      onError?.(msg);
+      onError?.(errorMessage(error));
     }
   }
 

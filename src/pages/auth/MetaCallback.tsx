@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
 
 const FN_BASE = "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1";
-const APP_URL = import.meta.env.VITE_PUBLIC_URL || "https://referral.creatyv.io";
+const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || "https://referral.creatyv.io";
 
 function decodeOrgFromSignedState(state: string | null) {
   try {
@@ -18,11 +18,23 @@ function decodeOrgFromSignedState(state: string | null) {
   }
 }
 
+type MetaPage = { id: string; name: string; access_token: string };
+
+function isMetaPage(value: unknown): value is MetaPage {
+  if (!value || typeof value !== "object") return false;
+  const page = value as Record<string, unknown>;
+  return typeof page.id === "string" && typeof page.name === "string" && typeof page.access_token === "string";
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function MetaCallback() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<"loading" | "selecting" | "saving" | "error">("loading");
   const [message, setMessage] = useState("Procesando conexión con Facebook...");
-  const [pages, setPages] = useState<Array<{ id: string; name: string; access_token: string }>>([]);
+  const [pages, setPages] = useState<MetaPage[]>([]);
 
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const code = params.get("code");
@@ -55,15 +67,15 @@ export default function MetaCallback() {
         }
 
         if (!mounted) return;
-        const availablePages = Array.isArray(j?.pages) ? j.pages : [];
+        const availablePages = Array.isArray(j?.pages) ? j.pages.filter(isMetaPage) : [];
         if (availablePages.length === 0) throw new Error("No hay páginas disponibles para seleccionar.");
         setPages(availablePages);
         setStatus("selecting");
         setMessage("Selecciona la página que quieres conectar.");
-      } catch (e: any) {
+      } catch (error: unknown) {
         if (!mounted) return;
         setStatus("error");
-        setMessage(String(e?.message ?? e));
+        setMessage(errorMessage(error));
       }
     })();
     return () => {
@@ -71,7 +83,7 @@ export default function MetaCallback() {
     };
   }, [code, state]);
 
-  async function savePage(page: { id: string; name: string; access_token: string }) {
+  async function savePage(page: MetaPage) {
     try {
       if (!state) throw new Error("State inválido.");
       setStatus("saving");
@@ -118,9 +130,9 @@ export default function MetaCallback() {
         });
         if (orgFromState) redirectParams.set("org", orgFromState);
       window.location.href = `/settings?${redirectParams.toString()}`;
-    } catch (e: any) {
+    } catch (error: unknown) {
       setStatus("error");
-      setMessage(String(e?.message ?? e));
+      setMessage(errorMessage(error));
     }
   }
 

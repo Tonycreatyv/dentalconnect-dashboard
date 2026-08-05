@@ -15,6 +15,7 @@ type ReferralOrganizationValue = {
   resolvedOrgId: string;
   resolvedOrgName: string;
   resolvedBusinessType: "referral_hub";
+  membershipRole: string;
   features: LgFeatureFlags;
   loading: boolean;
   error: string;
@@ -28,6 +29,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
   const [error, setError] = useState("");
   const [name, setName] = useState("LG Community Network");
   const [features, setFeatures] = useState(DEFAULT_LG_FEATURE_FLAGS);
+  const [membershipRole, setMembershipRole] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -39,7 +41,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
       setLoading(true);
       const membership = await supabase
         .from("org_members")
-        .select("organization_id")
+        .select("organization_id,role")
         .eq("user_id", user.id)
         .eq("organization_id", REFERRAL_HUB_ORGANIZATION_ID)
         .maybeSingle();
@@ -50,6 +52,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
         }
         return;
       }
+      setMembershipRole(String(membership.data.role ?? ""));
       const [settings, profile] = await Promise.all([
         supabase
           .from("org_settings")
@@ -81,10 +84,11 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
     resolvedOrgId: error ? "" : REFERRAL_HUB_ORGANIZATION_ID,
     resolvedOrgName: name,
     resolvedBusinessType: "referral_hub",
+    membershipRole,
     features,
     loading,
     error,
-  }), [error, name, features, loading]);
+  }), [error, name, features, loading, membershipRole]);
 
   return (
     <ReferralOrganizationContext.Provider value={value}>

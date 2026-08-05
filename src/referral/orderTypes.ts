@@ -1,4 +1,9 @@
-export type ReferralOrderSourceChannel = "web" | "whatsapp" | "qr" | "admin";
+export type ReferralOrderSourceChannel =
+  | "web"
+  | "whatsapp"
+  | "voice"
+  | "qr"
+  | "admin";
 export type ReferralOrderRouteSource = "demo" | "google_routes" | "manual";
 export type ReferralOrderCoverageStatus =
   | "available"
@@ -13,6 +18,9 @@ export type ReferralOrderStatus =
   | "delivered"
   | "cancelled";
 
+/** UUID values are opaque database identifiers, never basket keys. */
+export type ReferralUuid = string & { readonly __referralUuid: unique symbol };
+
 /**
  * Untrusted request contract. Prices, fee bands, totals, and display snapshots
  * are intentionally absent and must be resolved by the backend.
@@ -21,8 +29,8 @@ export type CreateReferralOrderInput = {
   idempotencyKey: string;
   campaignCode?: string | null;
   sourceChannel: ReferralOrderSourceChannel;
-  partnerLocationId: string;
-  basketOfferId: string;
+  partnerLocationId: ReferralUuid;
+  basketOfferId: ReferralUuid;
   customerName: string;
   customerPhone: string;
   customerEmail?: string | null;
@@ -43,7 +51,7 @@ export type CreateReferralOrderInput = {
 };
 
 export type ReferralOrderSummary = {
-  id: string;
+  id: ReferralUuid;
   orderCode: string;
   status: ReferralOrderStatus;
   partnerName: string;

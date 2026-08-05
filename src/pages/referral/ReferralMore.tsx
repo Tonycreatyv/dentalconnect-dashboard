@@ -1,12 +1,11 @@
-import { useEffect, useState } from "react";
-import { Building2, Facebook, GitBranch, LogOut, ScanLine, Unplug, User, Users } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft, Facebook, Unplug } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { startMetaOAuth } from "../../components/integrations/ConnectMessengerButton";
-import { MobileCard, MobileHeader } from "../../components/mobile/MobilePrimitives";
 import { REFERRAL_HUB_ORG_ID } from "../../config/referralHub";
-import { useAuth } from "../../context/AuthContext";
 import { useActiveOrg } from "../../hooks/useActiveOrg";
 import { supabase } from "../../lib/supabaseClient";
+import WhatsAppConnect from "../../components/WhatsAppConnect";
 
 type MessengerStatus = {
   meta_page_id: string | null;
@@ -21,8 +20,7 @@ const EMPTY_STATUS: MessengerStatus = {
 };
 
 export default function ReferralMore() {
-  const { user, signOut } = useAuth();
-  const { resolvedOrgId, resolvedOrgName, resolvedBusinessType } = useActiveOrg();
+  const { resolvedOrgId, resolvedBusinessType } = useActiveOrg();
   const location = useLocation();
   const navigate = useNavigate();
   const [messenger, setMessenger] = useState<MessengerStatus>(EMPTY_STATUS);
@@ -30,7 +28,7 @@ export default function ReferralMore() {
   const [notice, setNotice] = useState("");
   const isCanonicalLg = resolvedOrgId === REFERRAL_HUB_ORG_ID && resolvedBusinessType === "referral_hub";
 
-  async function loadMessengerStatus() {
+  const loadMessengerStatus = useCallback(async () => {
     if (!resolvedOrgId || resolvedBusinessType !== "referral_hub") {
       setMessenger(EMPTY_STATUS);
       return;
@@ -49,11 +47,11 @@ export default function ReferralMore() {
       meta_page_name: result.data.meta_page_name ?? null,
       messenger_enabled: result.data.messenger_enabled === true,
     });
-  }
+  }, [resolvedBusinessType, resolvedOrgId]);
 
   useEffect(() => {
     void loadMessengerStatus();
-  }, [resolvedOrgId, resolvedBusinessType]);
+  }, [loadMessengerStatus]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -63,7 +61,7 @@ export default function ReferralMore() {
     params.delete("connected");
     params.delete("org");
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
-  }, [location.pathname, location.search, navigate]);
+  }, [loadMessengerStatus, location.pathname, location.search, navigate]);
 
   async function connectMessenger() {
     if (!isCanonicalLg || !resolvedOrgId) {
@@ -73,7 +71,7 @@ export default function ReferralMore() {
     setBusy(true);
     setNotice("");
     try {
-      localStorage.setItem("dc_post_meta_redirect", "/more");
+      localStorage.setItem("dc_post_meta_redirect", "/integrations");
       await startMetaOAuth(resolvedOrgId);
     } catch (error) {
       setBusy(false);
@@ -104,20 +102,16 @@ export default function ReferralMore() {
   const connected = Boolean(messenger.meta_page_id && messenger.messenger_enabled);
 
   return (
-    <main className="referral-page">
-      <MobileHeader eyebrow="Cuenta" title="Más" subtitle="Herramientas y configuración" />
-      <div className="grid gap-2">
-        {false ? <Link to="/coupons/validate" className="coupon-more-link"><ScanLine className="h-5 w-5"/><span><strong>Validar cupón</strong><small>Escanear QR o ingresar código</small></span></Link> : null}
-        <Link to="/leads" className="coupon-more-link"><Users className="h-5 w-5"/><span><strong>Leads</strong><small>Consultar referidos y clientes</small></span></Link>
-        <Link to="/pipeline" className="coupon-more-link"><GitBranch className="h-5 w-5"/><span><strong>Pipeline</strong><small>Revisar oportunidades por etapa</small></span></Link>
-      </div>
-
-      <MobileCard className="space-y-3">
+    <main className="bolt-rh-page">
+      <Link className="bolt-rh-back" to="/more"><ArrowLeft />Volver</Link>
+      <header className="bolt-rh-heading"><h1>Integraciones</h1><p>Canales conectados a LG Community Network.</p></header>
+      <div className="grid gap-3 md:grid-cols-2">
+      <section className="space-y-3 rounded-lg border border-[#272a30] bg-[#101114] p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1877F2]/10 text-[#5A9CF5]"><Facebook className="h-5 w-5" /></div>
             <div className="min-w-0">
-              <strong className="block text-sm text-white">Messenger</strong>
+              <strong className="block text-sm text-white">{messenger.meta_page_name || "Messenger"}</strong>
               <span className="text-xs text-[#7E8C99]">{connected ? "Página conectada" : "No conectado"}</span>
             </div>
           </div>
@@ -128,7 +122,7 @@ export default function ReferralMore() {
         {connected ? (
           <div className="rounded-xl border border-[#25384A] bg-[#0A141D] p-3 text-xs">
             <div className="font-semibold text-white">{messenger.meta_page_name || "Página de Facebook"}</div>
-            <div className="mt-1 text-[#7E8C99]">Page ID: {messenger.meta_page_id}</div>
+            <div className="mt-1 text-[#7E8C99]">Lista para recibir y responder mensajes.</div>
           </div>
         ) : null}
         {notice ? <p className="text-xs text-[#9CAAB8]">{notice}</p> : null}
@@ -141,14 +135,9 @@ export default function ReferralMore() {
             {busy ? "Conectando..." : "Conectar Messenger"}
           </button>
         )}
-      </MobileCard>
-
-      <MobileCard className="space-y-1">
-        <div className="referral-account-row"><User className="h-4 w-4" /><div><span>Cuenta</span><strong>{user?.email ?? "Sesión activa"}</strong></div></div>
-        <div className="referral-account-row"><Building2 className="h-4 w-4" /><div><span>Organización</span><strong>{resolvedOrgName || "Referral Hub"}</strong></div></div>
-      </MobileCard>
-      <button type="button" onClick={() => void signOut()} className="referral-logout"><LogOut className="h-4 w-4" />Cerrar sesión</button>
-      <p className="text-center text-[11px] text-[#536170]">Referral Hub · Powered by Creatyv</p>
+      </section>
+      <WhatsAppConnect organizationId={resolvedOrgId || REFERRAL_HUB_ORG_ID} businessType="referral_hub" />
+      </div>
     </main>
   );
 }

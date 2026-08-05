@@ -23,6 +23,11 @@ export type ReferralLead = {
   resumen_auto?: string | null;
   recomendacion?: string | null;
   partner_recomendado?: string | null;
+  channel?: string | null;
+  last_channel?: string | null;
+  last_message_at?: string | null;
+  last_message_preview?: string | null;
+  state?: Record<string, unknown> | null;
 };
 
 export type ReferralService = {

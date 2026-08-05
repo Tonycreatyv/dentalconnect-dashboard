@@ -24,12 +24,22 @@ export function useReferralData() {
     setLoading(true);
     setError(null);
     const [leadRes, serviceRes, partnerRes] = await Promise.all([
-      supabase.from("leads").select("*").eq("organization_id", organizationId).not("service_id", "is", null).order("created_at", { ascending: false }),
+      supabase.from("leads").select("*").eq("organization_id", organizationId).order("created_at", { ascending: false }),
       supabase.from("service_configs").select("id, nombre, menu_label, icono").eq("organization_id", organizationId),
       supabase.from("partners").select("id, nombre, servicios").eq("organization_id", organizationId),
     ]);
     if (leadRes.error) {
+      console.warn("[Referral Hub] No se pudieron cargar leads", { organizationId });
       setError("No pudimos cargar los leads. Intenta de nuevo.");
+      setLoading(false);
+      return;
+    }
+    if (serviceRes.error || partnerRes.error) {
+      console.warn("[Referral Hub] Fallaron fuentes del directorio", {
+        organizationId,
+        sources: [serviceRes.error ? "service_configs" : null, partnerRes.error ? "partners" : null].filter(Boolean),
+      });
+      setError("No pudimos cargar todos los datos del directorio. Intenta de nuevo.");
       setLoading(false);
       return;
     }
@@ -49,6 +59,21 @@ export function useReferralData() {
     setLeads((current) => current.map((lead) => lead.id === leadId ? updated : lead));
     return { ok: true, lead: updated };
   }, [organizationId]);
+
+  const createLead = useCallback(async (input: { name: string; phone: string; serviceId: string }) => {
+    if (!organizationId) return { ok: false, message: "La organización no está disponible." };
+    if (!input.name.trim() || !input.serviceId) return { ok: false, message: "Nombre y servicio son obligatorios." };
+    const result = await supabase.from("leads").insert({
+      organization_id: organizationId,
+      name: input.name.trim(),
+      phone: input.phone.trim() || null,
+      service_id: input.serviceId,
+      status: "new",
+    }).select("*").maybeSingle();
+    if (result.error || !result.data) return { ok: false, message: "No pudimos crear el lead." };
+    await load();
+    return { ok: true, lead: result.data as ReferralLead };
+  }, [load, organizationId]);
 
   const assignPartner = useCallback(async (lead: ReferralLead, partnerId: string) => {
     if (!organizationId || lead.organization_id !== organizationId) return { ok: false, message: "La organización del lead no coincide." };
@@ -87,6 +112,6 @@ export function useReferralData() {
     organizationId,
     isReferralMode: resolvedBusinessType === "referral_hub",
     leads, services, partners, loading, error, syncWarning,
-    load, updateStatus, assignPartner, retryAssignmentSync,
-  }), [organizationId, resolvedBusinessType, leads, services, partners, loading, error, syncWarning, load, updateStatus, assignPartner, retryAssignmentSync]);
+    load, createLead, updateStatus, assignPartner, retryAssignmentSync,
+  }), [organizationId, resolvedBusinessType, leads, services, partners, loading, error, syncWarning, load, createLead, updateStatus, assignPartner, retryAssignmentSync]);
 }
