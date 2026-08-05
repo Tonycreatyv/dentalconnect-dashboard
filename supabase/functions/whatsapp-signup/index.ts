@@ -1,248 +1,400 @@
-// supabase/functions/whatsapp-signup/index.ts
-// Handles the server-side token exchange after a clinic completes
-// the WhatsApp Embedded Signup flow in the frontend.
-
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  createSignupState,
+  mayManageWhatsApp,
+  REFERRAL_HUB_ORGANIZATION_ID,
+  verifySignupState,
+} from "./contract.ts";
 
-const corsHeaders = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+const ALLOWED_ORIGINS = new Set(["https://referral.creatyv.io"]);
 
-function json(status: number, body: unknown) {
+function cors(req: Request) {
+  const origin = req.headers.get("origin") ?? "";
+  return {
+    "access-control-allow-origin": ALLOWED_ORIGINS.has(origin)
+      ? origin
+      : "https://referral.creatyv.io",
+    "access-control-allow-headers":
+      "authorization, x-client-info, apikey, content-type",
+    "access-control-allow-methods": "POST, OPTIONS",
+    vary: "Origin",
+  };
+}
+function json(req: Request, status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "content-type": "application/json" },
+    headers: {
+      ...cors(req),
+      "content-type": "application/json",
+      "cache-control": "no-store",
+    },
   });
 }
-
 function env(name: string) {
   const value = Deno.env.get(name);
-  if (!value) throw new Error(`Missing env ${name}`);
+  if (!value) throw new Error(`missing_${name.toLowerCase()}`);
   return value;
 }
-
-function safeStr(x: unknown, d = ""): string {
-  if (typeof x === "string") return x;
-  if (x == null) return d;
-  return String(x);
+function text(value: unknown, max = 500) {
+  return typeof value === "string" && value.trim().length <= max
+    ? value.trim()
+    : "";
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+type MetaOAuthError = {
+  message?: unknown;
+  type?: unknown;
+  code?: unknown;
+  error_subcode?: unknown;
+  fbtrace_id?: unknown;
+  trace_id?: unknown;
+};
+type MetaOAuthDiagnostic = {
+  stage: "token_exchange";
+  upstream_status: number;
+  meta_error_type?: string;
+  meta_error_code?: number;
+  meta_error_subcode?: number;
+  safe_message_category:
+    | "redirect_uri_mismatch"
+    | "invalid_client_credentials"
+    | "code_expired_or_reused"
+    | "invalid_authorization_code"
+    | "app_configuration_mismatch"
+    | "unknown_meta_oauth_error";
+  trace_id?: string;
+};
+
+function safeMetaType(value: unknown) {
+  return typeof value === "string" &&
+      /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(value)
+    ? value
+    : undefined;
+}
+function safeMetaInteger(value: unknown) {
+  const number = typeof value === "number"
+    ? value
+    : typeof value === "string" && /^\d{1,10}$/.test(value)
+    ? Number(value)
+    : NaN;
+  return Number.isSafeInteger(number) && number >= 0 ? number : undefined;
+}
+function safeMetaTrace(value: unknown) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value)
+    ? value
+    : undefined;
+}
+
+export function classifyMetaOAuthMessage(
+  value: unknown,
+): MetaOAuthDiagnostic["safe_message_category"] {
+  const message = typeof value === "string" ? value.toLowerCase() : "";
+  if (/redirect[ _-]?(uri|url)|redirect uri/.test(message)) {
+    return "redirect_uri_mismatch";
   }
-  if (req.method !== "POST") {
-    return json(405, { ok: false, error: "method_not_allowed" });
-  }
+  if (
+    /invalid (client|app)|client[ _-]?(id|secret)|app secret|client credentials/
+      .test(message)
+  ) return "invalid_client_credentials";
+  if (
+    /(authorization )?code.{0,50}(expired|already (been )?used|reused|invalidated)|expired.{0,30}(authorization )?code/
+      .test(message)
+  ) return "code_expired_or_reused";
+  if (
+    /invalid.{0,30}(authorization )?code|malformed.{0,30}(authorization )?code/
+      .test(message)
+  ) return "invalid_authorization_code";
+  if (
+    /config(uration|_id)|app.{0,30}(configuration|association)|does not belong/
+      .test(message)
+  ) return "app_configuration_mismatch";
+  return "unknown_meta_oauth_error";
+}
 
-  try {
-    const SUPABASE_URL = env("SUPABASE_URL");
-    const SERVICE_ROLE = env("SUPABASE_SERVICE_ROLE_KEY");
-    const META_APP_ID = env("META_APP_ID");
-    const META_APP_SECRET = env("META_APP_SECRET");
-    const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v19.0";
+export function safeMetaOAuthDiagnostic(
+  status: number,
+  payload: unknown,
+): MetaOAuthDiagnostic {
+  const providerError =
+    payload && typeof payload === "object" && "error" in payload &&
+      (payload as { error?: unknown }).error &&
+      typeof (payload as { error?: unknown }).error === "object"
+      ? (payload as { error: MetaOAuthError }).error
+      : {};
+  const metaErrorType = safeMetaType(providerError.type);
+  const metaErrorCode = safeMetaInteger(providerError.code);
+  const metaErrorSubcode = safeMetaInteger(providerError.error_subcode);
+  const traceId = safeMetaTrace(providerError.fbtrace_id) ??
+    safeMetaTrace(providerError.trace_id);
+  return {
+    stage: "token_exchange",
+    upstream_status: status,
+    ...(metaErrorType ? { meta_error_type: metaErrorType } : {}),
+    ...(metaErrorCode !== undefined ? { meta_error_code: metaErrorCode } : {}),
+    ...(metaErrorSubcode !== undefined
+      ? { meta_error_subcode: metaErrorSubcode }
+      : {}),
+    safe_message_category: classifyMetaOAuthMessage(providerError.message),
+    ...(traceId ? { trace_id: traceId } : {}),
+  };
+}
 
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
-      auth: { persistSession: false },
-    });
-
-    const body = await req.json().catch(() => ({}));
-    const code = safeStr(body?.code, "").trim();
-    const organizationId = safeStr(body?.organization_id, "").trim();
-    const wabaId = safeStr(body?.waba_id, "").trim();
-    const phoneNumberId = safeStr(body?.phone_number_id, "").trim();
-
-    if (!code) return json(400, { ok: false, error: "missing_code" });
-    if (!organizationId) return json(400, { ok: false, error: "missing_organization_id" });
-
-    // =========================================================================
-    // 1. Exchange code for access token
-    // =========================================================================
-    const tokenUrl = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/oauth/access_token`);
-    tokenUrl.searchParams.set("client_id", META_APP_ID);
-    tokenUrl.searchParams.set("client_secret", META_APP_SECRET);
-    tokenUrl.searchParams.set("code", code);
-
-    const tokenRes = await fetch(tokenUrl.toString());
-    const tokenData = await tokenRes.json();
-
-    if (!tokenRes.ok || !tokenData.access_token) {
-      console.error("[whatsapp-signup] token exchange failed:", tokenData);
-      return json(500, {
-        ok: false,
-        error: "token_exchange_failed",
-        detail: tokenData?.error?.message ?? "unknown",
-      });
+if (import.meta.main) {
+  Deno.serve(async (req) => {
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: cors(req) });
     }
+    if (req.method !== "POST") {
+      return json(req, 405, { ok: false, error: "method_not_allowed" });
+    }
+    const requestOrigin = req.headers.get("origin") ?? "";
+    if (!ALLOWED_ORIGINS.has(requestOrigin)) {
+      return json(req, 403, { ok: false, error: "invalid_origin" });
+    }
+    try {
+      const supabaseUrl = env("SUPABASE_URL");
+      const serviceRole = env("SUPABASE_SERVICE_ROLE_KEY");
+      const metaAppId = env("META_APP_ID");
+      const metaAppSecret = env("META_APP_SECRET");
+      const graphVersion = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
+      const bearer = (req.headers.get("authorization") ?? "").replace(
+        /^Bearer\s+/i,
+        "",
+      ).trim();
+      if (!bearer) {
+        return json(req, 401, { ok: false, error: "unauthorized" });
+      }
 
-    const accessToken = String(tokenData.access_token);
-    const tokenType = safeStr(tokenData.token_type, "bearer");
-    const expiresIn = Number(tokenData.expires_in ?? 0);
-    const expiresAt = expiresIn > 0
-      ? new Date(Date.now() + expiresIn * 1000).toISOString()
-      : null;
-
-    console.log("[whatsapp-signup] token exchanged", {
-      organizationId,
-      wabaId,
-      phoneNumberId,
-      tokenType,
-      expiresIn,
-    });
-
-    // =========================================================================
-    // 2. If we don't have WABA ID / phone number ID from frontend, fetch them
-    // =========================================================================
-    let resolvedWabaId = wabaId;
-    let resolvedPhoneNumberId = phoneNumberId;
-    let phoneNumber = "";
-    let displayName = "";
-
-    if (!resolvedWabaId) {
-      // Fetch shared WABAs
-      const sharedUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/debug_token?input_token=${accessToken}`;
-      const debugRes = await fetch(sharedUrl, {
-        headers: { Authorization: `Bearer ${META_APP_ID}|${META_APP_SECRET}` },
+      const admin = createClient(supabaseUrl, serviceRole, {
+        auth: { persistSession: false },
       });
-      const debugData = await debugRes.json();
-      const granularScopes = debugData?.data?.granular_scopes ?? [];
-      
-      for (const scope of granularScopes) {
-        if (scope.permission === "whatsapp_business_management" && scope.target_ids?.length > 0) {
-          resolvedWabaId = String(scope.target_ids[0]);
-          break;
+      const userResult = await admin.auth.getUser(bearer);
+      const userId = userResult.data.user?.id;
+      if (!userId) {
+        return json(req, 401, { ok: false, error: "unauthorized" });
+      }
+      const membership = await admin.from("org_members").select("role").eq(
+        "organization_id",
+        REFERRAL_HUB_ORGANIZATION_ID,
+      ).eq("user_id", userId).maybeSingle();
+      if (!membership.data) {
+        return json(req, 403, {
+          ok: false,
+          error: "organization_membership_required",
+        });
+      }
+      if (!mayManageWhatsApp(membership.data.role)) {
+        return json(req, 403, { ok: false, error: "owner_or_admin_required" });
+      }
+
+      const body = await req.json().catch(() => ({})) as Record<
+        string,
+        unknown
+      >;
+      const suppliedOrg = text(body.organization_id, 100);
+      if (
+        suppliedOrg && suppliedOrg !== REFERRAL_HUB_ORGANIZATION_ID
+      ) {
+        return json(req, 403, { ok: false, error: "organization_forbidden" });
+      }
+      const action = text(body.action, 30) || "exchange";
+      if (action === "create_state") {
+        try {
+          return json(req, 200, {
+            ok: true,
+            state: await createSignupState(userId, metaAppSecret),
+            return_to: "/integrations",
+          });
+        } catch {
+          return json(req, 500, { ok: false, error: "state_signing_failed" });
         }
       }
-    }
-
-    // Fetch phone numbers for this WABA
-    if (resolvedWabaId && !resolvedPhoneNumberId) {
-      const phonesUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${resolvedWabaId}/phone_numbers`;
-      const phonesRes = await fetch(phonesUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const phonesData = await phonesRes.json();
-
-      if (Array.isArray(phonesData?.data) && phonesData.data.length > 0) {
-        resolvedPhoneNumberId = String(phonesData.data[0].id);
-        phoneNumber = safeStr(phonesData.data[0].display_phone_number, "");
-        displayName = safeStr(phonesData.data[0].verified_name, "");
+      if (action !== "exchange") {
+        return json(req, 400, {
+          ok: false,
+          error: "invalid_action",
+        });
       }
-    }
 
-    // If we have phone number ID, get details
-    if (resolvedPhoneNumberId && !phoneNumber) {
-      const phoneUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${resolvedPhoneNumberId}`;
-      const phoneRes = await fetch(phoneUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const code = text(body.code, 2_000);
+      const state = text(body.state, 4_000);
+      if (!code) return json(req, 400, { ok: false, error: "missing_code" });
+      if (
+        !state || !await verifySignupState(state, userId, metaAppSecret)
+      ) return json(req, 400, { ok: false, error: "invalid_state" });
+
+      const tokenUrl = new URL(
+        `https://graph.facebook.com/${graphVersion}/oauth/access_token`,
+      );
+      tokenUrl.searchParams.set("client_id", metaAppId);
+      tokenUrl.searchParams.set("client_secret", metaAppSecret);
+      tokenUrl.searchParams.set("code", code);
+      const tokenRes = await fetch(tokenUrl);
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok || !tokenData.access_token) {
+        console.error(
+          "[whatsapp-signup] meta_oauth_failed",
+          safeMetaOAuthDiagnostic(tokenRes.status, tokenData),
+        );
+        return json(req, 502, { ok: false, error: "token_exchange_failed" });
+      }
+      const accessToken = String(tokenData.access_token);
+
+      let wabaId = text(body.waba_id, 100);
+      let phoneNumberId = text(body.phone_number_id, 100);
+      if (!wabaId) {
+        const debugRes = await fetch(
+          `https://graph.facebook.com/${graphVersion}/debug_token?input_token=${
+            encodeURIComponent(accessToken)
+          }`,
+          {
+            headers: { Authorization: `Bearer ${metaAppId}|${metaAppSecret}` },
+          },
+        );
+        const debugData = await debugRes.json();
+        const scope = (debugData?.data?.granular_scopes ?? []).find((
+          item: Record<string, unknown>,
+        ) => item.permission === "whatsapp_business_management");
+        wabaId = text(
+          Array.isArray(scope?.target_ids) ? scope.target_ids[0] : "",
+          100,
+        );
+      }
+      if (wabaId && !phoneNumberId) {
+        const phonesRes = await fetch(
+          `https://graph.facebook.com/${graphVersion}/${
+            encodeURIComponent(wabaId)
+          }/phone_numbers?fields=id`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        const phonesData = await phonesRes.json();
+        phoneNumberId = text(phonesData?.data?.[0]?.id, 100);
+      }
+      if (!wabaId || !phoneNumberId) {
+        return json(req, 400, { ok: false, error: "meta_assets_missing" });
+      }
+
+      const current = await admin.from("org_settings").select(
+        "whatsapp_waba_id,whatsapp_phone_number_id,whatsapp_enabled",
+      ).eq("organization_id", REFERRAL_HUB_ORGANIZATION_ID).maybeSingle();
+      if (current.error || !current.data) {
+        return json(req, 500, {
+          ok: false,
+          error: "organization_settings_unavailable",
+        });
+      }
+      const replacing = Boolean(
+        current.data.whatsapp_phone_number_id &&
+          (current.data.whatsapp_phone_number_id !== phoneNumberId ||
+            current.data.whatsapp_waba_id !== wabaId),
+      );
+      if (replacing && body.replace_existing !== true) {
+        return json(req, 409, {
+          ok: false,
+          error: "replacement_confirmation_required",
+        });
+      }
+
+      const phoneRes = await fetch(
+        `https://graph.facebook.com/${graphVersion}/${
+          encodeURIComponent(phoneNumberId)
+        }?fields=id,display_phone_number,verified_name,code_verification_status,status`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
       const phoneData = await phoneRes.json();
-      phoneNumber = safeStr(phoneData?.display_phone_number, "");
-      displayName = safeStr(phoneData?.verified_name, displayName);
-    }
+      if (!phoneRes.ok) {
+        return json(req, 502, {
+          ok: false,
+          error: "registration_check_failed",
+        });
+      }
+      const registrationReady =
+        phoneData.code_verification_status === "VERIFIED" &&
+        ["CONNECTED", "PENDING"].includes(
+          String(phoneData.status ?? "").toUpperCase(),
+        );
+      if (!registrationReady) {
+        return json(req, 409, {
+          ok: false,
+          error: "registration_failed",
+          connection_state: "error_registration",
+        });
+      }
 
-    if (!resolvedWabaId || !resolvedPhoneNumberId) {
-      return json(400, {
+      const subscribeRes = await fetch(
+        `https://graph.facebook.com/${graphVersion}/${
+          encodeURIComponent(wabaId)
+        }/subscribed_apps`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+      const subscribeData = await subscribeRes.json();
+      if (!subscribeRes.ok || subscribeData?.success !== true) {
+        return json(req, 502, {
+          ok: false,
+          error: "webhook_subscription_failed",
+          connection_state: "error_webhook",
+        });
+      }
+
+      const expiresIn = Number(tokenData.expires_in ?? 0);
+      const expiresAt = expiresIn > 0
+        ? new Date(Date.now() + expiresIn * 1_000).toISOString()
+        : null;
+      const connectionState =
+        String(phoneData.status ?? "").toUpperCase() === "CONNECTED"
+          ? "connected"
+          : "pending_verification";
+      const update = await admin.from("org_settings").update({
+        whatsapp_enabled: connectionState === "connected",
+        whatsapp_access_token: accessToken,
+        whatsapp_phone_number_id: phoneNumberId,
+        whatsapp_waba_id: wabaId,
+        whatsapp_phone_number: text(phoneData.display_phone_number) || null,
+        whatsapp_display_name: text(phoneData.verified_name) || null,
+        whatsapp_token_expires_at: expiresAt,
+        whatsapp_registered: true,
+        whatsapp_webhooks_subscribed: true,
+        whatsapp_connected_at: connectionState === "connected"
+          ? new Date().toISOString()
+          : null,
+        updated_at: new Date().toISOString(),
+      }).eq("organization_id", REFERRAL_HUB_ORGANIZATION_ID).select(
+        "organization_id",
+      ).maybeSingle();
+      if (update.error || !update.data) {
+        return json(req, 500, {
+          ok: false,
+          error: "connection_persistence_failed",
+        });
+      }
+      return json(req, 200, {
+        ok: true,
+        connection_state: connectionState,
+        phone_number: text(phoneData.display_phone_number) || null,
+        display_name: text(phoneData.verified_name) || null,
+        replaced: replacing,
+        return_to: "/integrations",
+      });
+    } catch (error) {
+      const safeMessage = String((error as Error).message).slice(0, 160);
+      const missingConfiguration = /^missing_[a-z0-9_]+$/.test(safeMessage);
+      console.error("[whatsapp-signup] request_failed", {
+        code: missingConfiguration
+          ? "missing_configuration"
+          : "whatsapp_signup_failed",
+      });
+      return json(req, 500, {
         ok: false,
-        error: "could_not_resolve_waba_or_phone",
-        waba_id: resolvedWabaId || null,
-        phone_number_id: resolvedPhoneNumberId || null,
+        error: missingConfiguration
+          ? "missing_configuration"
+          : "whatsapp_signup_failed",
       });
     }
-
-    // =========================================================================
-    // 3. Register the phone number (required to start receiving messages)
-    // =========================================================================
-    const registerUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${resolvedPhoneNumberId}/register`;
-    const registerRes = await fetch(registerUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        pin: "123456", // Default PIN — clinic can change later
-      }),
-    });
-    const registerData = await registerRes.json();
-    const registered = registerRes.ok && registerData?.success === true;
-
-    if (!registered) {
-      console.warn("[whatsapp-signup] phone registration warning:", registerData);
-      // Don't fail — phone might already be registered
-    }
-
-    // =========================================================================
-    // 4. Subscribe to webhooks for this WABA
-    // =========================================================================
-    const subscribeUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${resolvedWabaId}/subscribed_apps`;
-    const subscribeRes = await fetch(subscribeUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-    const subscribeData = await subscribeRes.json();
-    const subscribed = subscribeRes.ok && subscribeData?.success === true;
-
-    if (!subscribed) {
-      console.warn("[whatsapp-signup] webhook subscription warning:", subscribeData);
-    }
-
-    // =========================================================================
-    // 5. Save everything to org_settings
-    // =========================================================================
-    const updatePayload: Record<string, unknown> = {
-      whatsapp_enabled: true,
-      whatsapp_access_token: accessToken,
-      whatsapp_phone_number_id: resolvedPhoneNumberId,
-      whatsapp_waba_id: resolvedWabaId,
-      whatsapp_phone_number: phoneNumber || null,
-      whatsapp_display_name: displayName || null,
-      whatsapp_token_expires_at: expiresAt,
-      whatsapp_registered: registered,
-      whatsapp_webhooks_subscribed: subscribed,
-      whatsapp_connected_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const { error: updateError } = await supabase
-      .from("org_settings")
-      .update(updatePayload)
-      .eq("organization_id", organizationId);
-
-    if (updateError) {
-      console.error("[whatsapp-signup] org_settings update failed:", updateError);
-      return json(500, {
-        ok: false,
-        error: `db_update_failed: ${updateError.message}`,
-      });
-    }
-
-    console.log("[whatsapp-signup] success", {
-      organizationId,
-      wabaId: resolvedWabaId,
-      phoneNumberId: resolvedPhoneNumberId,
-      phoneNumber,
-      registered,
-      subscribed,
-    });
-
-    return json(200, {
-      ok: true,
-      waba_id: resolvedWabaId,
-      phone_number_id: resolvedPhoneNumberId,
-      phone_number: phoneNumber,
-      display_name: displayName,
-      registered,
-      subscribed,
-    });
-  } catch (error: any) {
-    console.error("[whatsapp-signup] error:", error);
-    return json(500, { ok: false, error: String(error?.message ?? error) });
-  }
-});
+  });
+}
