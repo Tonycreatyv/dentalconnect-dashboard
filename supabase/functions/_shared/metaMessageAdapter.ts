@@ -135,6 +135,7 @@ async function sendViaMessenger(args: {
   url.searchParams.set("access_token", token);
 
   const text = String(args.text ?? "").trim() || "Gracias por escribirnos.";
+  const imageUrl = String(args.imageUrl ?? "").trim();
   const quickReplies = Array.isArray(args.buttons) && args.buttons.length > 0
     ? args.buttons.slice(0, 11).map((b) => ({
       content_type: "text",
@@ -143,14 +144,25 @@ async function sendViaMessenger(args: {
     }))
     : undefined;
 
-  const body = {
-    messaging_type: "RESPONSE",
-    recipient: { id: args.recipientId },
-    message: {
-      text,
-      ...(quickReplies ? { quick_replies: quickReplies } : {}),
-    },
-  };
+  const body = imageUrl
+    ? {
+      messaging_type: "RESPONSE",
+      recipient: { id: args.recipientId },
+      message: {
+        attachment: {
+          type: "image",
+          payload: { url: imageUrl, is_reusable: true },
+        },
+      },
+    }
+    : {
+      messaging_type: "RESPONSE",
+      recipient: { id: args.recipientId },
+      message: {
+        text,
+        ...(quickReplies ? { quick_replies: quickReplies } : {}),
+      },
+    };
 
   const res = await fetch(url, {
     method: "POST",

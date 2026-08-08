@@ -1,0 +1,103 @@
+{
+  "type": "webhook",
+  "name": "find_nearest_supermarket",
+  "description": "Find and rank the eligible supermarkets nearest to the customer's full delivery address using verified Google driving routes. Never infer proximity from ZIP alone and never invent an address, location, distance, duration, ID, or fee.",
+  "disable_interruptions": false,
+  "interruption_mode": "allow",
+  "force_pre_tool_speech": false,
+  "pre_tool_speech": "auto",
+  "tool_call_sound": null,
+  "tool_call_sound_behavior": "auto",
+  "tool_error_handling_mode": "auto",
+  "execution_mode": "immediate",
+  "api_schema": {
+    "url": "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1/referral-voice-tools",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "id": "body",
+      "type": "object",
+      "description": "Use the customer's explicitly provided ZIP and full delivery address. Do not call with an inferred or incomplete address and do not fabricate routing results.",
+      "properties": [
+        {
+          "id": "action",
+          "type": "string",
+          "description": "Backend action name.",
+          "dynamic_variable": "",
+          "constant_value": "find_nearest_supermarket",
+          "enum": null,
+          "required": true,
+          "value_type": "constant"
+        },
+        {
+          "id": "organization_id",
+          "type": "string",
+          "description": "Use the organization_id dynamic variable exactly; never choose a tenant.",
+          "dynamic_variable": "organization_id",
+          "constant_value": "",
+          "enum": null,
+          "required": true,
+          "value_type": "dynamic_variable"
+        },
+        {
+          "id": "source_channel",
+          "type": "string",
+          "description": "Fixed source channel for this ElevenLabs WhatsApp agent.",
+          "dynamic_variable": "",
+          "constant_value": "whatsapp",
+          "enum": null,
+          "required": true,
+          "value_type": "constant"
+        },
+        {
+          "id": "postal_code",
+          "type": "string",
+          "description": "The customer's explicitly provided US delivery ZIP or ZIP+4. Never infer it.",
+          "dynamic_variable": "",
+          "constant_value": "",
+          "enum": null,
+          "required": true,
+          "value_type": "llm_prompt"
+        },
+        {
+          "id": "delivery_address",
+          "type": "string",
+          "description": "The full delivery address explicitly provided by the customer. Never invent, complete, or alter missing address details.",
+          "dynamic_variable": "",
+          "constant_value": "",
+          "enum": null,
+          "required": true,
+          "value_type": "llm_prompt"
+        }
+      ],
+      "required": false,
+      "value_type": "llm_prompt"
+    },
+    "request_headers": [
+      {
+        "type": "value",
+        "name": "Content-Type",
+        "value": "application/json"
+      },
+      {
+        "type": "secret",
+        "name": "x-creatyv-voice-secret",
+        "secret_id": "REPLACE_WITH_EXISTING_SECRET_ID"
+      }
+    ],
+    "content_type": "application/json",
+    "auth_connection": null
+  },
+  "assignments": [],
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {
+      "organization_id": {
+        "type": "string_literal",
+        "value": ""
+      }
+    }
+  },
+  "response_mocks": []
+}

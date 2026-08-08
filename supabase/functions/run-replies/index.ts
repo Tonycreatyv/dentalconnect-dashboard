@@ -66,6 +66,17 @@ import { formatBookingSuccessCopy } from "./domain/bookingSuccessCopy.ts";
 import { formatBarberLineReply } from "./domain/barberLinePersonality.ts";
 import { normalizeLeadStateForBusinessType } from "./domain/stateNormalization.ts";
 import {
+  buildCreatedAccidentHandoffState,
+  resolveAccidentHandoffOutcome,
+  resolveAdvisorHandoffOutcome,
+} from "./domain/referralHub/accidentHandoff.ts";
+import {
+  customerCopyForServiceRequest,
+  operationalStatePatch,
+  orchestrateCompletedServiceRequest,
+  type OperationalServiceId,
+} from "./domain/referralHub/serviceRequestOrchestrator.ts";
+import {
   activateHumanTakeoverState,
   isHumanTakeoverActive,
   shouldAllowAutomationDuringTakeover,
@@ -140,6 +151,10 @@ interface GenerateReplyResult {
   interactiveButtons?: InteractiveButton[];
   interactiveList?: WhatsAppInteractiveListSpec;
   outboundPrelude?: Array<{ text?: string; imageUrl?: string }>;
+  outboundMessages?: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; url: string; altText?: string; reusable?: boolean }
+  >;
 }
 
 type BarbershopProviderOption = {
@@ -12308,6 +12323,11 @@ export async function generateReply(
       payloadAction: effectivePayloadAction,
       channelUserId: safeStr((leadState as any)?.channel_user_id, "") || null,
       channel,
+      timezone: safeStr((clinicSettings as any)?.timezone, "America/New_York"),
+      integrations: (clinicSettings as any)?.integrations &&
+          typeof (clinicSettings as any).integrations === "object"
+        ? (clinicSettings as any).integrations as Record<string, unknown>
+        : {},
     });
     return {
       reply: referralResult.reply,
@@ -12317,6 +12337,7 @@ export async function generateReply(
       interactiveButtons: referralResult.interactiveButtons,
       interactiveList: referralResult.interactiveList,
       outboundPrelude: referralResult.outboundPrelude,
+      outboundMessages: referralResult.outboundMessages,
     };
   }
   const isDentalOrg = isDentalBusinessTypeValue(businessType);
@@ -16554,6 +16575,95 @@ async function updateLeadAfterSend(args: {
   return { updated: true, nextState };
 }
 
+async function persistReferralAccidentHandoff(args: {
+  supabase: SupabaseClientType;
+  leadId: string;
+  leadState: Json | null;
+  statePatch: Json;
+}): Promise<{ persisted: boolean; createdStatePatch: Json }> {
+  const createdStatePatch = buildCreatedAccidentHandoffState(
+    args.statePatch,
+    nowIso(),
+  );
+  if (!args.leadId) return { persisted: false, createdStatePatch };
+  const nextState = normalizeLeadStateForBusinessType(
+    mergeLeadState(args.leadState, createdStatePatch),
+    "referral_hub",
+  );
+  try {
+    const result = await args.supabase
+      .from("leads")
+      .update({
+        state: nextState,
+        handoff_to_human: true,
+        updated_at: nowIso(),
+      })
+      .eq("id", args.leadId)
+      .select("id")
+      .maybeSingle();
+    return {
+      persisted: !result.error && Boolean(result.data?.id),
+      createdStatePatch,
+    };
+  } catch {
+    return { persisted: false, createdStatePatch };
+  }
+}
+
+const REFERRAL_OPERATIONS_ORGANIZATION_ID = "luis-gabriel-referral-hub";
+
+function operationalCompletionForDebugNote(debugNote: string): {
+  serviceId: OperationalServiceId;
+  completionOutcome: "confirmed_intake" | "follow_up_requested";
+} | null {
+  switch (debugNote) {
+    case "referral_hub:accident_complete":
+      return { serviceId: "luis_accidente", completionOutcome: "confirmed_intake" };
+    case "referral_hub:immigration_complete":
+      return { serviceId: "luis_inmigracion", completionOutcome: "confirmed_intake" };
+    case "referral_hub:advisor_handoff_requested":
+      return { serviceId: "luis_representante", completionOutcome: "confirmed_intake" };
+    case "referral_hub:events_followup_requested":
+      return { serviceId: "luis_eventos", completionOutcome: "follow_up_requested" };
+    default:
+      return null;
+  }
+}
+
+function operationalIntakeSnapshot(leadState: Json | null, statePatch: Json): Json {
+  const merged = mergeLeadState(leadState, statePatch);
+  const collected = merged.collected && typeof merged.collected === "object"
+    ? merged.collected as Json
+    : {};
+  const referral = collected.referral_hub && typeof collected.referral_hub === "object"
+    ? collected.referral_hub as Json
+    : {};
+  const extracted = referral.extracted_data && typeof referral.extracted_data === "object"
+    ? referral.extracted_data as Json
+    : {};
+  return {
+    ...extracted,
+    profile_name: safeStr(referral.profile_name, "").trim() || null,
+    profile_city: safeStr(referral.profile_city, "").trim() || null,
+  };
+}
+
+function mergeOperationalStatePatch(statePatch: Json, operationalPatch: Json): Json {
+  const collected = statePatch.collected && typeof statePatch.collected === "object"
+    ? { ...(statePatch.collected as Json) }
+    : {};
+  const referral = collected.referral_hub && typeof collected.referral_hub === "object"
+    ? { ...(collected.referral_hub as Json) }
+    : {};
+  return {
+    ...statePatch,
+    collected: {
+      ...collected,
+      referral_hub: { ...referral, ...operationalPatch },
+    },
+  };
+}
+
 async function activateHumanTakeoverForLead(args: {
   supabase: SupabaseClientType;
   leadId: string;
@@ -16876,7 +16986,8 @@ async function processSingleJob(
     }
   }
 
-  const manualText = safeStr(job?.payload?.text, "");
+    const manualText = safeStr(job?.payload?.text, "");
+    const manualImageUrl = safeStr(job?.payload?.image_url, "");
   let inboundPayloadAction = normalizePayloadActionValue(
     safeStr((job?.payload as any)?.payload_action, ""),
   );
@@ -16932,8 +17043,8 @@ async function processSingleJob(
       source: payloadSource || null,
       type: payloadType || null,
     });
-    if (!manualText) {
-      throw new Error("manual_outbound_failed:empty_manual_text");
+    if (!manualText && !manualImageUrl) {
+      throw new Error("manual_outbound_failed:empty_manual_content");
     }
     logEvent("manual_outbound:send_attempt", {
       execution_id: executionId,
@@ -16952,6 +17063,7 @@ async function processSingleJob(
         graphVersion: metaGraphVersion,
         recipientId: effectiveRecipientId,
         text: manualText,
+        imageUrl: manualImageUrl || undefined,
         pageAccessToken,
         whatsappAccessToken,
         whatsappPhoneNumberId,
@@ -17703,10 +17815,87 @@ async function processSingleJob(
 
   let reply = clampText(generated.reply, 950);
   let statePatch = generated.statePatch ?? {};
+  let generatedInteractiveButtons = generated.interactiveButtons;
   const leadPatch = generated.leadPatch ?? {};
   const flowCtaSpec = generated.flowCta ?? null;
   const debugNote = safeStr(generated.debugNote, "");
   let bookingSuccessAuthorized = generated.bookingSuccessAuthorized === true;
+
+  let handoffPersistenceSucceeded = true;
+  if (
+    debugNote === "referral_hub:accident_complete" ||
+    debugNote === "referral_hub:advisor_handoff_requested"
+  ) {
+    const handoffPersistence = await persistReferralAccidentHandoff({
+      supabase,
+      leadId,
+      leadState,
+      statePatch,
+    });
+    const handoffOutcome = debugNote === "referral_hub:advisor_handoff_requested"
+      ? resolveAdvisorHandoffOutcome({
+        persisted: handoffPersistence.persisted,
+        createdStatePatch: handoffPersistence.createdStatePatch,
+      })
+      : resolveAccidentHandoffOutcome({
+        persisted: handoffPersistence.persisted,
+        createdStatePatch: handoffPersistence.createdStatePatch,
+      });
+    reply = handoffOutcome.reply;
+    statePatch = handoffOutcome.statePatch;
+    handoffPersistenceSucceeded = handoffPersistence.persisted;
+    if (!handoffPersistence.persisted) generatedInteractiveButtons = undefined;
+    logEvent("referral_hub_accident_handoff_persistence", {
+      organization_id: effectiveOrganizationId,
+      lead_id: leadId,
+      job_id: jobId,
+      persisted: handoffPersistence.persisted,
+    });
+  }
+
+  const operationalCompletion = operationalCompletionForDebugNote(debugNote);
+  if (
+    operationalCompletion && handoffPersistenceSucceeded &&
+    effectiveOrganizationId === REFERRAL_OPERATIONS_ORGANIZATION_ID
+  ) {
+    const operationalResult = await orchestrateCompletedServiceRequest({
+      supabase,
+      organizationId: effectiveOrganizationId,
+      leadId,
+      serviceId: operationalCompletion.serviceId,
+      sourceChannel: channel as "messenger" | "whatsapp",
+      channelUserId: effectiveRecipientId,
+      completionKey: inboundMessageId || jobId,
+      completionOutcome: operationalCompletion.completionOutcome,
+      intake: operationalIntakeSnapshot(leadState, statePatch),
+    });
+    reply = customerCopyForServiceRequest(
+      operationalCompletion.serviceId,
+      operationalResult,
+    );
+    statePatch = mergeOperationalStatePatch(
+      statePatch,
+      operationalStatePatch(operationalResult),
+    );
+    if (!operationalResult.success) generatedInteractiveButtons = undefined;
+    logEvent("referral_hub_operational_request", {
+      organization_id: effectiveOrganizationId,
+      lead_id: leadId,
+      job_id: jobId,
+      service_id: operationalCompletion.serviceId,
+      success: operationalResult.success,
+      outcome: operationalResult.success ? operationalResult.outcome : null,
+      request_id: operationalResult.success ? operationalResult.requestId : null,
+      assignment_id: operationalResult.success ? operationalResult.assignmentId : null,
+      notification_status: operationalResult.success
+        ? operationalResult.notificationStatus
+        : null,
+      exception_type: operationalResult.success ? operationalResult.exceptionType : null,
+      idempotent_replay: operationalResult.success
+        ? operationalResult.idempotentReplay
+        : null,
+    });
+  }
 
   const businessType = safeStr((orgSettings as any)?.business_type, "")
     .toLowerCase();
@@ -17803,7 +17992,45 @@ async function processSingleJob(
     }
   }
 
-  // 3) send ordered WhatsApp preludes before the main interactive response
+  // 3) send ordered channel-specific messages before the main interactive response
+  for (const [index, message] of (generated.outboundMessages ?? []).entries()) {
+    const messageText = message.type === "text" ? safeStr(message.text, "").trim() : "";
+    const messageImageUrl = message.type === "image" ? safeStr(message.url, "").trim() : "";
+    const failureStage = index === 0 ? "coupon_intro_failed" : "coupon_image_failed";
+    const preludeMessageId = await insertOutboundMessage({
+      supabase,
+      organizationId: effectiveOrganizationId,
+      leadId,
+      channel,
+      actor: isOperatorOutbound ? "operator" : "bot",
+      recipientId: effectiveRecipientId,
+      reply: messageText || safeStr(message.type === "image" ? message.altText : "", "Imagen del cupón"),
+    });
+    const preludeResp = await sendViaMetaAdapter({
+      channel: channel as "messenger" | "whatsapp",
+      graphVersion: metaGraphVersion,
+      recipientId: effectiveRecipientId,
+      text: messageText || undefined,
+      imageUrl: messageImageUrl || undefined,
+      pageAccessToken,
+      whatsappAccessToken,
+      whatsappPhoneNumberId,
+    });
+    if (!preludeResp?.ok) {
+      await deleteMessageIfExists(supabase, preludeMessageId);
+      throw new Error(`${failureStage}:${preludeResp?.status}`);
+    }
+    await updateOutboundMessageProviderId({
+      supabase,
+      outboundMessageId: preludeMessageId,
+      outboundProviderMessageId: safeStr(
+        preludeResp?.data?.message_id ?? preludeResp?.data?.messages?.[0]?.id,
+        "",
+      ) || null,
+    });
+  }
+
+  // Preserve the legacy WhatsApp-only prelude behavior.
   for (const prelude of generated.outboundPrelude ?? []) {
     const preludeText = safeStr(prelude?.text, "").trim();
     const preludeImageUrl = safeStr(prelude?.imageUrl, "").trim() || undefined;
@@ -17845,8 +18072,8 @@ async function processSingleJob(
   });
 
   // 4) send to provider
-  const generatedButtons = Array.isArray(generated.interactiveButtons)
-    ? generated.interactiveButtons.filter((b) =>
+  const generatedButtons = Array.isArray(generatedInteractiveButtons)
+    ? generatedInteractiveButtons.filter((b) =>
       safeStr((b as any)?.id, "") && safeStr((b as any)?.title, "")
     )
     : [];
@@ -17918,6 +18145,9 @@ async function processSingleJob(
 
   if (!metaResp?.ok) {
     await deleteMessageIfExists(supabase, outboundMessageId);
+    if (debugNote.startsWith("referral_hub:persistent_coupon:")) {
+      throw new Error(`coupon_details_failed:${metaResp?.status}`);
+    }
     throw new Error(
       `meta_send_failed:${metaResp?.status}:${
         JSON.stringify(metaResp?.data ?? {})
@@ -17929,6 +18159,36 @@ async function processSingleJob(
     metaResp?.data?.message_id ?? metaResp?.data?.messages?.[0]?.id,
     "",
   ) || null;
+
+  if (debugNote.startsWith("referral_hub:persistent_coupon:")) {
+    const collected = statePatch.collected && typeof statePatch.collected === "object"
+      ? { ...(statePatch.collected as Record<string, unknown>) }
+      : {};
+    const referralHub = collected.referral_hub && typeof collected.referral_hub === "object"
+      ? { ...(collected.referral_hub as Record<string, unknown>) }
+      : {};
+    statePatch = {
+      ...statePatch,
+      collected: {
+        ...collected,
+        referral_hub: {
+          ...referralHub,
+          coupon_delivery_status: "sent",
+          coupon_delivery_error: null,
+          coupon_sent_at: nowIso(),
+          service_id: null,
+          service_label: null,
+          current_field: null,
+          pending_field_confirmation: null,
+          last_completion: {
+            service_id: debugNote.split(":").at(-1),
+            completed_at: nowIso(),
+            outcome: "coupon_sent",
+          },
+        },
+      },
+    };
+  }
 
   // 5) update lead and message metadata before terminalizing outbox
   const leadUpdate = await updateLeadAfterSend({

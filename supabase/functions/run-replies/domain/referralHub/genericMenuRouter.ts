@@ -9,8 +9,18 @@ import {
   type PantryPreludeMessage,
   shouldHandlePantryDemo,
 } from "./pantryDemoRouter.ts";
-import { issueOrGetCoupon } from "./couponService.ts";
-import { REFERRAL_HUB_CANONICAL_ORGANIZATION_ID } from "../../../_products/referral-hub/config.ts";
+import {
+  CouponPersistenceError,
+  issueOrGetCoupon,
+} from "./couponService.ts";
+import {
+  REFERRAL_HUB_CANONICAL_ORGANIZATION_ID,
+  REFERRAL_HUB_COUPON_ASSETS,
+  type ReferralHubCouponAssetConfig,
+} from "../../../_products/referral-hub/config.ts";
+import { LG_ACCIDENT_HANDOFF_FAILURE } from "./accidentHandoff.ts";
+import { interpretAccidentDate, interpretCity, type FieldInterpretation } from "./fieldInterpreter.ts";
+import { continueWhatsAppGrocery, groceryStateFromReferral, startWhatsAppGrocery } from "./whatsappGrocery.ts";
 
 type Json = Record<string, unknown>;
 
@@ -57,6 +67,7 @@ export type ReferralHubTurnResult = {
   interactiveList?: WhatsAppInteractiveListSpec;
   imageUrl?: string;
   outboundPrelude?: PantryPreludeMessage[];
+  outboundMessages?: OutboundMessage[];
   notification?: {
     type: "referral_hub_qualified_lead";
     leadName: string;
@@ -64,6 +75,27 @@ export type ReferralHubTurnResult = {
     summaryLine: string;
   };
 };
+
+export type OutboundMessage =
+  | { type: "text"; text: string }
+  | { type: "image"; url: string; altText?: string; reusable?: boolean };
+
+export type CouponDeliveryError =
+  | "asset_config_missing"
+  | "asset_config_inactive"
+  | "coupon_delivery_disabled"
+  | "coupon_campaign_missing"
+  | "image_url_invalid"
+  | "coupon_persistence_unavailable"
+  | "coupon_issue_failed"
+  | "coupon_table_missing"
+  | "coupon_rpc_missing"
+  | "coupon_campaign_inactive"
+  | "coupon_insert_rejected"
+  | "coupon_select_failed"
+  | "coupon_rls_denied"
+  | "coupon_constraint_failed"
+  | "coupon_response_invalid";
 
 type ReferralHubState = {
   service_id?: string | null;
@@ -76,6 +108,17 @@ type ReferralHubState = {
   profile_city?: string | null;
   profile_complete?: boolean;
   food_option?: string | null;
+  grocery?: unknown;
+  pending_field_confirmation?: {
+    field: "profile_city" | "accident_date";
+    interpretation: FieldInterpretation;
+  } | null;
+  profile_edit_field?: "profile_name" | "profile_city" | null;
+  last_completion?: {
+    service_id: string;
+    completed_at: string;
+    outcome: string;
+  } | null;
 };
 
 const BUILT_IN_SERVICE_IDS = {
@@ -85,12 +128,12 @@ const BUILT_IN_SERVICE_IDS = {
   supermarketCoupon: "luis_cupon_super",
   dentalCoupon: "luis_cupon_dental",
   events: "luis_eventos",
-  foodSupport: "luis_donacion",
-  advisor: "luis_asesor",
+  grocery: "luis_compra_super",
+  advisor: "luis_representante",
 } as const;
 
-const LG_DISCLOSURE =
-  "LG Community Network funciona como un puente entre la comunidad y recursos o aliados participantes. No prestamos directamente servicios legales, médicos ni financieros.";
+const LG_PRIVACY =
+  "Usaremos tus datos únicamente para orientarte y conectarte con recursos disponibles.";
 
 const TEMPORARY_STATIC_ACTION_TEXT: Record<string, string> = {
   luis_cupon_medico:
@@ -122,10 +165,9 @@ const DEMO_STATIC_ACTION_PARTNERS: Record<string, ReferralHubPartner> = {
   },
 };
 
-const REFERRAL_HUB_GREETING =
-  "¡Hola! 👋\nGracias por contactar a LG Community Network.\nEstamos aquí para ayudarte.";
-const LG_MESSENGER_MENU_TEXT =
-  `${REFERRAL_HUB_GREETING}\n\nTu información es confidencial y solo se utilizará para conectarte con beneficios, recursos y servicios de la comunidad.\n\n¿En qué podemos ayudarte?`;
+const REFERRAL_HUB_INITIAL_PROMPT =
+  "¡Hola! 👋 Soy el asistente de LG Community Network.\n\nPara comenzar, ¿cuál es tu nombre completo?";
+const LG_MENU_PROMPT = "¿En qué podemos ayudarte hoy?";
 
 const REFERRAL_HUB_GENERAL_CLOSING =
   "Gracias por ser parte de nuestra comunidad.\n¡Estamos de tu lado! 💚";
@@ -134,6 +176,11 @@ function safeStr(value: unknown, fallback = ""): string {
   if (typeof value === "string") return value;
   if (value === null || value === undefined) return fallback;
   return String(value);
+}
+
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function normalizeText(input: unknown): string {
@@ -231,7 +278,7 @@ export function buildReferralHubMenuList(
   configs: ReferralHubServiceConfig[],
 ): WhatsAppInteractiveListSpec {
   return {
-    body: REFERRAL_HUB_GREETING,
+    body: "¿En qué podemos ayudarte?",
     buttonText: "Ver opciones",
     sections: [{
       title: "Opciones",
@@ -486,7 +533,7 @@ function communityOptInButtons(): InteractiveButton[] {
 
 function menuResult(leadState: Json | null, configs: ReferralHubServiceConfig[]): ReferralHubTurnResult {
   return {
-    reply: REFERRAL_HUB_GREETING,
+    reply: "¿En qué podemos ayudarte?",
     interactiveList: buildReferralHubMenuList(configs),
     statePatch: {
       stage: "DISCOVERY",
@@ -784,7 +831,7 @@ function optInResult(args: {
 
 function buildLgMenuList(): WhatsAppInteractiveListSpec {
   return {
-    body: `${REFERRAL_HUB_GREETING}\n\nTu información es confidencial y solo se utilizará para conectarte con beneficios, recursos y servicios de la comunidad.\n\nPor favor elige una opción:`,
+    body: LG_MENU_PROMPT,
     buttonText: "Ver opciones",
     sections: [{
       title: "Servicios",
@@ -795,7 +842,7 @@ function buildLgMenuList(): WhatsAppInteractiveListSpec {
         { id: serviceActionId(BUILT_IN_SERVICE_IDS.supermarketCoupon), title: "Cupón supermercado", description: "Cupón de $20" },
         { id: serviceActionId(BUILT_IN_SERVICE_IDS.dentalCoupon), title: "Cupón dental", description: "Consulta, limpieza y rayos X" },
         { id: serviceActionId(BUILT_IN_SERVICE_IDS.events), title: "Eventos comunitarios", description: "Próximos eventos" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.foodSupport), title: "Comida y apoyo", description: "Donar o recibir apoyo" },
+        { id: serviceActionId(BUILT_IN_SERVICE_IDS.grocery), title: "Compras supermercado", description: "Canastas con delivery" },
         { id: serviceActionId(BUILT_IN_SERVICE_IDS.advisor), title: "Hablar con asesor", description: "Atención personal" },
       ],
     }],
@@ -810,7 +857,7 @@ export function buildLgMessengerQuickReplies(): InteractiveButton[] {
     { id: serviceActionId(BUILT_IN_SERVICE_IDS.supermarketCoupon), title: "Cupón supermercado" },
     { id: serviceActionId(BUILT_IN_SERVICE_IDS.dentalCoupon), title: "Cupón dental" },
     { id: serviceActionId(BUILT_IN_SERVICE_IDS.events), title: "Eventos" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.foodSupport), title: "Comida y apoyo" },
+    { id: serviceActionId(BUILT_IN_SERVICE_IDS.grocery), title: "Compras supermercado" },
     { id: serviceActionId(BUILT_IN_SERVICE_IDS.advisor), title: "Hablar con asesor" },
   ];
 }
@@ -819,18 +866,80 @@ function buildLgWelcomeReply(leadState: Json | null): string {
   const referralState = getReferralState(leadState);
   const name = safeStr(referralState.profile_name).trim();
   if (!name) {
-    return `${REFERRAL_HUB_GREETING}\n\nPara empezar, ¿cuál es tu nombre completo?`;
+    return REFERRAL_HUB_INITIAL_PROMPT;
   }
   const city = safeStr(referralState.profile_city).trim();
   if (!city) {
-    return `${REFERRAL_HUB_GREETING}\n\nGracias, ${name}.\n¿Ciudad donde vive?`;
+    return `Mucho gusto, ${firstName(name)}. ¿En qué ciudad vives?`;
   }
-  return `${REFERRAL_HUB_GREETING}\n\n¡Gracias, ${name}! 🙂\nTe registramos como residente de ${city}.\n\nAhora puedes elegir una opción del menú para continuar.\n\nTu información es confidencial y solo se utilizará para conectarte con beneficios, recursos y servicios de la comunidad.\n\n${LG_DISCLOSURE}`;
+  return LG_MENU_PROMPT;
+}
+
+function firstName(value: string) {
+  return safeStr(value).trim().split(/\s+/)[0] || "mucho gusto";
+}
+
+function cityConfirmationButtons(city: string): InteractiveButton[] {
+  return [
+    { id: "referral_field_confirm:profile_city:yes", title: `Sí, ${city}`.slice(0, 20) },
+    { id: "referral_field_confirm:profile_city:no", title: "Es otra ciudad" },
+  ];
+}
+
+function dateConfirmationButtons(): InteractiveButton[] {
+  return [
+    { id: "referral_field_confirm:accident_date:yes", title: "Sí, esa fecha" },
+    { id: "referral_field_confirm:accident_date:no", title: "Otra fecha" },
+  ];
+}
+
+function submissionConfirmationButtons(serviceId: string): InteractiveButton[] {
+  return [
+    { id: `referral_submit:${serviceId}:yes`, title: "Enviar solicitud" },
+    { id: `referral_submit:${serviceId}:no`, title: "Cancelar" },
+  ];
 }
 
 function shouldResetMenu(input: string): boolean {
   const normalized = normalizeText(input);
   return ["menu", "inicio", "volver al menu", "empezar de nuevo", "servicios"].includes(normalized);
+}
+
+function continuationActions(): InteractiveButton[] {
+  return [
+    { id: "referral_menu:services", title: "Ver otros servicios" },
+    { id: "referral_handoff:advisor", title: "Hablar con asesor" },
+    { id: "referral_menu:main", title: "Menú principal" },
+  ];
+}
+
+function completeLgServiceState(
+  leadState: Json | null,
+  serviceId: string,
+  outcome: string,
+  patch: ReferralHubState = {},
+): Json {
+  return buildLgStatePatch(leadState, {
+    ...getReferralState(leadState),
+    ...patch,
+    service_id: null,
+    service_label: null,
+    current_field: null,
+    pending_field_confirmation: null,
+    last_completion: {
+      service_id: serviceId,
+      completed_at: new Date().toISOString(),
+      outcome,
+    },
+  });
+}
+
+function normalizedAction(input: string | null | undefined): string {
+  return safeStr(input).trim().replace(/^action:/, "");
+}
+
+function isReturningEntry(input: string): boolean {
+  return /^(hola|hello|menu|menú|inicio|empezar|start)$/i.test(safeStr(input).trim());
 }
 
 function isStopRequest(input: string): boolean {
@@ -841,9 +950,13 @@ function isStopRequest(input: string): boolean {
 function resolveServiceIdFromInput(input: string): string | null {
   const raw = safeStr(input).trim().replace(/^action:/, "");
   if (raw.startsWith("referral_service:")) {
-    const serviceId = raw.slice("referral_service:".length);
+    const requestedServiceId = raw.slice("referral_service:".length);
+    const serviceId = requestedServiceId === "luis_asesor"
+      ? BUILT_IN_SERVICE_IDS.advisor
+      : requestedServiceId;
     return Object.values(BUILT_IN_SERVICE_IDS).includes(serviceId as any) ? serviceId : null;
   }
+  if (raw.includes(":")) return null;
   const normalized = normalizeText(input);
   if (/^\d+$/.test(normalized)) {
     const index = Number(normalized) - 1;
@@ -853,10 +966,10 @@ function resolveServiceIdFromInput(input: string): string | null {
   if (normalized.includes("accidente")) return BUILT_IN_SERVICE_IDS.accident;
   if (normalized.includes("inmigr") || normalized.includes("migratorio")) return BUILT_IN_SERVICE_IDS.immigration;
   if (normalized.includes("medico") || normalized.includes("descuento medico") || normalized.includes("coupon medico") || normalized.includes("cupon medico")) return BUILT_IN_SERVICE_IDS.medicalCoupon;
-  if (normalized.includes("supermerc") || normalized.includes("super") || normalized.includes("cupon supermercado") || normalized.includes("cupon super")) return BUILT_IN_SERVICE_IDS.supermarketCoupon;
+  if (normalized.includes("cupon") && (normalized.includes("supermerc") || normalized.includes("super"))) return BUILT_IN_SERVICE_IDS.supermarketCoupon;
+  if (normalized.includes("compra") && (normalized.includes("supermerc") || normalized.includes("comida"))) return BUILT_IN_SERVICE_IDS.grocery;
   if (normalized.includes("dental") || normalized.includes("dentista") || normalized.includes("rayos x") || normalized.includes("rayosx")) return BUILT_IN_SERVICE_IDS.dentalCoupon;
   if (normalized.includes("evento") || normalized.includes("agenda")) return BUILT_IN_SERVICE_IDS.events;
-  if (normalized.includes("donacion") || normalized.includes("donar") || normalized.includes("apoyo") || normalized.includes("comida")) return BUILT_IN_SERVICE_IDS.foodSupport;
   if (normalized.includes("asesor") || normalized.includes("humano") || normalized.includes("persona") || normalized.includes("hablar")) return BUILT_IN_SERVICE_IDS.advisor;
   return null;
 }
@@ -891,16 +1004,18 @@ function startLgProfileFlow(leadState: Json | null): ReferralHubTurnResult {
       profile_city: referralState.profile_city ?? null,
       profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
       stop_requested: referralState.stop_requested ?? false,
+      grocery: null,
     }),
     debugNote: "referral_hub:lg_profile",
   };
 }
 
-function updateProfileFromInput(
+async function updateProfileFromInput(
   leadState: Json | null,
   inboundText: string,
   channel: "messenger" | "whatsapp" = "whatsapp",
-): ReferralHubTurnResult {
+  payloadAction?: string | null,
+): Promise<ReferralHubTurnResult> {
   const referralState = getReferralState(leadState);
   const nextState = {
     ...referralState,
@@ -910,17 +1025,96 @@ function updateProfileFromInput(
   };
   const trimmed = safeStr(inboundText).trim();
   if (!nextState.profile_name && trimmed) {
-    const updated = { ...nextState, profile_name: trimmed, current_field: "profile_city" };
+    const profileComplete = Boolean(nextState.profile_city);
+    const updated = {
+      ...nextState,
+      profile_name: trimmed,
+      current_field: profileComplete ? null : "profile_city",
+      profile_complete: profileComplete,
+      profile_edit_field: null,
+    };
     return {
-      reply: `${REFERRAL_HUB_GREETING}\n\nGracias, ${trimmed}.\n¿Ciudad donde vive?`,
+      reply: profileComplete
+        ? `Listo, ${firstName(trimmed)}. ${LG_MENU_PROMPT}`
+        : `Mucho gusto, ${firstName(trimmed)}. ¿En qué ciudad vives?`,
+      interactiveList: profileComplete && channel === "whatsapp" ? buildLgMenuList() : undefined,
+      interactiveButtons: profileComplete && channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
       statePatch: buildLgStatePatch(leadState, updated),
       debugNote: "referral_hub:lg_profile_name",
     };
   }
   if (!nextState.profile_city && trimmed) {
-    const updated = { ...nextState, profile_city: trimmed, current_field: null, profile_complete: true };
+    const pending = nextState.pending_field_confirmation?.field === "profile_city"
+      ? nextState.pending_field_confirmation
+      : null;
+    const normalizedAction = normalizeText(payloadAction ?? "");
+    const normalizedInbound = normalizeText(trimmed);
+    const confirmed = normalizedAction.endsWith(":yes") || /^(si|sí)(,|\s|$)/i.test(trimmed);
+    const rejected = normalizedAction.endsWith(":no") || /^(no|es otra ciudad)(,|\s|$)/i.test(trimmed);
+    if (pending && confirmed && pending.interpretation.normalizedValue) {
+      const city = pending.interpretation.normalizedValue;
+      const updated = { ...nextState, profile_city: city, current_field: null, profile_complete: true, pending_field_confirmation: null };
+      return {
+        reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
+        interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
+        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
+        statePatch: buildLgStatePatch(leadState, updated),
+        debugNote: "referral_hub:lg_profile_city_confirmed",
+      };
+    }
+    if (pending && rejected) {
+      const replacement = trimmed.replace(/^(no|es otra ciudad)\s*[,.:;-]?\s*/i, "").trim();
+      if (!replacement || normalizedAction.endsWith(":no")) {
+        return {
+          reply: "Está bien. ¿En qué ciudad vives?",
+          statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: null }),
+          debugNote: "referral_hub:lg_profile_city_rejected",
+        };
+      }
+      const replacementResult = await interpretCity(replacement);
+      if (!replacementResult.normalizedValue || replacementResult.confidence === "low") {
+        return {
+          reply: replacementResult.clarificationPrompt ?? "No pude identificar la ciudad. ¿Puedes escribirla nuevamente?",
+          statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: null }),
+          debugNote: "referral_hub:lg_profile_city_retry",
+        };
+      }
+      if (replacementResult.needsConfirmation) {
+        return {
+          reply: replacementResult.clarificationPrompt ?? `¿Te refieres a ${replacementResult.normalizedValue}?`,
+          interactiveButtons: cityConfirmationButtons(replacementResult.normalizedValue),
+          statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: { field: "profile_city", interpretation: replacementResult } }),
+          debugNote: "referral_hub:lg_profile_city_candidate",
+        };
+      }
+      const updated = { ...nextState, profile_city: replacementResult.normalizedValue, current_field: null, profile_complete: true, pending_field_confirmation: null };
+      return {
+        reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
+        interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
+        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
+        statePatch: buildLgStatePatch(leadState, updated),
+        debugNote: "referral_hub:lg_profile_city_corrected",
+      };
+    }
+    const interpretation = await interpretCity(trimmed);
+    if (!interpretation.normalizedValue || interpretation.confidence === "low") {
+      return {
+        reply: interpretation.clarificationPrompt ?? "No pude identificar la ciudad. ¿Puedes escribirla nuevamente?",
+        statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: null }),
+        debugNote: "referral_hub:lg_profile_city_retry",
+      };
+    }
+    if (interpretation.needsConfirmation) {
+      return {
+        reply: interpretation.clarificationPrompt ?? `¿Te refieres a ${interpretation.normalizedValue}?`,
+        interactiveButtons: cityConfirmationButtons(interpretation.normalizedValue),
+        statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: { field: "profile_city", interpretation } }),
+        debugNote: "referral_hub:lg_profile_city_candidate",
+      };
+    }
+    const updated = { ...nextState, profile_city: interpretation.normalizedValue, current_field: null, profile_complete: true, pending_field_confirmation: null };
     return {
-      reply: `${REFERRAL_HUB_GREETING}\n\n¡Gracias, ${safeStr(updated.profile_name)}! 🙂\nTe registramos como residente de ${trimmed}.\n\nAhora puedes elegir una opción del menú para continuar.\n\nTu información es confidencial y solo se utilizará para conectarte con beneficios, recursos y servicios de la comunidad.\n\n${LG_DISCLOSURE}`,
+      reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
       interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
       interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
       statePatch: buildLgStatePatch(leadState, updated),
@@ -933,12 +1127,11 @@ function updateProfileFromInput(
 function handleLgMenu(
   leadState: Json | null,
   channel: "messenger" | "whatsapp" = "whatsapp",
+  reply = LG_MENU_PROMPT,
 ): ReferralHubTurnResult {
   const referralState = getReferralState(leadState);
   return {
-    reply: channel === "messenger"
-      ? LG_MESSENGER_MENU_TEXT
-      : `${REFERRAL_HUB_GREETING}\n\n${LG_DISCLOSURE}\n\nElige una opción del menú:`,
+    reply,
     interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
     interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
     statePatch: buildLgStatePatch(leadState, {
@@ -950,6 +1143,7 @@ function handleLgMenu(
       profile_city: referralState.profile_city ?? null,
       profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
       stop_requested: referralState.stop_requested ?? false,
+      grocery: null,
     }),
     debugNote: "referral_hub:lg_menu",
   };
@@ -960,6 +1154,7 @@ const TRANSIENT_SERVICE_FIELDS = new Set([
   "accident_date",
   "accident_city",
   "police_report",
+  "accident_injuries",
   "contact_name",
   "contact_phone",
   "immigration_case",
@@ -992,7 +1187,242 @@ function stopResult(leadState: Json | null): ReferralHubTurnResult {
   };
 }
 
-function buildServiceReply(serviceId: string, leadState: Json | null): ReferralHubTurnResult {
+function couponNextActions(): InteractiveButton[] {
+  return continuationActions();
+}
+
+async function activeCouponsResult(args: {
+  supabase?: SupabaseLike;
+  organizationId: string;
+  leadId?: string;
+  leadState: Json | null;
+}): Promise<ReferralHubTurnResult> {
+  if (!args.supabase?.from || !safeStr(args.leadId).trim()) {
+    return {
+      reply: "No pudimos consultar tus cupones en este momento.",
+      interactiveButtons: continuationActions(),
+      statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+      debugNote: "referral_hub:my_coupons_unavailable",
+    };
+  }
+  const result = await args.supabase
+    .from("referral_coupon_issuances")
+    .select("code,status,expires_at,referral_coupon_campaigns!inner(display_name)")
+    .eq("organization_id", args.organizationId)
+    .eq("lead_id", safeStr(args.leadId))
+    .eq("status", "active")
+    .order("issued_at", { ascending: false });
+  if (result.error) {
+    return {
+      reply: "No pudimos consultar tus cupones en este momento.",
+      interactiveButtons: continuationActions(),
+      statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+      debugNote: "referral_hub:my_coupons_failed",
+    };
+  }
+  const rows = Array.isArray(result.data) ? result.data : [];
+  const reply = rows.length === 0
+    ? "Aún no tienes cupones activos."
+    : `Tus cupones activos:\n\n${rows.map((row: any) => {
+      const campaign = Array.isArray(row.referral_coupon_campaigns)
+        ? row.referral_coupon_campaigns[0]
+        : row.referral_coupon_campaigns;
+      const expiration = safeStr(row.expires_at).trim()
+        ? `\nVence: ${safeStr(row.expires_at).slice(0, 10)}`
+        : "";
+      return `${safeStr(campaign?.display_name, "Cupón")}\nCódigo: ${safeStr(row.code)}\nEstado: activo${expiration}`;
+    }).join("\n\n")}`;
+  return {
+    reply,
+    interactiveButtons: continuationActions(),
+    statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+    debugNote: "referral_hub:my_coupons",
+  };
+}
+
+export function resolveLgCouponDeliveryEnabled(
+  integrations: Record<string, unknown> | null | undefined,
+): boolean {
+  const root = integrations && typeof integrations === "object"
+    ? integrations
+    : {};
+  const lgFeatures = root.lg_features && typeof root.lg_features === "object"
+    ? root.lg_features as Record<string, unknown>
+    : {};
+  const value = lgFeatures.lg_coupon_delivery_enabled ??
+    root.lg_coupon_delivery_enabled;
+  if (value === false || value === 0) return false;
+  if (typeof value === "string" && ["false", "0", "off", "disabled"].includes(value.trim().toLowerCase())) {
+    return false;
+  }
+  return true;
+}
+
+function failedCouponDeliveryResult(
+  leadState: Json | null,
+  serviceId: string,
+  reason: CouponDeliveryError,
+): ReferralHubTurnResult {
+  return {
+    reply: "No pudimos preparar la imagen del cupón en este momento. Inténtalo nuevamente o selecciona ‘Hablar con asesor’.",
+    statePatch: buildLgStatePatch(leadState, {
+      ...getReferralState(leadState),
+      service_id: serviceId,
+      current_field: null,
+      coupon_delivery_status: "failed",
+      coupon_delivery_error: reason,
+    } as ReferralHubState),
+    debugNote: `referral_hub:coupon_delivery_failed:${reason}`,
+  };
+}
+
+function classifyCouponIssueError(error: unknown): CouponDeliveryError {
+  if (error instanceof CouponPersistenceError) return error.reason;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (
+    message.includes("coupon_issue_empty_result") ||
+    /campaign.*(missing|not found|inactive)|no active.*campaign/i.test(message)
+  ) {
+    return "coupon_campaign_missing";
+  }
+  return "coupon_issue_failed";
+}
+
+async function buildPersistentCouponReply(args: {
+  serviceId: ReferralHubCouponAssetConfig["service_id"];
+  leadState: Json | null;
+  supabase?: SupabaseLike;
+  organizationId: string;
+  leadId?: string;
+  couponAssets: Record<string, ReferralHubCouponAssetConfig>;
+  couponDeliveryEnabled: boolean;
+  channel: "messenger" | "whatsapp";
+}): Promise<ReferralHubTurnResult> {
+  const asset = args.couponAssets[args.serviceId];
+  console.log(JSON.stringify({
+    event: "referral_hub_coupon_delivery_decision",
+    organization_id: args.organizationId,
+    service_id: args.serviceId,
+    channel: args.channel,
+    coupon_delivery_enabled: args.couponDeliveryEnabled,
+    config_found: Boolean(asset),
+    config_active: asset?.active === true,
+    image_url_present: Boolean(safeStr(asset?.image_url).trim()),
+  }));
+  if (!args.couponDeliveryEnabled) {
+    return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_delivery_disabled");
+  }
+  if (!asset) {
+    return failedCouponDeliveryResult(args.leadState, args.serviceId, "asset_config_missing");
+  }
+  if (!asset.active) {
+    return failedCouponDeliveryResult(args.leadState, args.serviceId, "asset_config_inactive");
+  }
+  if (!/^https:\/\//i.test(safeStr(asset.image_url).trim())) {
+    return failedCouponDeliveryResult(args.leadState, args.serviceId, "image_url_invalid");
+  }
+  if (!args.supabase?.rpc || !safeStr(args.leadId).trim()) {
+    return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_persistence_unavailable");
+  }
+  try {
+    const coupon = await issueOrGetCoupon({
+      supabase: args.supabase as Parameters<typeof issueOrGetCoupon>[0]["supabase"],
+      organizationId: args.organizationId,
+      leadId: safeStr(args.leadId),
+      campaignKey: asset.campaign_key,
+    });
+    if (!safeStr(coupon.code)) {
+      return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_campaign_missing");
+    }
+    if (args.channel === "whatsapp") {
+      const identity = await sha256(`${args.organizationId}:${safeStr(args.leadId)}`);
+      const tracking = await args.supabase.from("referral_coupon_delivery_events").upsert({ organization_id: args.organizationId, conversation_identity_hash: identity, service_id: args.serviceId, campaign_key: asset.campaign_key, channel: "whatsapp", prepared_at: new Date().toISOString(), delivered_at: null, metadata: { coupon_id: coupon.id, status: "prepared" }, updated_at: new Date().toISOString() }, { onConflict: "organization_id,conversation_identity_hash,service_id,campaign_key,channel" });
+      if (tracking.error) return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_issue_failed");
+    }
+    const referralState = getReferralState(args.leadState);
+    return {
+      reply: `Código: ${coupon.code}\n\n${asset.instructions}`,
+      outboundMessages: [
+        { type: "text", text: asset.intro_text },
+        { type: "image", url: asset.image_url, altText: "Imagen del cupón", reusable: true },
+      ],
+      interactiveButtons: couponNextActions(),
+      statePatch: buildLgStatePatch(args.leadState, {
+        ...referralState,
+        service_id: args.serviceId,
+        service_label: serviceLabelFromId(args.serviceId),
+        current_field: null,
+        coupon_delivery_status: "pending",
+        coupon_delivery_error: null,
+        extracted_data: {
+          ...(referralState.extracted_data ?? {}),
+          service: args.serviceId,
+          coupon_id: coupon.id,
+          coupon_code: coupon.code,
+        },
+      } as ReferralHubState),
+      debugNote: `referral_hub:persistent_coupon:${args.channel}:${args.serviceId}`,
+    };
+  } catch (error) {
+    if (error instanceof CouponPersistenceError) {
+      console.error(JSON.stringify({
+        event: "referral_hub_coupon_persistence_failed",
+        operation: error.operation,
+        database_code: error.databaseCode,
+        message: error.sanitizedMessage,
+        object_name: error.objectName,
+        organization_id: args.organizationId,
+        service_id: args.serviceId,
+        campaign_key: asset.campaign_key,
+      }));
+    }
+    return failedCouponDeliveryResult(
+      args.leadState,
+      args.serviceId,
+      classifyCouponIssueError(error),
+    );
+  }
+}
+
+async function buildServiceReply(
+  serviceId: string,
+  leadState: Json | null,
+  context?: {
+    channel?: "messenger" | "whatsapp";
+    supabase?: SupabaseLike;
+    organizationId?: string;
+    leadId?: string;
+    couponAssets?: Record<string, ReferralHubCouponAssetConfig>;
+    integrations?: Record<string, unknown>;
+  },
+): Promise<ReferralHubTurnResult> {
+  if (
+    context?.channel === "whatsapp" &&
+    ["luis_cupon_medico", "luis_cupon_super", "luis_cupon_dental"].includes(serviceId) &&
+    (!context.supabase?.rpc || !safeStr(context.leadId).trim())
+  ) {
+    return failedCouponDeliveryResult(
+      leadState,
+      serviceId as ReferralHubCouponAssetConfig["service_id"],
+      "coupon_persistence_unavailable",
+    );
+  }
+  if (
+    (context?.channel === "messenger" || context?.channel === "whatsapp") &&
+    context.supabase?.rpc &&
+    ["luis_cupon_medico", "luis_cupon_super", "luis_cupon_dental"].includes(serviceId)
+  ) {
+    return await buildPersistentCouponReply({
+      serviceId: serviceId as ReferralHubCouponAssetConfig["service_id"],
+      leadState,
+      supabase: context.supabase,
+      organizationId: safeStr(context.organizationId),
+      leadId: context.leadId,
+      couponAssets: context.couponAssets ?? REFERRAL_HUB_COUPON_ASSETS,
+      couponDeliveryEnabled: resolveLgCouponDeliveryEnabled(context.integrations),
+      channel: context.channel,
+    });
+  }
   const referralState = getReferralState(leadState);
   const preservedData = withoutTransientServiceFields(referralState.extracted_data);
   const statePatchBase = {
@@ -1003,12 +1433,13 @@ function buildServiceReply(serviceId: string, leadState: Json | null): ReferralH
     profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
     stop_requested: referralState.stop_requested ?? false,
     food_option: referralState.food_option ?? null,
+    grocery: null,
   };
 
   switch (serviceId) {
     case BUILT_IN_SERVICE_IDS.accident:
       return {
-        reply: "Por tu seguridad, te conectaremos con un asesor.\n\n¿Cuál fue la fecha del accidente?",
+        reply: "Lamento que estés pasando por esto. Vamos a recopilar algunos datos para conectarte con la persona adecuada.\n\n¿Cuándo ocurrió el accidente?",
         statePatch: buildLgStatePatch(leadState, {
           ...statePatchBase,
           current_field: "accident_date",
@@ -1058,6 +1489,7 @@ function buildServiceReply(serviceId: string, leadState: Json | null): ReferralH
             profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
             stop_requested: referralState.stop_requested ?? false,
             food_option: referralState.food_option ?? null,
+            grocery: null,
           }),
         },
         leadPatch: {
@@ -1067,6 +1499,10 @@ function buildServiceReply(serviceId: string, leadState: Json | null): ReferralH
         },
         debugNote: "referral_hub:service_supermarket_coupon",
       };
+    }
+    case BUILT_IN_SERVICE_IDS.grocery: {
+      const turn = startWhatsAppGrocery();
+      return { reply: turn.reply, interactiveList: turn.interactiveList, interactiveButtons: turn.interactiveButtons, statePatch: buildLgStatePatch(leadState, { ...statePatchBase, service_id: BUILT_IN_SERVICE_IDS.grocery, service_label: "Compras supermercado", current_field: null, grocery: turn.grocery }), debugNote: turn.debugNote };
     }
     case BUILT_IN_SERVICE_IDS.dentalCoupon:
       return {
@@ -1081,54 +1517,31 @@ function buildServiceReply(serviceId: string, leadState: Json | null): ReferralH
     case BUILT_IN_SERVICE_IDS.events:
       return {
         reply: "Te compartiremos los próximos eventos comunitarios disponibles cerca de tu ciudad.\n\nPor ahora no tenemos eventos publicados para tu ciudad. Podemos avisarte cuando haya uno disponible.",
-        statePatch: buildLgStatePatch(leadState, {
+        interactiveButtons: [
+          { id: "referral_event:follow_up", title: "Avisarme" },
+          { id: "referral_menu:services", title: "Ver servicios" },
+        ],
+        statePatch: completeLgServiceState(leadState, serviceId, "information_provided", {
           ...statePatchBase,
-          current_field: null,
           extracted_data: { ...preservedData, service: "eventos" },
         }),
         debugNote: "referral_hub:service_events",
       };
-    case BUILT_IN_SERVICE_IDS.foodSupport:
-      return {
-        reply: "¿Deseas donar comida o recibir apoyo?",
-        statePatch: buildLgStatePatch(leadState, {
-          ...statePatchBase,
-          current_field: "food_option",
-          extracted_data: { ...preservedData, service: "food_support" },
-        }),
-        debugNote: "referral_hub:service_food",
-      };
     case BUILT_IN_SERVICE_IDS.advisor: {
-      const takeoverState = activateHumanTakeoverState({
-        state: leadState,
-        source: "human_replied_from_dashboard",
-        actor: "luis_community_advisor",
-        pauseMinutes: 240,
-      });
       return {
-        reply: "Claro. Dejaremos tu solicitud para que un miembro del equipo pueda atenderte personalmente.",
-        statePatch: {
-          ...takeoverState,
-          stage: "HANDOFF",
-          orgType: "referral_hub",
-          active_flow: "human_takeover",
-          collected: mergeReferralState(leadState, {
-            ...statePatchBase,
-            service_id: BUILT_IN_SERVICE_IDS.advisor,
-            service_label: "Hablar con asesor",
-            current_field: null,
-            extracted_data: { ...preservedData, service: "asesor" },
-          }),
-          lastIntent: "referral_hub_advisor",
-          nextExpected: undefined,
-        },
+        reply: LG_ACCIDENT_HANDOFF_FAILURE,
+        interactiveButtons: continuationActions(),
+        statePatch: completeLgServiceState(leadState, BUILT_IN_SERVICE_IDS.advisor, "handoff_created", {
+          ...statePatchBase,
+          extracted_data: { ...preservedData, service: "asesor" },
+        }),
         leadPatch: {
           handoff_to_human: true,
           service_id: BUILT_IN_SERVICE_IDS.advisor,
           extracted_data: { ...(referralState.extracted_data ?? {}), service: "asesor" },
           status: "contacted",
         },
-        debugNote: "referral_hub:service_advisor",
+        debugNote: "referral_hub:advisor_handoff_requested",
       };
     }
     default:
@@ -1150,8 +1563,8 @@ function serviceLabelFromId(serviceId: string): string {
       return "Cupón dental";
     case BUILT_IN_SERVICE_IDS.events:
       return "Eventos comunitarios";
-    case BUILT_IN_SERVICE_IDS.foodSupport:
-      return "Comida y apoyo";
+    case BUILT_IN_SERVICE_IDS.grocery:
+      return "Compras supermercado";
     case BUILT_IN_SERVICE_IDS.advisor:
       return "Hablar con asesor";
     default:
@@ -1159,20 +1572,118 @@ function serviceLabelFromId(serviceId: string): string {
   }
 }
 
-function continueLgServiceFlow(leadState: Json | null, inboundText: string): ReferralHubTurnResult {
+async function continueLgServiceFlow(
+  leadState: Json | null,
+  inboundText: string,
+  timezone = "America/New_York",
+  payloadAction?: string | null,
+): Promise<ReferralHubTurnResult> {
   const referralState = getReferralState(leadState);
   const currentField = safeStr(referralState.current_field).trim();
   const value = safeStr(inboundText).trim();
   const extractedData = { ...(referralState.extracted_data ?? {}) } as Record<string, unknown>;
 
+  if (currentField === "confirm_submission") {
+    const action = normalizedAction(payloadAction);
+    const confirmed = action === `referral_submit:${referralState.service_id}:yes` ||
+      /^(si|sí|enviar|confirmar|enviar solicitud)$/i.test(value);
+    const rejected = action === `referral_submit:${referralState.service_id}:no` ||
+      /^(no|cancelar)$/i.test(value);
+    if (!confirmed && !rejected) {
+      return {
+        reply: "Confirma si deseas enviar esta solicitud.",
+        interactiveButtons: submissionConfirmationButtons(referralState.service_id ?? ""),
+        statePatch: buildLgStatePatch(leadState, referralState),
+        debugNote: "referral_hub:submission_confirmation_retry",
+      };
+    }
+    if (rejected) {
+      return {
+        ...handleLgMenu(leadState),
+        reply: "No enviamos la solicitud. ¿En qué más podemos ayudarte?",
+        debugNote: "referral_hub:submission_cancelled",
+      };
+    }
+    if (referralState.service_id === BUILT_IN_SERVICE_IDS.accident) {
+      return {
+        reply: LG_ACCIDENT_HANDOFF_FAILURE,
+        interactiveButtons: continuationActions(),
+        statePatch: completeLgServiceState(leadState, BUILT_IN_SERVICE_IDS.accident, "handoff_created", {
+          ...referralState,
+          extracted_data: extractedData,
+        }),
+        debugNote: "referral_hub:accident_complete",
+      };
+    }
+    if (referralState.service_id === BUILT_IN_SERVICE_IDS.immigration) {
+      return {
+        reply: LG_ACCIDENT_HANDOFF_FAILURE,
+        interactiveButtons: continuationActions(),
+        statePatch: completeLgServiceState(leadState, BUILT_IN_SERVICE_IDS.immigration, "request_recorded", {
+          ...referralState,
+          extracted_data: extractedData,
+        }),
+        debugNote: "referral_hub:immigration_complete",
+      };
+    }
+  }
+
   if (referralState.service_id === BUILT_IN_SERVICE_IDS.accident) {
     if (currentField === "accident_date") {
-      extractedData.accident_date = value;
+      const pending = referralState.pending_field_confirmation?.field === "accident_date"
+        ? referralState.pending_field_confirmation
+        : null;
+      const normalizedAction = normalizeText(payloadAction ?? "");
+      const confirmed = normalizedAction.endsWith(":yes") || /^(si|sí)(,|\s|$)/i.test(value);
+      const rejected = normalizedAction.endsWith(":no") || /^(no|otra fecha)(,|\s|$)/i.test(value);
+      if (pending && confirmed && pending.interpretation.normalizedValue) {
+        extractedData.accident_date = pending.interpretation.normalizedValue;
+        return {
+          reply: "Entendido. ¿En qué ciudad ocurrió?",
+          statePatch: buildLgStatePatch(leadState, {
+            ...referralState,
+            current_field: "accident_city",
+            pending_field_confirmation: null,
+            extracted_data: extractedData,
+          }),
+          debugNote: "referral_hub:accident_date_confirmed",
+        };
+      }
+      if (pending && rejected) {
+        return {
+          reply: "Está bien. ¿Qué día ocurrió el accidente?",
+          statePatch: buildLgStatePatch(leadState, {
+            ...referralState,
+            current_field: "accident_date",
+            pending_field_confirmation: null,
+            extracted_data: extractedData,
+          }),
+          debugNote: "referral_hub:accident_date_rejected",
+        };
+      }
+      const interpreted = interpretAccidentDate(value, timezone);
+      if (!interpreted.normalizedValue || interpreted.confidence === "low") {
+        return {
+          reply: interpreted.clarificationPrompt ?? "No pude identificar la fecha. ¿Puedes escribirla nuevamente?",
+          statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: "accident_date", extracted_data: extractedData }),
+          debugNote: "referral_hub:accident_date_retry",
+        };
+      }
+      if (interpreted.needsConfirmation) {
+        return {
+          reply: interpreted.clarificationPrompt ?? `¿Te refieres a ${interpreted.normalizedValue}?`,
+          interactiveButtons: dateConfirmationButtons(),
+          statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: "accident_date", pending_field_confirmation: { field: "accident_date", interpretation: interpreted }, extracted_data: extractedData }),
+          debugNote: "referral_hub:accident_date_confirm",
+        };
+      }
+      extractedData.accident_date = interpreted.normalizedValue;
       return {
-        reply: "¿En qué ciudad ocurrió?",
+        reply: "Entendido. ¿En qué ciudad ocurrió?",
         statePatch: buildLgStatePatch(leadState, {
           ...referralState,
           current_field: "accident_city",
+          pending_field_confirmation: null,
           extracted_data: extractedData,
         }),
         debugNote: "referral_hub:accident_date",
@@ -1181,17 +1692,24 @@ function continueLgServiceFlow(leadState: Json | null, inboundText: string): Ref
     if (currentField === "accident_city") {
       extractedData.accident_city = value;
       return {
-        reply: "¿Hubo reporte policial? Responde sí o no.",
+        reply: "¿Hubo personas lesionadas?",
+        interactiveButtons: [
+          { id: "referral_field:accident_injuries:0", title: "Sí" },
+          { id: "referral_field:accident_injuries:1", title: "No" },
+          { id: "referral_field:accident_injuries:2", title: "No estoy seguro" },
+        ],
         statePatch: buildLgStatePatch(leadState, {
           ...referralState,
-          current_field: "police_report",
+          current_field: "accident_injuries",
           extracted_data: extractedData,
         }),
         debugNote: "referral_hub:accident_city",
       };
     }
-    if (currentField === "police_report") {
-      extractedData.police_report = /^(si|sí|yes)$/i.test(value) ? "sí" : "no";
+    if (currentField === "accident_injuries" || currentField === "police_report") {
+      extractedData.accident_injuries = /no estoy seguro/i.test(value)
+        ? "no_estoy_seguro"
+        : /^(si|sí|yes)$/i.test(value) ? "sí" : "no";
       return {
         reply: "¿Cuál es tu nombre completo?",
         statePatch: buildLgStatePatch(leadState, {
@@ -1199,7 +1717,7 @@ function continueLgServiceFlow(leadState: Json | null, inboundText: string): Ref
           current_field: "contact_name",
           extracted_data: extractedData,
         }),
-        debugNote: "referral_hub:accident_police",
+        debugNote: "referral_hub:accident_injuries",
       };
     }
     if (currentField === "contact_name") {
@@ -1217,15 +1735,14 @@ function continueLgServiceFlow(leadState: Json | null, inboundText: string): Ref
     if (currentField === "contact_phone") {
       extractedData.contact_phone = value;
       return {
-        reply: "Gracias. Tu solicitud recibida. Un asesor se comunicará contigo lo antes posible.",
+        reply: `Revisa la información antes de enviarla:\n• Fecha: ${safeStr(extractedData.accident_date)}\n• Ciudad: ${safeStr(extractedData.accident_city)}\n• Lesionados: ${safeStr(extractedData.accident_injuries)}\n• Nombre: ${safeStr(extractedData.contact_name)}\n• Teléfono: ${safeStr(extractedData.contact_phone)}\n\nConfirma si deseas enviar esta solicitud.`,
+        interactiveButtons: submissionConfirmationButtons(BUILT_IN_SERVICE_IDS.accident),
         statePatch: buildLgStatePatch(leadState, {
           ...referralState,
-          current_field: null,
+          current_field: "confirm_submission",
           extracted_data: extractedData,
-          service_id: null,
-          service_label: null,
         }),
-        debugNote: "referral_hub:accident_complete",
+        debugNote: "referral_hub:accident_confirmation",
       };
     }
   }
@@ -1233,77 +1750,21 @@ function continueLgServiceFlow(leadState: Json | null, inboundText: string): Ref
   if (referralState.service_id === BUILT_IN_SERVICE_IDS.immigration) {
     extractedData.immigration_case = value;
     return {
-      reply: "Gracias. Registramos tu solicitud para que un profesional pueda comunicarse contigo.",
+      reply: `Revisa la información antes de enviarla:\n• Tipo de ayuda: ${value}\n\nConfirma si deseas enviar esta solicitud.`,
+      interactiveButtons: submissionConfirmationButtons(BUILT_IN_SERVICE_IDS.immigration),
       statePatch: buildLgStatePatch(leadState, {
         ...referralState,
-        current_field: null,
+        current_field: "confirm_submission",
         extracted_data: extractedData,
-        service_id: null,
-        service_label: null,
       }),
-      debugNote: "referral_hub:immigration_complete",
+      debugNote: "referral_hub:immigration_confirmation",
     };
   }
 
-  if (referralState.service_id === BUILT_IN_SERVICE_IDS.foodSupport) {
-    if (currentField === "food_option") {
-      const normalized = normalizeText(value);
-      const chosen = normalized.includes("donar") || normalized.includes("quiero donar") ? "donation" : "support";
-      extractedData.food_option = chosen;
-      if (chosen === "donation") {
-        return {
-          reply: "Perfecto. Cuéntanos el tipo de donación y la ciudad.",
-          statePatch: buildLgStatePatch(leadState, {
-            ...referralState,
-            current_field: "food_donation_details",
-            food_option: chosen,
-            extracted_data: extractedData,
-          }),
-          debugNote: "referral_hub:food_donation",
-        };
-      }
-      return {
-        reply: "Claro. Cuéntanos la ciudad y la necesidad breve que tienes.",
-        statePatch: buildLgStatePatch(leadState, {
-          ...referralState,
-          current_field: "food_support_details",
-          food_option: chosen,
-          extracted_data: extractedData,
-        }),
-        debugNote: "referral_hub:food_support",
-      };
-    }
-    if (currentField === "food_donation_details") {
-      extractedData.food_donation_details = value;
-      return {
-        reply: "Gracias. Registramos tu solicitud para conectarte con recursos o miembros del equipo cuando haya disponibilidad.",
-        statePatch: buildLgStatePatch(leadState, {
-          ...referralState,
-          current_field: null,
-          extracted_data: extractedData,
-          service_id: null,
-          service_label: null,
-        }),
-        debugNote: "referral_hub:food_donation_complete",
-      };
-    }
-    if (currentField === "food_support_details") {
-      extractedData.food_support_details = value;
-      return {
-        reply: "Gracias. Registramos tu solicitud para conectarte con recursos o miembros del equipo cuando haya disponibilidad.",
-        statePatch: buildLgStatePatch(leadState, {
-          ...referralState,
-          current_field: null,
-          extracted_data: extractedData,
-          service_id: null,
-          service_label: null,
-        }),
-        debugNote: "referral_hub:food_support_complete",
-      };
-    }
-  }
-
-  return buildServiceReply(referralState.service_id ?? BUILT_IN_SERVICE_IDS.advisor, leadState);
+  return await buildServiceReply(
+    referralState.service_id ?? BUILT_IN_SERVICE_IDS.advisor,
+    leadState,
+  );
 }
 
 export async function handleReferralHubTurn(args: {
@@ -1315,7 +1776,10 @@ export async function handleReferralHubTurn(args: {
   payloadAction?: string | null;
   channelUserId?: string | null;
   channel?: "messenger" | "whatsapp";
+  timezone?: string;
   serviceConfigs?: ReferralHubServiceConfig[];
+  couponAssets?: Record<string, ReferralHubCouponAssetConfig>;
+  integrations?: Record<string, unknown>;
 }): Promise<ReferralHubTurnResult> {
   const isLgTenant = safeStr(args.organizationId).trim() ===
     REFERRAL_HUB_CANONICAL_ORGANIZATION_ID;
@@ -1340,42 +1804,133 @@ export async function handleReferralHubTurn(args: {
   if (isStopRequest(args.inboundText)) return stopResult(args.leadState);
 
   if (isLgTenant) {
+    const action = normalizedAction(args.payloadAction);
+    if (action === "referral_event:follow_up") {
+      return {
+        reply: LG_ACCIDENT_HANDOFF_FAILURE,
+        interactiveButtons: continuationActions(),
+        statePatch: completeLgServiceState(
+          args.leadState,
+          BUILT_IN_SERVICE_IDS.events,
+          "follow_up_requested",
+          {
+            ...referralState,
+            extracted_data: {
+              ...(referralState.extracted_data ?? {}),
+              service: "eventos",
+              event_follow_up: true,
+            },
+          },
+        ),
+        debugNote: "referral_hub:events_followup_requested",
+      };
+    }
+    if (action === "referral_menu:services") {
+      return handleLgMenu(args.leadState, args.channel);
+    }
+    if (action === "referral_menu:main") {
+      return handleLgMenu(args.leadState, args.channel, "Claro. ¿En qué podemos ayudarte?");
+    }
+    if (action === "referral_menu:my_coupons") {
+      return await activeCouponsResult(args);
+    }
+    if (action === "referral_handoff:advisor") {
+      return await buildServiceReply(BUILT_IN_SERVICE_IDS.advisor, args.leadState, {
+        channel: args.channel,
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+      });
+    }
+    if (action === "referral_profile:change_name") {
+      return {
+        reply: "Claro. ¿Cuál es tu nombre completo?",
+        statePatch: buildLgStatePatch(args.leadState, {
+          ...referralState,
+          profile_name: null,
+          profile_complete: false,
+          current_field: "profile_name",
+          profile_edit_field: "profile_name",
+        }),
+        debugNote: "referral_hub:change_name",
+      };
+    }
+    if (action === "referral_profile:change_city") {
+      return {
+        reply: "Claro. ¿En qué ciudad vives?",
+        statePatch: buildLgStatePatch(args.leadState, {
+          ...referralState,
+          profile_city: null,
+          profile_complete: false,
+          current_field: "profile_city",
+          profile_edit_field: "profile_city",
+        }),
+        debugNote: "referral_hub:change_city",
+      };
+    }
     if (!safeStr(referralState.profile_name).trim() || !safeStr(referralState.profile_city).trim()) {
       if (safeStr(referralState.current_field).trim() === "profile_name") {
-        return updateProfileFromInput(args.leadState, args.inboundText, args.channel);
+        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction);
       }
       if (safeStr(referralState.current_field).trim() === "profile_city") {
-        return updateProfileFromInput(args.leadState, args.inboundText, args.channel);
+        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction);
       }
       if (!safeStr(referralState.profile_name).trim() && !safeStr(referralState.profile_city).trim()) {
         return startLgProfileFlow(args.leadState);
       }
       if (!safeStr(referralState.profile_city).trim()) {
-        return updateProfileFromInput(args.leadState, args.inboundText, args.channel);
+        return startLgProfileFlow(args.leadState);
       }
     }
 
-    if (shouldResetMenu(args.inboundText)) {
+    if (shouldResetMenu(args.inboundText) && !isReturningEntry(args.inboundText)) {
       return handleLgMenu(args.leadState, args.channel);
+    }
+
+    const groceryState = groceryStateFromReferral(referralState.grocery);
+    if (groceryState && groceryState.step !== "complete" && !safeStr(args.payloadAction).includes("referral_service:") && args.channel === "whatsapp" && args.supabase?.rpc && args.leadId && args.channelUserId) {
+      const turn = await continueWhatsAppGrocery({ supabase: args.supabase as SupabaseLike & { rpc: NonNullable<SupabaseLike["rpc"]> }, state: groceryState, inboundText: args.inboundText, payloadAction: args.payloadAction, leadId: args.leadId, channelUserId: args.channelUserId });
+      return { reply: turn.reply, interactiveList: turn.interactiveList, interactiveButtons: turn.interactiveButtons, statePatch: buildLgStatePatch(args.leadState, { ...referralState, service_id: BUILT_IN_SERVICE_IDS.grocery, service_label: "Compras supermercado", current_field: null, grocery: turn.grocery }), debugNote: turn.debugNote };
     }
 
     const selectedPayloadServiceId = safeStr(args.payloadAction).trim()
       ? resolveServiceIdFromInput(args.payloadAction ?? "")
       : null;
     if (selectedPayloadServiceId) {
-      return buildServiceReply(selectedPayloadServiceId, args.leadState);
+      return await buildServiceReply(selectedPayloadServiceId, args.leadState, {
+        channel: args.channel,
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        couponAssets: args.couponAssets,
+        integrations: args.integrations,
+      });
     }
 
     if (safeStr(referralState.current_field).trim()) {
-      return continueLgServiceFlow(args.leadState, args.inboundText);
+      return continueLgServiceFlow(args.leadState, args.inboundText, args.timezone, args.payloadAction);
     }
 
     const selectedTextServiceId = resolveServiceIdFromInput(args.inboundText);
     if (selectedTextServiceId) {
-      return buildServiceReply(selectedTextServiceId, args.leadState);
+      return await buildServiceReply(selectedTextServiceId, args.leadState, {
+        channel: args.channel,
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        couponAssets: args.couponAssets,
+        integrations: args.integrations,
+      });
     }
 
-    if (normalizeText(args.inboundText).includes("hola") || normalizeText(args.inboundText).includes("menu") || !safeStr(args.inboundText).trim()) {
+    if (isReturningEntry(args.inboundText)) {
+      return handleLgMenu(
+        args.leadState,
+        args.channel,
+        `Hola de nuevo, ${firstName(safeStr(referralState.profile_name))}. ¿En qué podemos ayudarte hoy?`,
+      );
+    }
+    if (!safeStr(args.inboundText).trim()) {
       return handleLgMenu(args.leadState, args.channel);
     }
 
