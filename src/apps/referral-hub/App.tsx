@@ -9,6 +9,7 @@ import BoltShell from "./ui/BoltShell";
 import ReferralLogin from "./pages/ReferralLogin";
 import ReferralServices from "./pages/ReferralServices";
 import ReferralServiceDetail from "./pages/ReferralServiceDetail";
+import ReferralIntegrations from "./pages/ReferralIntegrations";
 import ReferralSettings from "./pages/ReferralSettings";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { AlliesScreen, AllyDetailScreen, ConversationScreen, HomeScreen, InboxScreen, NetworkScreen, OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
@@ -56,7 +57,7 @@ function ProductRoutes() {
       <Route path="coverage" element={<CoverageScreen />} />
       <Route path="coverage/:locationId" element={<CoverageLocationScreen />} />
       <Route path="catalog" element={<CatalogScreen />} />
-      <Route path="integrations" element={<ReferralMore />} />
+      <Route path="integrations" element={<ReferralIntegrations />} />
       <Route path="settings" element={<ReferralSettings />} />
       <Route path="attention" element={<Navigate to="/work" replace />} />
       <Route path="opportunities" element={<Navigate to="/work?tab=seguimiento" replace />} />

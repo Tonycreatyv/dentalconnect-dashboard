@@ -51,6 +51,7 @@ export type ReferralHubServiceConfig = {
   accion_estatica?: Json | null;
   partner_id?: string | null;
   partner?: ReferralHubPartner | null;
+  activo?: boolean | null;
 };
 
 type ReferralHubPartner = {
@@ -829,7 +830,45 @@ function optInResult(args: {
   };
 }
 
-function buildLgMenuList(): WhatsAppInteractiveListSpec {
+type CanonicalMenuConfig = Pick<ReferralHubServiceConfig, "id" | "nombre" | "menu_label" | "menu_orden" | "activo">;
+
+const LG_MENU_DESCRIPTIONS: Record<string, string> = {
+  [BUILT_IN_SERVICE_IDS.accident]: "Ayuda inmediata",
+  [BUILT_IN_SERVICE_IDS.immigration]: "Orientación con un profesional",
+  [BUILT_IN_SERVICE_IDS.medicalCoupon]: "20% de descuento",
+  [BUILT_IN_SERVICE_IDS.supermarketCoupon]: "Cupón de $20",
+  [BUILT_IN_SERVICE_IDS.dentalCoupon]: "Consulta, limpieza y rayos X",
+  [BUILT_IN_SERVICE_IDS.events]: "Próximos eventos",
+  [BUILT_IN_SERVICE_IDS.grocery]: "Canastas con delivery",
+  [BUILT_IN_SERVICE_IDS.advisor]: "Atención personal",
+};
+
+function canonicalServiceLabel(config: CanonicalMenuConfig) {
+  return truncateWhatsAppTitle(safeStr(config.menu_label).trim() || safeStr(config.nombre).trim() || serviceLabelFromId(config.id));
+}
+
+function canonicalMenuRows(configs: CanonicalMenuConfig[]) {
+  return configs.map((config) => ({
+    id: serviceActionId(config.id),
+    title: canonicalServiceLabel(config),
+    description: LG_MENU_DESCRIPTIONS[config.id] ?? "Más información",
+  }));
+}
+
+function sortCanonicalMenuConfigs(configs: CanonicalMenuConfig[]) {
+  return [...configs].sort((left, right) => {
+    const leftOrder = Number.isFinite(Number(left.menu_orden)) ? Number(left.menu_orden) : Number.MAX_SAFE_INTEGER;
+    const rightOrder = Number.isFinite(Number(right.menu_orden)) ? Number(right.menu_orden) : Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder || canonicalServiceLabel(left).localeCompare(canonicalServiceLabel(right));
+  });
+}
+
+function buildLgMenuList(configs?: CanonicalMenuConfig[]): WhatsAppInteractiveListSpec {
+  if (configs) {
+    const primary = canonicalMenuRows(configs.slice(0, 3));
+    if (configs.length > 3) primary.push({ id: "referral_menu:more", title: "Ver más servicios", description: "Más opciones disponibles" });
+    return { body: LG_MENU_PROMPT, buttonText: "Ver opciones", sections: [{ title: "Servicios", rows: primary }] };
+  }
   return {
     body: LG_MENU_PROMPT,
     buttonText: "Ver opciones",
@@ -849,7 +888,16 @@ function buildLgMenuList(): WhatsAppInteractiveListSpec {
   };
 }
 
-export function buildLgMessengerQuickReplies(): InteractiveButton[] {
+function buildLgMoreList(configs: CanonicalMenuConfig[]): WhatsAppInteractiveListSpec {
+  return { body: "Más servicios disponibles", buttonText: "Ver servicios", sections: [{ title: "Más servicios", rows: canonicalMenuRows(configs.slice(3)) }] };
+}
+
+export function buildLgMessengerQuickReplies(configs?: CanonicalMenuConfig[], more = false): InteractiveButton[] {
+  if (configs) {
+    const services = more ? configs.slice(3) : configs.slice(0, 3);
+    const buttons = services.map((config) => ({ id: serviceActionId(config.id), title: canonicalServiceLabel(config) }));
+    return !more && configs.length > 3 ? [...buttons, { id: "referral_menu:more", title: "Ver más servicios" }] : buttons;
+  }
   return [
     { id: serviceActionId(BUILT_IN_SERVICE_IDS.accident), title: "Accidentes" },
     { id: serviceActionId(BUILT_IN_SERVICE_IDS.immigration), title: "Inmigración" },
@@ -1015,6 +1063,7 @@ async function updateProfileFromInput(
   inboundText: string,
   channel: "messenger" | "whatsapp" = "whatsapp",
   payloadAction?: string | null,
+  menuConfigs?: CanonicalMenuConfig[],
 ): Promise<ReferralHubTurnResult> {
   const referralState = getReferralState(leadState);
   const nextState = {
@@ -1037,8 +1086,8 @@ async function updateProfileFromInput(
       reply: profileComplete
         ? `Listo, ${firstName(trimmed)}. ${LG_MENU_PROMPT}`
         : `Mucho gusto, ${firstName(trimmed)}. ¿En qué ciudad vives?`,
-      interactiveList: profileComplete && channel === "whatsapp" ? buildLgMenuList() : undefined,
-      interactiveButtons: profileComplete && channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
+      interactiveList: profileComplete && channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
+      interactiveButtons: profileComplete && channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
       statePatch: buildLgStatePatch(leadState, updated),
       debugNote: "referral_hub:lg_profile_name",
     };
@@ -1056,8 +1105,8 @@ async function updateProfileFromInput(
       const updated = { ...nextState, profile_city: city, current_field: null, profile_complete: true, pending_field_confirmation: null };
       return {
         reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
-        interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
-        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
+        interactiveList: channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
+        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
         statePatch: buildLgStatePatch(leadState, updated),
         debugNote: "referral_hub:lg_profile_city_confirmed",
       };
@@ -1090,8 +1139,8 @@ async function updateProfileFromInput(
       const updated = { ...nextState, profile_city: replacementResult.normalizedValue, current_field: null, profile_complete: true, pending_field_confirmation: null };
       return {
         reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
-        interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
-        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
+        interactiveList: channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
+        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
         statePatch: buildLgStatePatch(leadState, updated),
         debugNote: "referral_hub:lg_profile_city_corrected",
       };
@@ -1115,8 +1164,8 @@ async function updateProfileFromInput(
     const updated = { ...nextState, profile_city: interpretation.normalizedValue, current_field: null, profile_complete: true, pending_field_confirmation: null };
     return {
       reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
-      interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
-      interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
+      interactiveList: channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
+      interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
       statePatch: buildLgStatePatch(leadState, updated),
       debugNote: "referral_hub:lg_profile_city",
     };
@@ -1128,12 +1177,13 @@ function handleLgMenu(
   leadState: Json | null,
   channel: "messenger" | "whatsapp" = "whatsapp",
   reply = LG_MENU_PROMPT,
+  configs?: CanonicalMenuConfig[],
 ): ReferralHubTurnResult {
   const referralState = getReferralState(leadState);
   return {
     reply,
-    interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies() : undefined,
-    interactiveList: channel === "whatsapp" ? buildLgMenuList() : undefined,
+    interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(configs) : undefined,
+    interactiveList: channel === "whatsapp" ? buildLgMenuList(configs) : undefined,
     statePatch: buildLgStatePatch(leadState, {
       service_id: null,
       service_label: null,
@@ -1147,6 +1197,57 @@ function handleLgMenu(
     }),
     debugNote: "referral_hub:lg_menu",
   };
+}
+
+function handleLgMoreMenu(
+  leadState: Json | null,
+  channel: "messenger" | "whatsapp",
+  configs: CanonicalMenuConfig[],
+): ReferralHubTurnResult {
+  const referralState = getReferralState(leadState);
+  if (configs.length === 0) {
+    return {
+      reply: "Por el momento no hay servicios disponibles. Intenta nuevamente más tarde.",
+      interactiveButtons: continuationActions(),
+      statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: null, grocery: null }),
+      debugNote: "referral_hub:lg_menu_no_active_services",
+    };
+  }
+  return {
+    reply: "Más servicios disponibles",
+    interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(configs, true) : undefined,
+    interactiveList: channel === "whatsapp" ? buildLgMoreList(configs) : undefined,
+    statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: null, grocery: null }),
+    debugNote: "referral_hub:lg_menu_more",
+  };
+}
+
+async function loadCanonicalMenuConfigs(args: {
+  supabase?: SupabaseLike;
+  organizationId: string;
+  serviceConfigs?: ReferralHubServiceConfig[];
+}): Promise<CanonicalMenuConfig[] | null> {
+  const supportedIds = new Set(Object.values(BUILT_IN_SERVICE_IDS));
+  const normalize = (rows: ReferralHubServiceConfig[]) => {
+    const supported = rows.filter((config) => config.organization_id === args.organizationId && supportedIds.has(config.id as typeof BUILT_IN_SERVICE_IDS[keyof typeof BUILT_IN_SERVICE_IDS]));
+    return sortCanonicalMenuConfigs(supported.filter((config) => config.activo !== false));
+  };
+  if (args.serviceConfigs) return normalize(args.serviceConfigs);
+  if (!args.supabase || typeof args.supabase.from !== "function") return null;
+  try {
+    const { data, error } = await args.supabase.from("service_configs")
+      .select("id,nombre,menu_label,menu_orden,activo")
+      .eq("organization_id", args.organizationId)
+      .order("menu_orden", { ascending: true });
+    if (error || !Array.isArray(data) || data.length === 0) {
+      console.warn("[Referral Hub] Canonical menu configuration unavailable", { organizationId: args.organizationId, reason: safeStr(error?.message) || "empty" });
+      return null;
+    }
+    return normalize(data as ReferralHubServiceConfig[]);
+  } catch (error) {
+    console.warn("[Referral Hub] Canonical menu configuration unavailable", { organizationId: args.organizationId, reason: error instanceof Error ? error.message : "unknown" });
+    return null;
+  }
 }
 
 const TRANSIENT_SERVICE_FIELDS = new Set([
@@ -1601,6 +1702,7 @@ async function continueLgServiceFlow(
   inboundText: string,
   timezone = "America/New_York",
   payloadAction?: string | null,
+  menuConfigs?: CanonicalMenuConfig[],
 ): Promise<ReferralHubTurnResult> {
   const referralState = getReferralState(leadState);
   const currentField = safeStr(referralState.current_field).trim();
@@ -1623,7 +1725,7 @@ async function continueLgServiceFlow(
     }
     if (rejected) {
       return {
-        ...handleLgMenu(leadState),
+        ...handleLgMenu(leadState, "whatsapp", LG_MENU_PROMPT, menuConfigs),
         reply: "No enviamos la solicitud. ¿En qué más podemos ayudarte?",
         debugNote: "referral_hub:submission_cancelled",
       };
@@ -1830,6 +1932,17 @@ export async function handleReferralHubTurn(args: {
   if (isLgTenant) {
     const action = normalizedAction(args.payloadAction);
     const groceryIntent = action || normalizeText(args.inboundText);
+    let canonicalMenuConfigs: CanonicalMenuConfig[] | null | undefined;
+    const getCanonicalMenuConfigs = async () => {
+      if (canonicalMenuConfigs === undefined) canonicalMenuConfigs = await loadCanonicalMenuConfigs(args);
+      return canonicalMenuConfigs;
+    };
+    const canonicalMenu = async (reply = LG_MENU_PROMPT) => {
+      const configs = await getCanonicalMenuConfigs();
+      return configs?.length === 0
+        ? handleLgMoreMenu(args.leadState, args.channel ?? "whatsapp", configs)
+        : handleLgMenu(args.leadState, args.channel, reply, configs ?? undefined);
+    };
     if (
       action === "referral_grocery:entry" ||
       action === `referral_service:${BUILT_IN_SERVICE_IDS.grocery}`
@@ -1881,10 +1994,14 @@ export async function handleReferralHubTurn(args: {
       };
     }
     if (action === "referral_menu:services") {
-      return handleLgMenu(args.leadState, args.channel);
+      return await canonicalMenu();
     }
     if (action === "referral_menu:main") {
-      return handleLgMenu(args.leadState, args.channel, "Claro. ¿En qué podemos ayudarte?");
+      return await canonicalMenu("Claro. ¿En qué podemos ayudarte?");
+    }
+    if (action === "referral_menu:more") {
+      const configs = await getCanonicalMenuConfigs();
+      return configs ? handleLgMoreMenu(args.leadState, args.channel ?? "whatsapp", configs) : await canonicalMenu();
     }
     if (action === "referral_menu:my_coupons") {
       return await activeCouponsResult(args);
@@ -1930,10 +2047,10 @@ export async function handleReferralHubTurn(args: {
     }
     if (!safeStr(referralState.profile_name).trim() || !safeStr(referralState.profile_city).trim()) {
       if (safeStr(referralState.current_field).trim() === "profile_name") {
-        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction);
+        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction, (await getCanonicalMenuConfigs()) ?? undefined);
       }
       if (safeStr(referralState.current_field).trim() === "profile_city") {
-        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction);
+        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction, (await getCanonicalMenuConfigs()) ?? undefined);
       }
       if (!safeStr(referralState.profile_name).trim() && !safeStr(referralState.profile_city).trim()) {
         return startLgProfileFlow(args.leadState);
@@ -1944,7 +2061,7 @@ export async function handleReferralHubTurn(args: {
     }
 
     if (shouldResetMenu(args.inboundText) && !isReturningEntry(args.inboundText)) {
-      return handleLgMenu(args.leadState, args.channel);
+      return await canonicalMenu();
     }
 
     const selectedPayloadServiceId = safeStr(args.payloadAction).trim()
@@ -1962,7 +2079,7 @@ export async function handleReferralHubTurn(args: {
     }
 
     if (safeStr(referralState.current_field).trim()) {
-      return continueLgServiceFlow(args.leadState, args.inboundText, args.timezone, args.payloadAction);
+      return continueLgServiceFlow(args.leadState, args.inboundText, args.timezone, args.payloadAction, (await getCanonicalMenuConfigs()) ?? undefined);
     }
 
     const selectedTextServiceId = resolveServiceIdFromInput(args.inboundText);
@@ -1978,17 +2095,15 @@ export async function handleReferralHubTurn(args: {
     }
 
     if (isReturningEntry(args.inboundText)) {
-      return handleLgMenu(
-        args.leadState,
-        args.channel,
+      return await canonicalMenu(
         `Hola de nuevo, ${firstName(safeStr(referralState.profile_name))}. ¿En qué podemos ayudarte hoy?`,
       );
     }
     if (!safeStr(args.inboundText).trim()) {
-      return handleLgMenu(args.leadState, args.channel);
+      return await canonicalMenu();
     }
 
-    return handleLgMenu(args.leadState, args.channel);
+    return await canonicalMenu();
   }
 
   const configs = args.serviceConfigs ??
