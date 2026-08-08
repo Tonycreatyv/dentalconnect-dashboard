@@ -1191,6 +1191,57 @@ function couponNextActions(): InteractiveButton[] {
   return continuationActions();
 }
 
+function groceryEntryActions(): InteractiveButton[] {
+  return [
+    { id: "referral_grocery:coupon", title: "Quiero mi cupón" },
+    { id: "referral_grocery:baskets", title: "Ver las canastas" },
+  ];
+}
+
+function groceryCouponUpsellActions(): InteractiveButton[] {
+  return [
+    { id: "referral_grocery:baskets", title: "Sí, ver las canastas" },
+    { id: "referral_grocery:coupon_only", title: "No, ya tengo mi cupón" },
+  ];
+}
+
+function groceryEntryResult(
+  leadState: Json | null,
+  serviceId: string = BUILT_IN_SERVICE_IDS.grocery,
+): ReferralHubTurnResult {
+  const referralState = getReferralState(leadState);
+  return {
+    reply: "¡Hola! 👋 Llegaste al lugar correcto.\n\nPuedes recibir tu cupón de $20 para supermercado o ver nuestras canastas ya preparadas con delivery, con los precios y la cobertura disponibles. Si eliges una canasta, primero te pediremos el código postal.\n\n¿Qué quieres hacer hoy?",
+    interactiveButtons: groceryEntryActions(),
+    statePatch: buildLgStatePatch(leadState, {
+      ...referralState,
+      service_id: serviceId,
+      service_label: serviceLabelFromId(serviceId),
+      current_field: null,
+      grocery: null,
+    }),
+    debugNote: "referral_hub:grocery_entry",
+  };
+}
+
+function startDurableGroceryResult(leadState: Json | null): ReferralHubTurnResult {
+  const referralState = getReferralState(leadState);
+  const turn = startWhatsAppGrocery({ customerName: referralState.profile_name });
+  return {
+    reply: turn.reply,
+    interactiveList: turn.interactiveList,
+    interactiveButtons: turn.interactiveButtons,
+    statePatch: buildLgStatePatch(leadState, {
+      ...referralState,
+      service_id: BUILT_IN_SERVICE_IDS.grocery,
+      service_label: "Compras supermercado",
+      current_field: null,
+      grocery: turn.grocery,
+    }),
+    debugNote: turn.debugNote,
+  };
+}
+
 async function activeCouponsResult(args: {
   supabase?: SupabaseLike;
   organizationId: string;
@@ -1340,13 +1391,19 @@ async function buildPersistentCouponReply(args: {
       if (tracking.error) return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_issue_failed");
     }
     const referralState = getReferralState(args.leadState);
+    const groceryCouponUpsell = args.serviceId === BUILT_IN_SERVICE_IDS.supermarketCoupon &&
+      args.channel === "whatsapp";
     return {
-      reply: `Código: ${coupon.code}\n\n${asset.instructions}`,
+      reply: groceryCouponUpsell
+        ? `Listo. Tu cupón ya está listo. 🎟️\n\nCódigo: ${coupon.code}\n${asset.instructions}\n\nYa que vas a comprar… ¿quieres ahorrarte también el viaje?\n\nTenemos canastas ya preparadas con productos seleccionados. Puedes ver qué incluye cada una, elegir la que más te convenga y coordinamos el delivery.`
+        : `Código: ${coupon.code}\n\n${asset.instructions}`,
       outboundMessages: [
         { type: "text", text: asset.intro_text },
         { type: "image", url: asset.image_url, altText: "Imagen del cupón", reusable: true },
       ],
-      interactiveButtons: couponNextActions(),
+      interactiveButtons: groceryCouponUpsell
+        ? groceryCouponUpsellActions()
+        : couponNextActions(),
       statePatch: buildLgStatePatch(args.leadState, {
         ...referralState,
         service_id: args.serviceId,
@@ -1467,43 +1524,10 @@ async function buildServiceReply(
         }),
         debugNote: "referral_hub:service_medical_coupon",
       };
-    case BUILT_IN_SERVICE_IDS.supermarketCoupon: {
-      const pantryResult = handlePantryDemoTurn({
-        leadState,
-        inboundText: "quiero mi cupón",
-        payloadAction: `referral_service:${BUILT_IN_SERVICE_IDS.supermarketCoupon}`,
-      });
-      return {
-        ...pantryResult,
-        reply: "Recibe un cupón de $20 para tu próxima compra en un supermercado participante.\n\n" + pantryResult.reply,
-        statePatch: {
-          ...pantryResult.statePatch,
-          collected: mergeReferralState(leadState, {
-            ...(getReferralState(leadState)),
-            service_id: BUILT_IN_SERVICE_IDS.supermarketCoupon,
-            service_label: "Cupón supermercado",
-            current_field: null,
-            extracted_data: { ...preservedData, service: "coupon_supermercado" },
-            profile_name: referralState.profile_name ?? null,
-            profile_city: referralState.profile_city ?? null,
-            profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
-            stop_requested: referralState.stop_requested ?? false,
-            food_option: referralState.food_option ?? null,
-            grocery: null,
-          }),
-        },
-        leadPatch: {
-          service_id: BUILT_IN_SERVICE_IDS.supermarketCoupon,
-          extracted_data: { ...(getReferralState(leadState).extracted_data ?? {}), service: "coupon_supermercado" },
-          status: "contacted",
-        },
-        debugNote: "referral_hub:service_supermarket_coupon",
-      };
-    }
-    case BUILT_IN_SERVICE_IDS.grocery: {
-      const turn = startWhatsAppGrocery();
-      return { reply: turn.reply, interactiveList: turn.interactiveList, interactiveButtons: turn.interactiveButtons, statePatch: buildLgStatePatch(leadState, { ...statePatchBase, service_id: BUILT_IN_SERVICE_IDS.grocery, service_label: "Compras supermercado", current_field: null, grocery: turn.grocery }), debugNote: turn.debugNote };
-    }
+    case BUILT_IN_SERVICE_IDS.supermarketCoupon:
+      return groceryEntryResult(leadState, serviceId);
+    case BUILT_IN_SERVICE_IDS.grocery:
+      return groceryEntryResult(leadState, serviceId);
     case BUILT_IN_SERVICE_IDS.dentalCoupon:
       return {
         reply: "Cupón de clínica dental por $29 que incluye:\n• consulta\n• limpieza\n• rayos X.\n\nOferta sujeta a disponibilidad y a los términos de la clínica participante.",
@@ -1805,6 +1829,37 @@ export async function handleReferralHubTurn(args: {
 
   if (isLgTenant) {
     const action = normalizedAction(args.payloadAction);
+    const groceryIntent = action || normalizeText(args.inboundText);
+    if (
+      action === "referral_grocery:entry" ||
+      action === `referral_service:${BUILT_IN_SERVICE_IDS.grocery}`
+    ) {
+      return groceryEntryResult(args.leadState);
+    }
+    if (action === "referral_grocery:coupon") {
+      return await buildServiceReply(BUILT_IN_SERVICE_IDS.supermarketCoupon, args.leadState, {
+        channel: args.channel,
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        couponAssets: args.couponAssets,
+        integrations: args.integrations,
+      });
+    }
+    if (
+      action === "referral_grocery:baskets" ||
+      groceryIntent === "ver las canastas"
+    ) {
+      return startDurableGroceryResult(args.leadState);
+    }
+    if (action === "referral_grocery:coupon_only") {
+      return {
+        reply: "Perfecto. Tu cupón queda listo para usar cuando vayas a pagar.",
+        interactiveButtons: continuationActions(),
+        statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+        debugNote: "referral_hub:grocery_coupon_only",
+      };
+    }
     if (action === "referral_event:follow_up") {
       return {
         reply: LG_ACCIDENT_HANDOFF_FAILURE,
@@ -1868,6 +1923,11 @@ export async function handleReferralHubTurn(args: {
         debugNote: "referral_hub:change_city",
       };
     }
+    const groceryState = groceryStateFromReferral(referralState.grocery);
+    if (groceryState && groceryState.step !== "complete" && !safeStr(args.payloadAction).includes("referral_service:") && args.channel === "whatsapp" && args.supabase?.rpc && args.leadId && args.channelUserId) {
+      const turn = await continueWhatsAppGrocery({ supabase: args.supabase as SupabaseLike & { rpc: NonNullable<SupabaseLike["rpc"]> }, state: groceryState, inboundText: args.inboundText, payloadAction: args.payloadAction, leadId: args.leadId, channelUserId: args.channelUserId });
+      return { reply: turn.reply, interactiveList: turn.interactiveList, interactiveButtons: turn.interactiveButtons, statePatch: buildLgStatePatch(args.leadState, { ...referralState, service_id: BUILT_IN_SERVICE_IDS.grocery, service_label: "Compras supermercado", current_field: null, grocery: turn.grocery }), debugNote: turn.debugNote };
+    }
     if (!safeStr(referralState.profile_name).trim() || !safeStr(referralState.profile_city).trim()) {
       if (safeStr(referralState.current_field).trim() === "profile_name") {
         return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction);
@@ -1885,12 +1945,6 @@ export async function handleReferralHubTurn(args: {
 
     if (shouldResetMenu(args.inboundText) && !isReturningEntry(args.inboundText)) {
       return handleLgMenu(args.leadState, args.channel);
-    }
-
-    const groceryState = groceryStateFromReferral(referralState.grocery);
-    if (groceryState && groceryState.step !== "complete" && !safeStr(args.payloadAction).includes("referral_service:") && args.channel === "whatsapp" && args.supabase?.rpc && args.leadId && args.channelUserId) {
-      const turn = await continueWhatsAppGrocery({ supabase: args.supabase as SupabaseLike & { rpc: NonNullable<SupabaseLike["rpc"]> }, state: groceryState, inboundText: args.inboundText, payloadAction: args.payloadAction, leadId: args.leadId, channelUserId: args.channelUserId });
-      return { reply: turn.reply, interactiveList: turn.interactiveList, interactiveButtons: turn.interactiveButtons, statePatch: buildLgStatePatch(args.leadState, { ...referralState, service_id: BUILT_IN_SERVICE_IDS.grocery, service_label: "Compras supermercado", current_field: null, grocery: turn.grocery }), debugNote: turn.debugNote };
     }
 
     const selectedPayloadServiceId = safeStr(args.payloadAction).trim()

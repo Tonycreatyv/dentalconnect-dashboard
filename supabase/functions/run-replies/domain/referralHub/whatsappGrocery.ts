@@ -13,8 +13,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const clean = (value: unknown, max = 500) => typeof value === "string" && value.trim().length <= max ? value.trim().replace(/\s+/g, " ") : "";
 const money = (cents: unknown, currency = "USD") => new Intl.NumberFormat("es-US", { style: "currency", currency }).format(Number(cents) / 100);
 
-export function startWhatsAppGrocery(): GroceryTurn {
-  return { reply: "Vamos a preparar una compra de supermercado con los precios y la cobertura disponibles. ¿Cuál es el código postal de entrega?", grocery: { step: "zip", idempotencyKey: `whatsapp-grocery:${crypto.randomUUID()}` }, debugNote: "referral_hub:grocery_zip" };
+export function startWhatsAppGrocery(args?: { customerName?: string | null }): GroceryTurn {
+  const customerName = clean(args?.customerName, 120);
+  return {
+    reply: "Estas canastas ya vienen preparadas para hacerlo rápido y sencillo. Son opciones fijas y no se personalizan; puedes ver qué incluye cada una y elegir la que mejor te convenga.\n\nPrimero, ¿cuál es el código postal de entrega?",
+    grocery: {
+      step: "zip",
+      ...(customerName ? { customerName } : {}),
+      idempotencyKey: `whatsapp-grocery:${crypto.randomUUID()}`,
+    },
+    debugNote: "referral_hub:grocery_zip",
+  };
 }
 
 function failure(state: GroceryState, reply: string, note: string): GroceryTurn { return { reply, grocery: state, debugNote: note }; }
@@ -35,14 +44,16 @@ export async function continueWhatsAppGrocery(args: { supabase: SupabaseLike; st
     if (locations.error || !location) return failure(state, "No hay una sucursal activa disponible para ese código postal.", "referral_hub:grocery_location_unavailable");
     const locationId = clean(location.id); const offers = await supabase.from("referral_basket_offers").select("id,display_name,price_cents,currency").eq("organization_id", ORGANIZATION_ID).eq("partner_location_id", locationId).eq("active", true).order("price_cents", { ascending: true });
     if (offers.error || !(offers.data ?? []).length) return failure(state, "No hay canastas activas disponibles para esa sucursal.", "referral_hub:grocery_offers_unavailable");
-    return { reply: "Selecciona la compra que prefieres:", grocery: { ...state, step: "offer", postalCode, locationId, locationName: clean(location.name) }, interactiveList: { body: "Compras disponibles con precio actual:", buttonText: "Ver compras", sections: [{ title: clean(location.name, 24) || "Sucursal", rows: (offers.data ?? []).map((offer: Json) => ({ id: `grocery_offer:${clean(offer.id)}`, title: clean(offer.display_name, 24), description: money(offer.price_cents, clean(offer.currency) || "USD") })) }] }, debugNote: "referral_hub:grocery_offers" };
+    return { reply: "Elige la canasta ya preparada que mejor te convenga:", grocery: { ...state, step: "offer", postalCode, locationId, locationName: clean(location.name) }, interactiveList: { body: "Canastas preparadas con precio actual:", buttonText: "Ver canastas", sections: [{ title: clean(location.name, 24) || "Sucursal", rows: (offers.data ?? []).map((offer: Json) => ({ id: `grocery_offer:${clean(offer.id)}`, title: clean(offer.display_name, 24), description: money(offer.price_cents, clean(offer.currency) || "USD") })) }] }, debugNote: "referral_hub:grocery_offers" };
   }
   if (state.step === "offer") {
     const offerId = (action.match(/^grocery_offer:([0-9a-f-]+)$/i)?.[1] ?? "");
     if (!UUID.test(offerId) || !state.locationId) return failure(state, "Selecciona una compra de la lista.", "referral_hub:grocery_offer_retry");
     const offer = await supabase.from("referral_basket_offers").select("id,display_name,partner_location_id,active").eq("organization_id", ORGANIZATION_ID).eq("id", offerId).eq("partner_location_id", state.locationId).eq("active", true).maybeSingle();
     if (offer.error || !offer.data) return failure(state, "Esa compra ya no está disponible. Selecciona otra opción.", "referral_hub:grocery_offer_invalid");
-    return { reply: "¿Cuál es el nombre de la persona que recibirá el pedido?", grocery: { ...state, step: "name", offerId, offerName: clean(offer.data.display_name) }, debugNote: "referral_hub:grocery_name" };
+    return state.customerName
+      ? { reply: "¿Cuál es la dirección de entrega?", grocery: { ...state, step: "address", offerId, offerName: clean(offer.data.display_name) }, debugNote: "referral_hub:grocery_address" }
+      : { reply: "¿Cuál es el nombre de la persona que recibirá el pedido?", grocery: { ...state, step: "name", offerId, offerName: clean(offer.data.display_name) }, debugNote: "referral_hub:grocery_name" };
   }
   if (state.step === "name") return value.length < 2 ? failure(state, "Escribe un nombre válido.", "referral_hub:grocery_name_retry") : { reply: "¿Cuál es la dirección de entrega?", grocery: { ...state, step: "address", customerName: value }, debugNote: "referral_hub:grocery_address" };
   if (state.step === "address") return value.length < 5 ? failure(state, "Escribe una dirección completa.", "referral_hub:grocery_address_retry") : { reply: "¿Cuál es la ciudad?", grocery: { ...state, step: "city", address: value }, debugNote: "referral_hub:grocery_city" };
