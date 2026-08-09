@@ -8,6 +8,10 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createMetaEmbeddedSignupAttempt } from "../lib/metaEmbeddedSignupAttempt";
 import { supabase } from "../lib/supabaseClient";
+import {
+  deriveWhatsAppConnectionStatus,
+  type WhatsAppConnectionStatus,
+} from "../lib/whatsappConnectionState";
 
 const PUBLIC_APP_URL = import.meta.env.VITE_PUBLIC_APP_URL;
 const FB_APP_ID = import.meta.env.VITE_META_APP_ID;
@@ -16,26 +20,22 @@ const FB_SDK_VERSION = "v21.0";
 
 type ConnectionStatus =
   | "loading"
-  | "disconnected"
   | "connecting"
-  | "pending_verification"
-  | "connected"
-  | "error_registration"
-  | "error_webhook"
-  | "token_expired"
-  | "error";
+  | "error"
+  | WhatsAppConnectionStatus;
 type Props = {
   organizationId: string;
   onConnected?: () => void;
   businessType?: "dental" | "barbershop" | "referral_hub";
+  canManage?: boolean;
 };
 type StatusRow = {
-  whatsapp_enabled?: boolean;
+  whatsapp_enabled?: boolean | null;
   whatsapp_phone_number?: string | null;
   whatsapp_display_name?: string | null;
   whatsapp_phone_number_id?: string | null;
-  whatsapp_registered?: boolean;
-  whatsapp_webhooks_subscribed?: boolean;
+  whatsapp_registered?: boolean | null;
+  whatsapp_webhooks_subscribed?: boolean | null;
   whatsapp_token_expires_at?: string | null;
 };
 type SafeFunctionFailure = {
@@ -83,17 +83,6 @@ function loadFacebookSDK() {
     script.onerror = () => reject(new Error("sdk_load_failed"));
     document.body.appendChild(script);
   });
-}
-
-function deriveStatus(row: StatusRow | null): ConnectionStatus {
-  if (!row?.whatsapp_phone_number_id) return "disconnected";
-  if (
-    row.whatsapp_token_expires_at &&
-    new Date(row.whatsapp_token_expires_at).getTime() <= Date.now()
-  ) return "token_expired";
-  if (!row.whatsapp_registered) return "error_registration";
-  if (!row.whatsapp_webhooks_subscribed) return "error_webhook";
-  return row.whatsapp_enabled ? "connected" : "pending_verification";
 }
 
 const LABELS: Record<ConnectionStatus, string> = {
@@ -191,7 +180,7 @@ function reportSafeFailure(
 }
 
 export default function WhatsAppConnect(
-  { organizationId, onConnected, businessType = "dental" }: Props,
+  { organizationId, onConnected, businessType = "dental", canManage = true }: Props,
 ) {
   const [status, setStatus] = useState<ConnectionStatus>("loading");
   const [row, setRow] = useState<StatusRow | null>(null);
@@ -211,21 +200,34 @@ export default function WhatsAppConnect(
     }
     const next = (result.data ?? null) as StatusRow | null;
     setRow(next);
-    setStatus(deriveStatus(next));
+    setStatus(deriveWhatsAppConnectionStatus(next));
   }, [organizationId]);
 
-  useEffect(() => {
-    void loadStatus();
-    void loadFacebookSDK().then(() => setSdkReady(true)).catch((sdkError) => {
-      setStatus("error");
+  const loadSdk = useCallback(async () => {
+    setSdkReady(false);
+    try {
+      await loadFacebookSDK();
+      setSdkReady(true);
+    } catch (sdkError) {
       setError(
         sdkError instanceof Error &&
           sdkError.message === "missing_signup_configuration"
           ? "Falta configurar Meta Embedded Signup para este entorno."
           : "No se pudo cargar Meta Embedded Signup.",
       );
-    });
-  }, [loadStatus]);
+    }
+  }, []);
+
+  const retry = useCallback(() => {
+    setError("");
+    void loadStatus();
+    void loadSdk();
+  }, [loadSdk, loadStatus]);
+
+  useEffect(() => {
+    void loadStatus();
+    void loadSdk();
+  }, [loadSdk, loadStatus]);
   useEffect(() => () => {
     cancelActiveAttempt.current?.();
     cancelActiveAttempt.current = null;
@@ -300,7 +302,7 @@ export default function WhatsAppConnect(
   );
 
   const connect = useCallback(async () => {
-    if (!sdkReady || connecting.current) return;
+    if (!canManage || !sdkReady || connecting.current) return;
     const replaceExisting = Boolean(row?.whatsapp_phone_number_id);
     if (
       replaceExisting &&
@@ -371,7 +373,7 @@ export default function WhatsAppConnect(
         if (result === "cancel") {
           cleanup();
           connecting.current = false;
-          setStatus(deriveStatus(row));
+          setStatus(deriveWhatsAppConnectionStatus(row));
           setError("Conexión cancelada.");
         } else if (result === "invalid_finish") {
           failAttempt(
@@ -390,7 +392,7 @@ export default function WhatsAppConnect(
         if (response.status !== "connected" || !response.authResponse?.code) {
           cleanup();
           connecting.current = false;
-          setStatus(deriveStatus(row));
+          setStatus(deriveWhatsAppConnectionStatus(row));
           setError("Conexión cancelada o no autorizada.");
           return;
         }
@@ -410,7 +412,7 @@ export default function WhatsAppConnect(
     } catch {
       failAttempt("No se pudo abrir Meta Embedded Signup.");
     }
-  }, [exchange, row, sdkReady]);
+  }, [canManage, exchange, row, sdkReady]);
 
   return (
     <div className="rounded-lg border border-[#272a30] bg-[#101114] p-4">
@@ -447,21 +449,29 @@ export default function WhatsAppConnect(
           </p>
         )
         : null}
+      {!canManage && status !== "connected"
+        ? <p className="mt-3 text-xs text-[#7E8C99]">Solo un propietario o administrador puede conectar WhatsApp.</p>
+        : null}
       {status !== "connected"
         ? (
-          <button
-            type="button"
-            disabled={!sdkReady || status === "connecting" ||
-              status === "loading"}
-            onClick={() => void connect()}
-            className="mt-4 min-h-11 w-full rounded-xl bg-[#25D366] px-4 text-sm font-bold text-white disabled:opacity-50"
-          >
-            {status === "connecting"
-              ? "Conectando…"
-              : row?.whatsapp_phone_number_id
-              ? "Reconectar WhatsApp"
-              : "Conectar WhatsApp"}
-          </button>
+          <div className="mt-4 grid gap-2">
+            <button
+              type="button"
+              disabled={!canManage || !sdkReady || status === "connecting" ||
+                status === "loading"}
+              onClick={() => void connect()}
+              className="min-h-11 w-full rounded-xl bg-[#25D366] px-4 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {status === "connecting"
+                ? "Conectando…"
+                : row?.whatsapp_phone_number_id
+                ? "Reconectar WhatsApp"
+                : "Conectar WhatsApp"}
+            </button>
+            {error
+              ? <button type="button" onClick={retry} className="min-h-10 rounded-xl border border-[#3B424C] px-4 text-sm font-semibold text-[#DCE5EF]">Reintentar</button>
+              : null}
+          </div>
         )
         : (
           <p className="mt-3 text-xs text-[#7E8C99]">
