@@ -1,4 +1,4 @@
-import { ArrowLeft, Cable, ChevronRight, LogOut, MapPinned, Package, Settings, ShoppingBasket, Store, Tag } from "lucide-react";
+import { ArrowLeft, Cable, ChevronRight, LogOut, MapPinned, Package, QrCode, Settings, ShoppingBasket, Store, Tag } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 
@@ -8,6 +8,7 @@ const menu = [
   { to: "/coupons", label: "Cupones", icon: Tag },
   { to: "/baskets", label: "Canastas", icon: ShoppingBasket },
   { to: "/coverage", label: "Cobertura", icon: MapPinned },
+  { to: "/qr-campaigns", label: "QR y campañas", icon: QrCode },
   { to: "/integrations", label: "Integraciones", icon: Cable },
   { to: "/settings#account", label: "Configuración", icon: Settings },
 ] as const;

@@ -11,6 +11,8 @@ import ReferralServices from "./pages/ReferralServices";
 import ReferralServiceDetail from "./pages/ReferralServiceDetail";
 import ReferralIntegrations from "./pages/ReferralIntegrations";
 import ReferralSettings from "./pages/ReferralSettings";
+import ReferralQrCampaigns from "./pages/ReferralQrCampaigns";
+import ReferralQrEntry from "./pages/ReferralQrEntry";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { AlliesScreen, AllyDetailScreen, ConversationScreen, HomeScreen, InboxScreen, NetworkScreen, OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, CouponsScreen, CoverageLocationScreen, CoverageScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
@@ -26,6 +28,7 @@ function ProductRoutes() {
     <Route path="/login" element={<ReferralLogin />} />
     <Route path="/auth/meta/callback" element={<RequireAuth><MetaCallback /></RequireAuth>} />
     <Route path="/coupon/:publicToken" element={<PublicCoupon />} />
+    <Route path="/q/:publicCode" element={<ReferralQrEntry />} />
     <Route path="/partner/:token" element={<PartnerPortal />} />
     <Route path="/" element={<RequireAuth><BoltShell /></RequireAuth>}>
       <Route index element={<HomeScreen />} />
@@ -58,6 +61,7 @@ function ProductRoutes() {
       <Route path="coverage/:locationId" element={<CoverageLocationScreen />} />
       <Route path="catalog" element={<CatalogScreen />} />
       <Route path="integrations" element={<ReferralIntegrations />} />
+      <Route path="qr-campaigns" element={<ReferralQrCampaigns />} />
       <Route path="settings" element={<ReferralSettings />} />
       <Route path="attention" element={<Navigate to="/work" replace />} />
       <Route path="opportunities" element={<Navigate to="/work?tab=seguimiento" replace />} />

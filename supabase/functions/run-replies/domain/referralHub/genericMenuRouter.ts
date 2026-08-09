@@ -18,6 +18,12 @@ import {
   REFERRAL_HUB_COUPON_ASSETS,
   type ReferralHubCouponAssetConfig,
 } from "../../../_products/referral-hub/config.ts";
+import {
+  extractReferralQrPublicCode,
+  qrLeadAttribution,
+  resolveReferralQrEntry,
+  type ResolvedReferralQrEntry,
+} from "../../../_products/referral-hub/qrEntries.ts";
 import { LG_ACCIDENT_HANDOFF_FAILURE } from "./accidentHandoff.ts";
 import { interpretAccidentDate, interpretCity, type FieldInterpretation } from "./fieldInterpreter.ts";
 import { continueWhatsAppGrocery, groceryStateFromReferral, startWhatsAppGrocery } from "./whatsappGrocery.ts";
@@ -1327,7 +1333,11 @@ function groceryEntryResult(
 
 function startDurableGroceryResult(leadState: Json | null): ReferralHubTurnResult {
   const referralState = getReferralState(leadState);
-  const turn = startWhatsAppGrocery({ customerName: referralState.profile_name });
+  const qrEntry = referralState.extracted_data?.qr_entry;
+  const sourceCampaign = qrEntry && typeof qrEntry === "object"
+    ? safeStr((qrEntry as Json).campaign_key).trim()
+    : "";
+  const turn = startWhatsAppGrocery({ customerName: referralState.profile_name, sourceCampaign });
   return {
     reply: turn.reply,
     interactiveList: turn.interactiveList,
@@ -1449,8 +1459,10 @@ async function buildPersistentCouponReply(args: {
   couponAssets: Record<string, ReferralHubCouponAssetConfig>;
   couponDeliveryEnabled: boolean;
   channel: "messenger" | "whatsapp";
+  campaignKey?: string;
 }): Promise<ReferralHubTurnResult> {
   const asset = args.couponAssets[args.serviceId];
+  const campaignKey = safeStr(args.campaignKey).trim() || asset?.campaign_key || "";
   console.log(JSON.stringify({
     event: "referral_hub_coupon_delivery_decision",
     organization_id: args.organizationId,
@@ -1481,14 +1493,14 @@ async function buildPersistentCouponReply(args: {
       supabase: args.supabase as Parameters<typeof issueOrGetCoupon>[0]["supabase"],
       organizationId: args.organizationId,
       leadId: safeStr(args.leadId),
-      campaignKey: asset.campaign_key,
+      campaignKey,
     });
     if (!safeStr(coupon.code)) {
       return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_campaign_missing");
     }
     if (args.channel === "whatsapp") {
       const identity = await sha256(`${args.organizationId}:${safeStr(args.leadId)}`);
-      const tracking = await args.supabase.from("referral_coupon_delivery_events").upsert({ organization_id: args.organizationId, conversation_identity_hash: identity, service_id: args.serviceId, campaign_key: asset.campaign_key, channel: "whatsapp", prepared_at: new Date().toISOString(), delivered_at: null, metadata: { coupon_id: coupon.id, status: "prepared" }, updated_at: new Date().toISOString() }, { onConflict: "organization_id,conversation_identity_hash,service_id,campaign_key,channel" });
+      const tracking = await args.supabase.from("referral_coupon_delivery_events").upsert({ organization_id: args.organizationId, conversation_identity_hash: identity, service_id: args.serviceId, campaign_key: campaignKey, channel: "whatsapp", prepared_at: new Date().toISOString(), delivered_at: null, metadata: { coupon_id: coupon.id, status: "prepared" }, updated_at: new Date().toISOString() }, { onConflict: "organization_id,conversation_identity_hash,service_id,campaign_key,channel" });
       if (tracking.error) return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_issue_failed");
     }
     const referralState = getReferralState(args.leadState);
@@ -1531,7 +1543,7 @@ async function buildPersistentCouponReply(args: {
         object_name: error.objectName,
         organization_id: args.organizationId,
         service_id: args.serviceId,
-        campaign_key: asset.campaign_key,
+        campaign_key: campaignKey,
       }));
     }
     return failedCouponDeliveryResult(
@@ -1552,6 +1564,7 @@ async function buildServiceReply(
     leadId?: string;
     couponAssets?: Record<string, ReferralHubCouponAssetConfig>;
     integrations?: Record<string, unknown>;
+    campaignKey?: string;
   },
 ): Promise<ReferralHubTurnResult> {
   if (
@@ -1579,6 +1592,7 @@ async function buildServiceReply(
       couponAssets: context.couponAssets ?? REFERRAL_HUB_COUPON_ASSETS,
       couponDeliveryEnabled: resolveLgCouponDeliveryEnabled(context.integrations),
       channel: context.channel,
+      campaignKey: context.campaignKey,
     });
   }
   const referralState = getReferralState(leadState);
@@ -1893,6 +1907,52 @@ async function continueLgServiceFlow(
   );
 }
 
+function stateWithQrAttribution(leadState: Json | null, entry: ResolvedReferralQrEntry): Json {
+  const referralState = getReferralState(leadState);
+  return buildLgStatePatch(leadState, {
+    ...referralState,
+    extracted_data: { ...(referralState.extracted_data ?? {}), qr_entry: qrLeadAttribution(entry) },
+  });
+}
+
+function withQrAttribution(result: ReferralHubTurnResult, entry: ResolvedReferralQrEntry): ReferralHubTurnResult {
+  const leadPatch = result.leadPatch && typeof result.leadPatch === "object" ? result.leadPatch : {};
+  const extractedData = leadPatch.extracted_data && typeof leadPatch.extracted_data === "object"
+    ? leadPatch.extracted_data as Json
+    : {};
+  return {
+    ...result,
+    leadPatch: {
+      ...leadPatch,
+      extracted_data: { ...extractedData, qr_entry: qrLeadAttribution(entry) },
+      ...(entry.campaignKey ? { source_campaign: entry.campaignKey } : {}),
+    },
+  };
+}
+
+async function recordQrAttribution(args: {
+  supabase?: SupabaseLike;
+  organizationId: string;
+  leadId?: string;
+  entry: ResolvedReferralQrEntry;
+}) {
+  if (!args.supabase?.from || !safeStr(args.leadId).trim()) return;
+  try {
+    const events = args.supabase.from("lead_events");
+    if (typeof events?.insert !== "function") return;
+    await events.insert({
+      organization_id: args.organizationId,
+      lead_id: args.leadId,
+      event_type: "referral_qr_entry_resolved",
+      payload: qrLeadAttribution(args.entry),
+    });
+  } catch (error) {
+    console.warn("[Referral Hub] QR attribution event was not recorded", {
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+  }
+}
+
 export async function handleReferralHubTurn(args: {
   supabase?: SupabaseLike;
   organizationId: string;
@@ -1937,12 +1997,37 @@ export async function handleReferralHubTurn(args: {
       if (canonicalMenuConfigs === undefined) canonicalMenuConfigs = await loadCanonicalMenuConfigs(args);
       return canonicalMenuConfigs;
     };
-    const canonicalMenu = async (reply = LG_MENU_PROMPT) => {
+    const canonicalMenu = async (reply = LG_MENU_PROMPT, leadState = args.leadState) => {
       const configs = await getCanonicalMenuConfigs();
       return configs?.length === 0
-        ? handleLgMoreMenu(args.leadState, args.channel ?? "whatsapp", configs)
-        : handleLgMenu(args.leadState, args.channel, reply, configs ?? undefined);
+        ? handleLgMoreMenu(leadState, args.channel ?? "whatsapp", configs)
+        : handleLgMenu(leadState, args.channel, reply, configs ?? undefined);
     };
+    const qrPublicCode = extractReferralQrPublicCode(args.inboundText);
+    if (qrPublicCode && args.supabase?.from) {
+      const qrEntry = await resolveReferralQrEntry(args.supabase, qrPublicCode);
+      if (qrEntry && qrEntry.organizationId === args.organizationId) {
+        const qrLeadState = stateWithQrAttribution(args.leadState, qrEntry);
+        await recordQrAttribution({
+          supabase: args.supabase,
+          organizationId: args.organizationId,
+          leadId: args.leadId,
+          entry: qrEntry,
+        });
+        const result = qrEntry.serviceId
+          ? await buildServiceReply(qrEntry.serviceId, qrLeadState, {
+            channel: args.channel,
+            supabase: args.supabase,
+            organizationId: args.organizationId,
+            leadId: args.leadId,
+            couponAssets: args.couponAssets,
+            integrations: args.integrations,
+            campaignKey: qrEntry.campaignKey ?? undefined,
+          })
+          : await canonicalMenu(LG_MENU_PROMPT, qrLeadState);
+        return withQrAttribution(result, qrEntry);
+      }
+    }
     if (
       action === "referral_grocery:entry" ||
       action === `referral_service:${BUILT_IN_SERVICE_IDS.grocery}`

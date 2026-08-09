@@ -4,7 +4,7 @@ type Json = Record<string, unknown>;
 type SupabaseLike = { from(table: string): any; rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> };
 type GroceryState = {
   step: "zip" | "offer" | "name" | "address" | "city" | "state" | "payment" | "instructions" | "confirm" | "complete";
-  postalCode?: string; locationId?: string; locationName?: string; offerId?: string; offerName?: string; customerName?: string; address?: string; city?: string; state?: string; payment?: string; instructions?: string; idempotencyKey: string; orderCode?: string;
+  postalCode?: string; locationId?: string; locationName?: string; offerId?: string; offerName?: string; customerName?: string; address?: string; city?: string; state?: string; payment?: string; instructions?: string; sourceCampaign?: string; idempotencyKey: string; orderCode?: string;
 };
 export type GroceryTurn = { reply: string; grocery: GroceryState; interactiveList?: { body: string; buttonText: string; sections: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }> }; interactiveButtons?: Array<{ id: string; title: string }>; debugNote: string };
 
@@ -13,13 +13,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const clean = (value: unknown, max = 500) => typeof value === "string" && value.trim().length <= max ? value.trim().replace(/\s+/g, " ") : "";
 const money = (cents: unknown, currency = "USD") => new Intl.NumberFormat("es-US", { style: "currency", currency }).format(Number(cents) / 100);
 
-export function startWhatsAppGrocery(args?: { customerName?: string | null }): GroceryTurn {
+export function startWhatsAppGrocery(args?: { customerName?: string | null; sourceCampaign?: string | null }): GroceryTurn {
   const customerName = clean(args?.customerName, 120);
+  const sourceCampaign = clean(args?.sourceCampaign, 120);
   return {
     reply: "Estas canastas ya vienen preparadas para hacerlo rápido y sencillo. Son opciones fijas y no se personalizan; puedes ver qué incluye cada una y elegir la que mejor te convenga.\n\nPrimero, ¿cuál es el código postal de entrega?",
     grocery: {
       step: "zip",
       ...(customerName ? { customerName } : {}),
+      ...(sourceCampaign ? { sourceCampaign } : {}),
       idempotencyKey: `whatsapp-grocery:${crypto.randomUUID()}`,
     },
     debugNote: "referral_hub:grocery_zip",
@@ -77,7 +79,7 @@ export async function continueWhatsAppGrocery(args: { supabase: SupabaseLike; st
     if (geocoded.error || !geocoded.data || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return failure(state, "No pudimos validar la dirección de entrega. No se creó el pedido.", "referral_hub:grocery_address_unresolved");
     const route = await maps.computeDrivingRouteMatrix({ origin: { latitude: geocoded.data.latitude, longitude: geocoded.data.longitude }, destinationCoordinates: [{ latitude, longitude }] }); const selected = route.data?.[0];
     if (route.error || !selected) return failure(state, "No pudimos validar la ruta de entrega. No se creó el pedido.", "referral_hub:grocery_route_failed");
-    const result = await supabase.rpc("create_referral_order", { p_organization_id: ORGANIZATION_ID, p_idempotency_key: state.idempotencyKey, p_campaign_code: "whatsapp_grocery_v1", p_source_channel: "whatsapp", p_partner_location_id: state.locationId, p_basket_offer_id: state.offerId, p_customer_name: state.customerName, p_customer_phone: args.channelUserId, p_customer_email: null, p_delivery_address: fullAddress, p_delivery_city: state.city, p_delivery_state: state.state, p_delivery_postal_code: state.postalCode, p_delivery_country_code: "US", p_delivery_latitude: geocoded.data.latitude, p_delivery_longitude: geocoded.data.longitude, p_delivery_distance_miles: Math.round(selected.distanceMeters / 1609.344 * 100) / 100, p_delivery_duration_minutes: Math.round(selected.durationSeconds / 60), p_route_source: "google_routes", p_customer_notes: `Pago: ${state.payment}${state.instructions ? ` · Entrega: ${state.instructions}` : ""}`, p_consent_transactional: true, p_consent_marketing: false, p_consent_version: "whatsapp_grocery_v1" });
+    const result = await supabase.rpc("create_referral_order", { p_organization_id: ORGANIZATION_ID, p_idempotency_key: state.idempotencyKey, p_campaign_code: state.sourceCampaign || "whatsapp_grocery_v1", p_source_channel: "whatsapp", p_partner_location_id: state.locationId, p_basket_offer_id: state.offerId, p_customer_name: state.customerName, p_customer_phone: args.channelUserId, p_customer_email: null, p_delivery_address: fullAddress, p_delivery_city: state.city, p_delivery_state: state.state, p_delivery_postal_code: state.postalCode, p_delivery_country_code: "US", p_delivery_latitude: geocoded.data.latitude, p_delivery_longitude: geocoded.data.longitude, p_delivery_distance_miles: Math.round(selected.distanceMeters / 1609.344 * 100) / 100, p_delivery_duration_minutes: Math.round(selected.durationSeconds / 60), p_route_source: "google_routes", p_customer_notes: `Pago: ${state.payment}${state.instructions ? ` · Entrega: ${state.instructions}` : ""}`, p_consent_transactional: true, p_consent_marketing: false, p_consent_version: "whatsapp_grocery_v1" });
     const row = (Array.isArray(result.data) ? result.data[0] : result.data) as Json | null; const orderCode = clean(row?.order_code);
     if (result.error || !orderCode) return failure(state, "No pudimos crear el pedido. No se realizó ningún cobro.", "referral_hub:grocery_order_failed");
     return { reply: `Pedido recibido. Tu referencia es ${orderCode}. Total: ${money(row?.total_cents, clean(row?.currency) || "USD")}. Estado: recibido.`, grocery: { ...state, step: "complete", orderCode }, debugNote: "referral_hub:grocery_order_created" };
