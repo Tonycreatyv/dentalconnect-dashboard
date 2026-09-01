@@ -115,7 +115,7 @@ function usePartnerReferrals() {
   return { rows, loading, error, load };
 }
 
-function PartnerLogin() {
+export function PartnerLogin() {
   const { session, signIn } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -155,13 +155,13 @@ function PartnerLogin() {
   );
 }
 
-function RequirePartner({ children }: { children: JSX.Element }) {
+export function RequirePartner({ children }: { children: JSX.Element }) {
   const { session, loading } = useAuth();
   if (loading) return <main className="partner-portal"><section><p className="partner-empty">Cargando…</p></section></main>;
   return session ? children : <Navigate to="/partner/login" replace />;
 }
 
-function Shell() {
+export function Shell() {
   const { user, signOut } = useAuth();
   return (
     <main className="partner-portal">
@@ -328,14 +328,5 @@ function PartnerDetail() {
         </div>
       </section>
     </>
-  );
-}
-
-export default function PartnerDashboard() {
-  return (
-    <Routes>
-      <Route path="/login" element={<PartnerLogin />} />
-      <Route path="/app/*" element={<RequirePartner><Shell /></RequirePartner>} />
-    </Routes>
   );
 }

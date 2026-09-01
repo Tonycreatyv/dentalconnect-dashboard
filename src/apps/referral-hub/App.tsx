@@ -4,7 +4,7 @@ import MetaCallback from "../../pages/auth/MetaCallback";
 import CouponValidator from "../../pages/referral/CouponValidator";
 import PublicCoupon from "../../pages/referral/PublicCoupon";
 import PartnerPortal from "../referral-partner/pages/PartnerPortal";
-import PartnerDashboard from "../referral-partner/PartnerDashboard";
+import { PartnerLogin, RequirePartner, Shell as PartnerShell } from "../referral-partner/PartnerDashboard";
 import BoltShell from "./ui/BoltShell";
 import RedirectWithSearch from "./RedirectWithSearch";
 import ReferralLogin from "./pages/ReferralLogin";
@@ -40,8 +40,15 @@ function ProductRoutes() {
     <Route path="/coupon/:publicToken" element={<PublicCoupon />} />
     <Route path="/q/:publicCode" element={<ReferralQrEntry />} />
     <Route path="/partner/:token" element={<PartnerPortal />} />
-    <Route path="/partner/login" element={<PartnerDashboard />} />
-    <Route path="/partner/app/*" element={<PartnerDashboard />} />
+    {/* Nested under /partner (not two flat sibling routes, and not a bare
+        /partner/* route) so the static "login"/"app" segments always outrank
+        the dynamic :token route above for those exact paths — React Router
+        ranks a bare /partner/* splat BELOW /partner/:token, which would
+        silently route the dashboard through PartnerPortal instead. */}
+    <Route path="/partner">
+      <Route path="login" element={<PartnerLogin />} />
+      <Route path="app/*" element={<RequirePartner><PartnerShell /></RequirePartner>} />
+    </Route>
     <Route path="/" element={<RequireAuth><ReferralOrganizationProvider><BoltShell /></ReferralOrganizationProvider></RequireAuth>}>
       <Route index element={<InicioScreen />} />
       <Route path="clientes" element={<ClientesScreen />} />
