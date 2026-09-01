@@ -76,6 +76,37 @@ export type BarbershopInterpretedTurn = {
     | "reschedule_appointment"
     | "none";
   user_facing_summary: string;
+  semantic?: BarbershopSemanticInterpreterResult;
+};
+
+export type BarbershopSemanticIntent =
+  | "booking_request"
+  | "availability_question"
+  | "pricing_question"
+  | "pricing_followup"
+  | "cancel_appointment"
+  | "reschedule_appointment"
+  | "confirm"
+  | "deny"
+  | "location_question"
+  | "business_hours_question"
+  | "services_question"
+  | "out_of_scope"
+  | "unknown";
+
+export type BarbershopSemanticInterpreterResult = {
+  intent: BarbershopSemanticIntent;
+  confidence: number;
+  normalized_user_message: string;
+  entities: {
+    service_name: string | null;
+    date_text: string | null;
+    time_text: string | null;
+    time_block: string | null;
+    provider_name: string | null;
+    target: string | null;
+  };
+  reason: string;
 };
 
 type LlmProvider = "openai" | "groq" | "none";
@@ -144,6 +175,37 @@ function normalizeText(input: string): string {
     .trim();
 }
 
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = Array.from({ length: b.length + 1 }, () => 0);
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function normalizeSemanticText(input: string): string {
+  const base = normalizeText(input)
+    .replace(/\blatarde\b/g, "la tarde")
+    .replace(/\ba\s+la\s+(\d{1,2})\b/g, "a las $1");
+  return base.split(/\s+/).map((token) => {
+    if (/^cancel[a-z]*$/.test(token) && token.length >= 6) return "cancelarla";
+    if (token.length >= 6 && editDistance(token, "cancelar") <= 2) return "cancelar";
+    if (token.length >= 8 && editDistance(token, "cancelarla") <= 3) return "cancelarla";
+    if (token.length >= 5 && editDistance(token, "mover") <= 1) return "mover";
+    if (token.length >= 7 && editDistance(token, "reagendar") <= 2) return "reagendar";
+    return token;
+  }).join(" ").trim();
+}
+
 function findBarberName(input: string): string | null {
   const m = input.match(/\bcon\s+([a-záéíóúñ]{3,})\b/i);
   if (!m) return null;
@@ -157,7 +219,7 @@ function findService(input: string): { service: string | null; ref: "explicit" |
   if (/\b(corte y barba|corte con barba|corte \+ barba|combo|fresh con barba y corte|cote y barba|core y barba)\b/.test(input)) {
     return { service: "Corte + barba", ref: "explicit" };
   }
-  if (/\b(corte de pelo|corte de cabello|quiero corte|cortarme|core de pelo|cote de pelo)\b/.test(input)) {
+  if (/\b(corte de pelo|corte de cabello|quiero corte|para corte|cortarme|core de pelo|cote de pelo)\b/.test(input)) {
     return { service: "Corte clásico", ref: "explicit" };
   }
   if (/\b(quiero barba|barba)\b/.test(input)) return { service: "Barba", ref: "explicit" };
@@ -169,11 +231,161 @@ function findDateTime(input: string): { date_text?: string; time_text?: string }
   const out: { date_text?: string; time_text?: string } = {};
   const dateMatch = input.match(/\b(hoy|manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|ahorita)\b/);
   if (dateMatch) out.date_text = dateMatch[1] === "ahorita" ? "hoy" : dateMatch[1];
-  const timeNum = input.match(/\b(?:a las|tipo)\s*(\d{1,2})(?::(\d{2}))?\b/);
+  const timeNum = input.match(/\b(?:a las|a la|tipo)\s*(\d{1,2})(?::(\d{2}))?\b/);
   if (timeNum) out.time_text = timeNum[1];
   if (!out.time_text && /\btemprano\b/.test(input)) out.time_text = "temprano";
   if (!out.time_text && /\bmas tarde\b/.test(input)) out.time_text = "más tarde";
   return out;
+}
+
+function findTimeBlock(input: string): string | null {
+  if (/\b(la tarde|por la tarde|en la tarde|mas tarde|tarde)\b/.test(input)) return "afternoon";
+  if (/\b(la manana|por la manana|en la manana|temprano)\b/.test(input)) return "morning";
+  if (/\b(noche|en la noche|por la noche)\b/.test(input)) return "evening";
+  return null;
+}
+
+function buildSemanticResult(args: {
+  inboundText: string;
+  intent: BarbershopSemanticIntent;
+  confidence: number;
+  normalized: string;
+  reason: string;
+  service?: string | null;
+  date?: string | null;
+  time?: string | null;
+  timeBlock?: string | null;
+  provider?: string | null;
+  target?: string | null;
+}): BarbershopSemanticInterpreterResult {
+  return {
+    intent: args.intent,
+    confidence: Math.max(0, Math.min(1, args.confidence)),
+    normalized_user_message: args.normalized,
+    entities: {
+      service_name: args.service ?? null,
+      date_text: args.date ?? null,
+      time_text: args.time ?? null,
+      time_block: args.timeBlock ?? null,
+      provider_name: args.provider ?? null,
+      target: args.target ?? null,
+    },
+    reason: args.reason,
+  };
+}
+
+export function interpretBarbershopSemanticFallback(args: {
+  inboundText: string;
+  timezone: string;
+  clinicSettings: Record<string, unknown>;
+  state: Record<string, unknown>;
+  collected: Record<string, unknown>;
+  recentMessages?: Array<{ role: string; content: string }>;
+}): BarbershopSemanticInterpreterResult {
+  const normalized = normalizeSemanticText(args.inboundText);
+  if (!normalized) {
+    return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "unknown", confidence: 0.2, reason: "empty_message" });
+  }
+
+  const service = findService(normalized);
+  const dateTime = findDateTime(normalized);
+  const timeBlock = findTimeBlock(normalized);
+  const provider = findBarberName(normalized);
+  const activeBooking = Boolean((args.collected as Record<string, unknown>)?.activeBookingFlow) ||
+    ["select_day", "select_time", "booking_date", "date_time"].includes(String((args.state as Record<string, unknown>)?.nextExpected ?? ""));
+
+  if (/^(confirmar|si|sí|dale|ok|confirmo|listo)$/.test(normalized)) {
+    return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "confirm", confidence: 0.9, reason: "affirmative_confirmation" });
+  }
+  if (/^(no|mejor no|no cancelar|cancelar no)$/.test(normalized)) {
+    return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "deny", confidence: 0.86, reason: "negative_confirmation" });
+  }
+  if (/\b(cancelarla|cancelala)\b/.test(normalized) || (/\bcancelar\b/.test(normalized) && /\b(cita|turno|reserva|la|mi)\b/.test(normalized))) {
+    return buildSemanticResult({
+      inboundText: args.inboundText,
+      normalized,
+      intent: "cancel_appointment",
+      confidence: 0.88,
+      reason: "semantic_cancel_request",
+      target: "active_appointment",
+    });
+  }
+  if (/\b(reagendar|cambiar|mover|moverla)\b/.test(normalized) && /\b(cita|turno|reserva|la)\b/.test(normalized)) {
+    return buildSemanticResult({
+      inboundText: args.inboundText,
+      normalized,
+      intent: "reschedule_appointment",
+      confidence: 0.86,
+      reason: "semantic_reschedule_request",
+      service: service.service,
+      date: dateTime.date_text ?? null,
+      time: dateTime.time_text ?? null,
+      timeBlock,
+      provider,
+      target: "active_appointment",
+    });
+  }
+  if (/\b(cuanto|precio|precios|vale|cuesta|sale|tarifa)\b/.test(normalized)) {
+    return buildSemanticResult({
+      inboundText: args.inboundText,
+      normalized,
+      intent: "pricing_question",
+      confidence: 0.87,
+      reason: "semantic_pricing_question",
+      service: service.service,
+    });
+  }
+  if (/^\by\b/.test(normalized) && service.service) {
+    return buildSemanticResult({
+      inboundText: args.inboundText,
+      normalized,
+      intent: "pricing_followup",
+      confidence: 0.78,
+      reason: "semantic_pricing_followup_candidate",
+      service: service.service,
+    });
+  }
+  if (/\b(donde estan|donde quedan|ubicacion|direccion)\b/.test(normalized)) {
+    return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "location_question", confidence: 0.9, reason: "semantic_location_question" });
+  }
+  if (/\b(horario|horarios|abren|cierran|cuando abren|cuando cierran)\b/.test(normalized)) {
+    return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "business_hours_question", confidence: 0.86, reason: "semantic_business_hours_question" });
+  }
+  if (/\b(servicios|que ofrecen|lista de precios)\b/.test(normalized)) {
+    return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "services_question", confidence: 0.84, reason: "semantic_services_question" });
+  }
+  if (/\b(disponible|disponibilidad|cupo|espacio|chance|hay)\b/.test(normalized) || (activeBooking && (dateTime.time_text || timeBlock))) {
+    return buildSemanticResult({
+      inboundText: args.inboundText,
+      normalized,
+      intent: dateTime.time_text || timeBlock ? "availability_question" : "booking_request",
+      confidence: 0.84,
+      reason: "semantic_availability_request",
+      service: service.service,
+      date: dateTime.date_text ?? null,
+      time: dateTime.time_text ?? null,
+      timeBlock,
+      provider,
+    });
+  }
+  if (service.service || dateTime.date_text || dateTime.time_text) {
+    return buildSemanticResult({
+      inboundText: args.inboundText,
+      normalized,
+      intent: "booking_request",
+      confidence: 0.78,
+      reason: "semantic_booking_entities_present",
+      service: service.service,
+      date: dateTime.date_text ?? null,
+      time: dateTime.time_text ?? null,
+      timeBlock,
+      provider,
+    });
+  }
+  if (/^(hola|buenas|hey|que tal|q tal)$/.test(normalized)) {
+    return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "unknown", confidence: 0.35, reason: "greeting_only_not_fallback_target" });
+  }
+  return buildSemanticResult({ inboundText: args.inboundText, normalized, intent: "unknown", confidence: 0.3, reason: "unsupported_or_low_confidence" });
 }
 
 const EMPTY_RESULT: BarbershopInterpretedTurn = {
@@ -202,13 +414,59 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+export function getBarbershopInterpreterRuntimeStatus(): {
+  provider: LlmProvider;
+  model: string;
+  has_groq_key: boolean;
+  has_openai_key: boolean;
+  llm_available: boolean;
+} {
+  const openAiApiKey = (Deno.env.get("OPENAI_API_KEY") ?? "").trim();
+  const groqApiKey = (Deno.env.get("GROQ_API_KEY") ?? "").trim();
+  const forcedProvider = (Deno.env.get("LLM_PROVIDER") ?? "").trim().toLowerCase();
+  const openAiModel = Deno.env.get("OPENAI_MODEL_PRODUCT") ??
+    Deno.env.get("OPENAI_MODEL") ??
+    Deno.env.get("BARBERSHOP_INTERPRETER_OPENAI_MODEL") ??
+    "gpt-4o-mini";
+  const groqModel = Deno.env.get("GROQ_MODEL") ??
+    Deno.env.get("BARBERSHOP_INTERPRETER_GROQ_MODEL") ??
+    "llama-3.1-70b-versatile";
+
+  let provider: LlmProvider = "none";
+  let model = "";
+  if (forcedProvider === "groq") {
+    if (groqApiKey) {
+      provider = "groq";
+      model = groqModel;
+    }
+  } else if (forcedProvider === "openai") {
+    if (openAiApiKey) {
+      provider = "openai";
+      model = openAiModel;
+    }
+  } else if (groqApiKey) {
+    provider = "groq";
+    model = groqModel;
+  } else if (openAiApiKey) {
+    provider = "openai";
+    model = openAiModel;
+  }
+
+  return {
+    provider,
+    model,
+    has_groq_key: Boolean(groqApiKey),
+    has_openai_key: Boolean(openAiApiKey),
+    llm_available: provider !== "none",
+  };
+}
+
 function chooseLlmProvider(): { provider: LlmProvider; apiKey: string; model: string } {
-  const openAiApiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
-  const groqApiKey = Deno.env.get("GROQ_API_KEY") ?? "";
-  const openAiModel = Deno.env.get("BARBERSHOP_INTERPRETER_OPENAI_MODEL") ?? "gpt-4o-mini";
-  const groqModel = Deno.env.get("BARBERSHOP_INTERPRETER_GROQ_MODEL") ?? "llama-3.1-70b-versatile";
-  if (openAiApiKey) return { provider: "openai", apiKey: openAiApiKey, model: openAiModel };
-  if (groqApiKey) return { provider: "groq", apiKey: groqApiKey, model: groqModel };
+  const status = getBarbershopInterpreterRuntimeStatus();
+  const openAiApiKey = (Deno.env.get("OPENAI_API_KEY") ?? "").trim();
+  const groqApiKey = (Deno.env.get("GROQ_API_KEY") ?? "").trim();
+  if (status.provider === "groq") return { provider: "groq", apiKey: groqApiKey, model: status.model };
+  if (status.provider === "openai") return { provider: "openai", apiKey: openAiApiKey, model: status.model };
   return { provider: "none", apiKey: "", model: "" };
 }
 
@@ -463,9 +721,54 @@ function interpretBarbershopTurnStub(args: {
 }): BarbershopInterpretedTurn {
   const text = normalizeText(args.inboundText);
   if (!text) return EMPTY_RESULT;
+  const semantic = interpretBarbershopSemanticFallback(args);
+  if (semantic.confidence >= 0.75) {
+    if (semantic.intent === "cancel_appointment") {
+      return {
+        ...EMPTY_RESULT,
+        intent: "cancel_request",
+        confidence: semantic.confidence,
+        next_step: "start_cancel_confirmation",
+        tool_needed: "get_active_appointment",
+        needs_tool: "cancel_appointment",
+        user_facing_summary: "Solicitud semántica de cancelación",
+        semantic,
+      };
+    }
+    if (
+      semantic.intent === "reschedule_appointment" &&
+      !/\b(cambiar|reagendar|me cambias la cita)\b/.test(text)
+    ) {
+      return {
+        ...EMPTY_RESULT,
+        intent: "reschedule_request",
+        confidence: semantic.confidence,
+        next_step: "start_reschedule",
+        tool_needed: "get_active_appointment",
+        fields_found: {
+          ...EMPTY_RESULT.fields_found,
+          service: semantic.entities.service_name,
+          date: semantic.entities.date_text,
+          time: semantic.entities.time_text,
+          provider_name: semantic.entities.provider_name,
+        },
+        entities: {
+          service_name: semantic.entities.service_name,
+          service_reference: semantic.entities.service_name ? "explicit" : null,
+          date_text: semantic.entities.date_text,
+          time_text: semantic.entities.time_text ?? semantic.entities.time_block,
+          preferred_barber: semantic.entities.provider_name,
+          provider_preference: semantic.entities.provider_name ? "specific" : null,
+        },
+        needs_tool: "reschedule_appointment",
+        user_facing_summary: "Solicitud semántica de reagendado",
+        semantic,
+      };
+    }
+  }
 
   if (/^(hola|buenas|que tal|q tal)$/.test(text)) {
-    return { ...EMPTY_RESULT, intent: "greeting", confidence: 0.9, user_facing_summary: "Saludo inicial" };
+    return { ...EMPTY_RESULT, intent: "greeting", confidence: 0.9, user_facing_summary: "Saludo inicial", semantic };
   }
   if (/\b(cambiar|reagendar|me cambias la cita)\b/.test(text)) {
     return {
@@ -556,7 +859,10 @@ function interpretBarbershopTurnStub(args: {
     };
   }
 
-  if (/\b(chance|espacio|disponible|ahorita|por llegada|solo cita)\b/.test(text) && !/\b(cita|agendar|reservar)\b/.test(text)) {
+  if (
+    /\b(chance|espacio|disponible|disponibilidad|cupo|horario|horarios|dia|dias|semana|ahorita|por llegada|solo cita|cuando)\b/.test(text) &&
+    !/\b(cita|agendar|reservar)\b/.test(text)
+  ) {
     const modeQuestion = /\b(por llegada|solo cita)\b/.test(text);
     return {
       ...EMPTY_RESULT,
@@ -637,7 +943,9 @@ export async function interpretBarbershopTurn(args: {
   collected: Record<string, unknown>;
   recentMessages?: Array<{ role: string; content: string }>;
   llmClient?: LlmClientFn;
+  semanticFallbackOnly?: boolean;
 }): Promise<BarbershopInterpretedTurn> {
+  if (args.semanticFallbackOnly) return interpretBarbershopTurnStub(args);
   const llmResult = await tryLlmInterpretation(args);
   if (llmResult) return llmResult;
   return interpretBarbershopTurnStub(args);

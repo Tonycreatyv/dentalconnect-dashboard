@@ -1,12 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const ALLOWED_ORIGIN = "https://dental.creatyv.io";
+const ALLOWED_PRODUCTION_ORIGINS = new Set([
+  ALLOWED_ORIGIN,
+  "https://referral.creatyv.io",
+]);
 const DEV_ORIGINS = new Set(["http://localhost:5173"]);
 
 function resolveOrigin(req: Request) {
   const origin = req.headers.get("origin") ?? "";
   if (!origin) return ALLOWED_ORIGIN;
-  if (origin === ALLOWED_ORIGIN) return origin;
+  if (ALLOWED_PRODUCTION_ORIGINS.has(origin)) return origin;
   if (DEV_ORIGINS.has(origin)) return origin;
   return ALLOWED_ORIGIN;
 }
@@ -32,6 +36,23 @@ function env(name: string) {
   const value = Deno.env.get(name);
   if (!value) throw new Error(`Missing env ${name}`);
   return value;
+}
+
+async function authorizeOrganizationAccess(
+  supabase: any,
+  req: Request,
+  organizationId: string,
+) {
+  const bearer = String(req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!bearer) return false;
+  const userResult = await supabase.auth.getUser(bearer);
+  const userId = String(userResult.data?.user?.id ?? "");
+  if (!userId) return false;
+  const [membership, profile] = await Promise.all([
+    supabase.from("org_members").select("organization_id").eq("organization_id", organizationId).eq("user_id", userId).maybeSingle(),
+    supabase.from("user_profiles").select("is_admin").eq("user_id", userId).maybeSingle(),
+  ]);
+  return Boolean(membership.data?.organization_id || profile.data?.is_admin === true);
 }
 
 function randomNonce() {
@@ -73,6 +94,9 @@ Deno.serve(async (req) => {
     const organizationId = String(body?.organization_id ?? "").trim();
     if (!organizationId) {
       return json(req, 400, { error: "missing_organization_id", details: "organization_id es requerido." });
+    }
+    if (!await authorizeOrganizationAccess(supabase, req, organizationId)) {
+      return json(req, 403, { error: "organization_access_denied", details: "No tienes acceso a esta organización." });
     }
 
     const exists = await supabase

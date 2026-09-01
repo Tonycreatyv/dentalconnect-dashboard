@@ -70,6 +70,9 @@ type HoursSource = "barber_hours" | "business_hours" | "default_hours";
 export type AvailabilitySlotOption = {
   date: string;
   time: string;
+  starts_at?: string | null;
+  service_key?: string | null;
+  service_name?: string | null;
   provider_id?: string | null;
   provider_name?: string | null;
 };

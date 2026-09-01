@@ -1,0 +1,41 @@
+{
+  "version": "7.3",
+  "routing_model": {
+    "ACCIDENT_BASICS": ["ACCIDENT_DETAILS"],
+    "ACCIDENT_DETAILS": []
+  },
+  "screens": [
+    {
+      "id": "ACCIDENT_BASICS",
+      "title": "Accidente de auto",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Contanos lo básico del accidente para conectarte con el profesional adecuado." },
+          { "type": "TextBody", "text": "Si hay una emergencia inmediata o alguien está en peligro, llama al 911." },
+          { "type": "DatePicker", "name": "accident_date", "label": "Fecha del accidente", "required": true },
+          { "type": "RadioButtonsGroup", "name": "participation", "label": "Tu participación", "required": true, "data-source": [{ "id": "DRIVER", "title": "Conductor" }, { "id": "PASSENGER", "title": "Pasajero" }, { "id": "OTHER", "title": "Otro" }] },
+          { "type": "RadioButtonsGroup", "name": "received_medical_attention", "label": "¿Recibiste atención médica?", "required": true, "data-source": [{ "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }] },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "ACCIDENT_DETAILS" }, "payload": { "accident_date": "${form.accident_date}", "participation": "${form.participation}", "received_medical_attention": "${form.received_medical_attention}" } } }
+        ]
+      }
+    },
+    {
+      "id": "ACCIDENT_DETAILS",
+      "title": "Tus datos",
+      "terminal": true,
+      "success": true,
+      "data": { "accident_date": { "type": "string", "__example__": "2026-08-14" }, "participation": { "type": "string", "__example__": "DRIVER" }, "received_medical_attention": { "type": "string", "__example__": "YES" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextArea", "name": "description", "label": "Breve descripción de lo ocurrido", "required": true },
+          { "type": "TextInput", "name": "medical_provider", "label": "Dónde recibiste atención médica — opcional", "required": false },
+          { "type": "Footer", "label": "Enviar solicitud", "on-click-action": { "name": "complete", "payload": { "intake_type": "AUTO_ACCIDENT", "full_name": "${form.full_name}", "accident_date": "${data.accident_date}", "participation": "${data.participation}", "received_medical_attention": "${data.received_medical_attention}", "medical_provider": "${form.medical_provider}", "description": "${form.description}" } } }
+        ]
+      }
+    }
+  ]
+}

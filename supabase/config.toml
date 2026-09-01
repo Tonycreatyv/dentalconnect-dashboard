@@ -24,3 +24,12 @@ verify_jwt = false
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+[functions.referral-manual-message]
+verify_jwt = true
+
+[functions.referral-partner-portal]
+verify_jwt = false
+
+[functions.referral-qr-resolve]
+verify_jwt = false

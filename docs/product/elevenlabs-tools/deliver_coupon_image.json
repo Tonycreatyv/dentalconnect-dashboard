@@ -1,0 +1,167 @@
+{
+  "type": "webhook",
+  "name": "deliver_coupon_image",
+  "description": "Prepare the approved coupon image and public campaign details for an explicitly selected LG coupon service. Never supply or invent an image URL, caption, merchant, campaign key or ID, terms, discount, price, or coupon code; the backend derives all commercial and media data from trusted configuration and database records.",
+  "disable_interruptions": false,
+  "interruption_mode": "allow",
+  "force_pre_tool_speech": false,
+  "pre_tool_speech": "auto",
+  "tool_call_sound": null,
+  "tool_call_sound_behavior": "auto",
+  "tool_error_handling_mode": "auto",
+  "execution_mode": "immediate",
+  "api_schema": {
+    "url": "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1/referral-voice-tools",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "id": "body",
+      "type": "object",
+      "description": "Prepare an approved coupon image only after explicit confirmation. Allowed caller input is limited to service selection, conversation identity, optional caller phone, and optional profile name/city. Never add image_url, caption, merchant, campaign_key, offer_terms, discount, price, or campaign IDs.",
+      "properties": [
+        {
+          "id": "action",
+          "type": "string",
+          "constant_value": "deliver_coupon_image",
+          "enum": null,
+          "required": true,
+          "value_type": "constant",
+          "description": "",
+          "dynamic_variable": "",
+          "is_system_provided": false
+        },
+        {
+          "id": "organization_id",
+          "type": "string",
+          "dynamic_variable": "organization_id",
+          "enum": null,
+          "required": true,
+          "value_type": "dynamic_variable",
+          "description": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "source_channel",
+          "type": "string",
+          "constant_value": "whatsapp",
+          "enum": null,
+          "required": true,
+          "value_type": "constant",
+          "description": "",
+          "dynamic_variable": "",
+          "is_system_provided": false
+        },
+        {
+          "id": "conversation_id",
+          "type": "string",
+          "description": "Use the exact current ElevenLabs conversation identifier. Never invent, summarize, or reuse another conversation's ID.",
+          "enum": null,
+          "required": true,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "service_id",
+          "type": "string",
+          "description": "Use only the exact coupon service selected by the customer: luis_cupon_super, luis_cupon_medico, or luis_cupon_dental. Do not invent or substitute a campaign ID.",
+          "enum": [
+            "luis_cupon_super",
+            "luis_cupon_medico",
+            "luis_cupon_dental"
+          ],
+          "required": true,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "confirmed",
+          "type": "boolean",
+          "description": "Set to true only after the customer explicitly confirms delivery of the selected coupon image. Never infer confirmation.",
+          "enum": null,
+          "required": true,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "caller_phone",
+          "type": "string",
+          "description": "Optional phone number only when explicitly available from or confirmed by the customer. Never invent it.",
+          "enum": null,
+          "required": false,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "fields",
+          "type": "object",
+          "description": "Optional profile context. Include only profile_name and/or profile_city when explicitly provided; omit this object otherwise.",
+          "properties": [
+            {
+              "id": "profile_name",
+              "type": "string",
+              "description": "Optional customer name exactly as provided. Never invent it.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "profile_city",
+              "type": "string",
+              "description": "Optional customer city exactly as provided. Never infer or invent it.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            }
+          ],
+          "required": false,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": "",
+          "enum": null
+        }
+      ],
+      "required": false,
+      "value_type": "llm_prompt"
+    },
+    "request_headers": [
+      {
+        "type": "value",
+        "name": "Content-Type",
+        "value": "application/json"
+      },
+      {
+        "type": "secret",
+        "name": "x-creatyv-voice-secret",
+        "secret_id": "Kot9RC7dHX1kUxqfHB30"
+      }
+    ],
+    "content_type": "application/json",
+    "auth_connection": null
+  },
+  "assignments": [],
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {
+      "organization_id": {
+        "type": "string_literal",
+        "value": ""
+      }
+    }
+  },
+  "response_mocks": []
+}

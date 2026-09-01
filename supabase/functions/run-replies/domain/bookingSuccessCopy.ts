@@ -46,22 +46,35 @@ function formatRequestedDayLabel(dateIso: string): string {
 }
 
 export function formatBookingSuccessCopy(args: {
-  booking: {
-    ok: boolean;
-    appointment?: Record<string, unknown>;
-  } | null | undefined;
+  booking:
+    | {
+      ok: boolean;
+      appointment?: Record<string, unknown>;
+    }
+    | null
+    | undefined;
   fallback: string;
   businessType?: string;
   preferredBarberFallback?: string;
+  brandName?: string;
 }): string {
   if (!args.booking || args.booking.ok !== true) return args.fallback;
 
   const appt = (args.booking.appointment ?? {}) as Record<string, unknown>;
   const businessType = safeStr(args.businessType, "").toLowerCase();
-  const date = safeStr(appt.appointment_date, safeStr(appt.starts_at, "").slice(0, 10));
+  const date = safeStr(
+    appt.appointment_date,
+    safeStr(appt.starts_at, "").slice(0, 10),
+  );
   const humanDate = formatRequestedDayLabel(date);
-  const time = safeStr(appt.appointment_time, safeStr(appt.starts_at, "").slice(11, 16));
-  const serviceRaw = safeStr(appt.reason, safeStr(appt.title, "Revisión dental"));
+  const time = safeStr(
+    appt.appointment_time,
+    safeStr(appt.starts_at, "").slice(11, 16),
+  );
+  const serviceRaw = safeStr(
+    appt.reason,
+    safeStr(appt.title, "Revisión dental"),
+  );
   const service = toPatientFacingServiceLabel(serviceRaw);
 
   if (businessType === "barbershop") {
@@ -74,20 +87,33 @@ export function formatBookingSuccessCopy(args: {
       args.preferredBarberFallback,
     );
     const preferredBarber = toDisplayPersonName(preferredBarberRaw);
-    const barberLine = preferredBarber ? `\n👤 Barbero: ${preferredBarber}` : "";
-    const isGenericBarberBooking = serviceRaw.trim().toLowerCase() === "cita barbería".toLowerCase();
-    const serviceLine = isGenericBarberBooking ? "" : `\n💈 ${service}`;
-    return `✅ Cita confirmada${serviceLine}${barberLine}\n📅 ${humanDate}\n⏰ ${formatHourLabel(time)}`;
+    const provider = preferredBarber || "Barbero disponible";
+    const brandName = safeStr(args.brandName, "la barbería");
+    return `✅ Cita confirmada 💈
+
+Te esperamos en ${brandName}:
+
+✂️ Servicio: ${service}
+💈 Barbero: ${provider}
+📅 Fecha: ${humanDate}
+🕝 Hora: ${formatHourLabel(time)}
+
+Si necesitás cambiarla o cancelarla, podés escribirnos por aquí.`;
   }
 
   const patientName = toDisplayPersonName(safeStr(appt.patient_name, ""));
   const leadName = toDisplayPersonName(
-    safeStr((appt as any)?.lead_full_name, safeStr((appt as any)?.lead_name, "")),
+    safeStr(
+      (appt as any)?.lead_full_name,
+      safeStr((appt as any)?.lead_name, ""),
+    ),
   );
-  const relation = safeStr((appt as any)?.appointment_for_relation, "").trim().toLowerCase();
+  const relation = safeStr((appt as any)?.appointment_for_relation, "").trim()
+    .toLowerCase();
   const isThirdPartyAppointment = Boolean(
     (relation && relation !== "self") ||
-      (patientName && leadName && patientName.toLowerCase() !== leadName.toLowerCase()),
+      (patientName && leadName &&
+        patientName.toLowerCase() !== leadName.toLowerCase()),
   );
   const headline = isThirdPartyAppointment
     ? `✅ Listo, la cita de ${patientName} quedó agendada.`
@@ -95,5 +121,7 @@ export function formatBookingSuccessCopy(args: {
   const reminderCopy = isThirdPartyAppointment
     ? "Te enviaremos un recordatorio antes de la cita."
     : "Te enviaremos un recordatorio antes de tu cita.";
-  return `${headline}\n\n🦷 ${service}\n📅 ${humanDate}\n⏰ ${formatHourLabel(time)}\n\n${reminderCopy}`;
+  return `${headline}\n\n🦷 ${service}\n📅 ${humanDate}\n⏰ ${
+    formatHourLabel(time)
+  }\n\n${reminderCopy}`;
 }
