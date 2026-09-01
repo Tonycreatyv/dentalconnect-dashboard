@@ -932,7 +932,7 @@ async function buildLuisLegalFlowCompletionResult(args: {
     reply: completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "DECLINED"
       ? "Gracias. Guardamos tu solicitud, pero no compartiremos tu información con un aliado. Si deseas continuar más adelante, puedes volver a escribirnos."
       : completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "AUTHORIZED"
-      ? "Gracias. Recibimos tu información. En breve uno de nuestros aliados de inmigración se pondrá en contacto contigo."
+      ? "¡Gracias! ✅\n\nRecibimos tu información.\n\nEn breve, alguien de nuestro equipo se comunicará contigo."
       : "Gracias. Recibimos tu solicitud y un integrante del equipo te dará seguimiento por este mismo WhatsApp.",
     statePatch: luisLegalPatch(args.leadState, legalIntake),
     debugNote: `referral_hub:luis_legal_flow_${completion.intake_type.toLowerCase()}_completed`,
