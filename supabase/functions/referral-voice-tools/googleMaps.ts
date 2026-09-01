@@ -22,10 +22,29 @@ export type RouteCoordinate = {
   longitude: number;
 };
 
+// Sanitized diagnostic detail attached to a failed call - never includes
+// the API key (never read from the response body in the first place) or
+// any customer PII. httpStatus/googleErrorStatus/googleErrorMessage come
+// directly from Google's own response when present, so a caller can tell
+// "not enabled for this API" (PERMISSION_DENIED) apart from "billing not
+// enabled" (billingNotEnabled reason) apart from a quota/rate-limit error
+// apart from a genuine network failure, without ever guessing.
+export type GoogleMapsCallDiagnostics = {
+  httpStatus: number | null;
+  googleErrorStatus: string | null;
+  googleErrorMessage: string | null;
+  networkError: boolean;
+};
+
 export type GoogleMapsClient = {
   geocodeAddress: (address: string) => Promise<{
     data: GeocodedAddress | null;
     error: string | null;
+    // Optional: the real client (createGoogleMapsClient below) always
+    // populates this; kept optional on the type so existing mocks/fakes in
+    // other callers' tests (referral-voice-tools) don't all need updating
+    // just to satisfy a new diagnostic-only field they don't exercise.
+    diagnostics?: GoogleMapsCallDiagnostics;
   }>;
   computeDrivingRouteMatrix: (input: {
     origin: RouteCoordinate;
@@ -33,8 +52,34 @@ export type GoogleMapsClient = {
   }) => Promise<{
     data: DrivingRoute[] | null;
     error: string | null;
+    diagnostics?: GoogleMapsCallDiagnostics;
   }>;
 };
+
+const NO_DIAGNOSTICS: GoogleMapsCallDiagnostics = {
+  httpStatus: null,
+  googleErrorStatus: null,
+  googleErrorMessage: null,
+  networkError: false,
+};
+
+// Google's standard error envelope for a non-2xx response is
+// { error: { code, message, status } } - extracting this is safe because
+// it never contains the request's API key or any customer data, only
+// Google's own description of why the request was rejected.
+async function readGoogleErrorDiagnostics(response: Response): Promise<GoogleMapsCallDiagnostics> {
+  let googleErrorStatus: string | null = null;
+  let googleErrorMessage: string | null = null;
+  try {
+    const body = await response.clone().json() as { error?: { status?: unknown; message?: unknown } };
+    googleErrorStatus = typeof body?.error?.status === "string" ? body.error.status : null;
+    googleErrorMessage = typeof body?.error?.message === "string" ? body.error.message.slice(0, 200) : null;
+  } catch {
+    // Response body wasn't JSON or was unreadable - httpStatus alone is
+    // still useful diagnostic signal, so this is not itself a failure.
+  }
+  return { httpStatus: response.status, googleErrorStatus, googleErrorMessage, networkError: false };
+}
 
 type Fetch = (
   input: string | URL | Request,
@@ -91,11 +136,13 @@ export function createGoogleMapsClient(
             },
           },
         );
-        if (!response.ok) return { data: null, error: "geocoding_failed" };
+        if (!response.ok) {
+          return { data: null, error: "geocoding_failed", diagnostics: await readGoogleErrorDiagnostics(response) };
+        }
         const payload = await response.json() as Record<string, unknown>;
         const results = Array.isArray(payload.results) ? payload.results : [];
         const first = results[0] as Record<string, unknown> | undefined;
-        if (!first) return { data: null, error: null };
+        if (!first) return { data: null, error: null, diagnostics: { ...NO_DIAGNOSTICS, httpStatus: response.status } };
         const location = first.location as Record<string, unknown> | undefined;
         const formattedAddress = typeof first.formattedAddress === "string"
           ? first.formattedAddress.trim()
@@ -103,14 +150,19 @@ export function createGoogleMapsClient(
         const latitude = finiteNumber(location?.latitude);
         const longitude = finiteNumber(location?.longitude);
         if (!formattedAddress || latitude === null || longitude === null) {
-          return { data: null, error: null };
+          return { data: null, error: null, diagnostics: { ...NO_DIAGNOSTICS, httpStatus: response.status } };
         }
         return {
           data: { formattedAddress, latitude, longitude },
           error: null,
+          diagnostics: { ...NO_DIAGNOSTICS, httpStatus: response.status },
         };
-      } catch {
-        return { data: null, error: "geocoding_failed" };
+      } catch (err) {
+        return {
+          data: null,
+          error: "geocoding_failed",
+          diagnostics: { ...NO_DIAGNOSTICS, networkError: true, googleErrorMessage: err instanceof Error ? err.name : null },
+        };
       }
     },
 
@@ -142,15 +194,18 @@ export function createGoogleMapsClient(
             }),
           },
         );
-        if (!response.ok) return { data: null, error: "routes_failed" };
+        if (!response.ok) {
+          return { data: null, error: "routes_failed", diagnostics: await readGoogleErrorDiagnostics(response) };
+        }
         const payload = await response.json() as unknown;
+        const baseDiagnostics: GoogleMapsCallDiagnostics = { ...NO_DIAGNOSTICS, httpStatus: response.status };
         if (!Array.isArray(payload)) {
-          return { data: null, error: "routes_failed" };
+          return { data: null, error: "routes_failed", diagnostics: { ...baseDiagnostics, googleErrorMessage: "non_array_response" } };
         }
         const routes: DrivingRoute[] = [];
         for (const value of payload) {
           if (!value || typeof value !== "object") {
-            return { data: null, error: "routes_failed" };
+            return { data: null, error: "routes_failed", diagnostics: { ...baseDiagnostics, googleErrorMessage: "non_object_element" } };
           }
           const element = value as Record<string, unknown>;
           const status = element.status as Record<string, unknown> | undefined;
@@ -166,7 +221,15 @@ export function createGoogleMapsClient(
             distanceMeters === null || distanceMeters < 0 || seconds === null ||
             seconds < 0
           ) {
-            return { data: null, error: "routes_failed" };
+            return {
+              data: null,
+              error: "routes_failed",
+              diagnostics: {
+                ...baseDiagnostics,
+                googleErrorStatus: typeof status?.code === "number" ? String(status.code) : null,
+                googleErrorMessage: typeof element.condition === "string" ? `condition:${element.condition}` : "element_rejected",
+              },
+            };
           }
           routes.push({
             destinationIndex,
@@ -174,9 +237,13 @@ export function createGoogleMapsClient(
             durationSeconds: seconds,
           });
         }
-        return { data: routes, error: null };
-      } catch {
-        return { data: null, error: "routes_failed" };
+        return { data: routes, error: null, diagnostics: baseDiagnostics };
+      } catch (err) {
+        return {
+          data: null,
+          error: "routes_failed",
+          diagnostics: { ...NO_DIAGNOSTICS, networkError: true, googleErrorMessage: err instanceof Error ? err.name : null },
+        };
       }
     },
   };

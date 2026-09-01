@@ -69,7 +69,9 @@ type SignupCompletionMetadata = {
   businessAppCoexistenceCompleted: boolean;
 };
 
-function signupCompletionMetadata(body: Record<string, unknown>): SignupCompletionMetadata {
+export function signupCompletionMetadata(
+  body: Record<string, unknown>,
+): SignupCompletionMetadata {
   const eventName = text(body.onboarding_event, 100);
   const sessionInfoVersion = text(body.session_info_version, 20);
   if (eventName === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") {
@@ -226,6 +228,52 @@ type SafeMetaReadDiagnostic = {
   };
 };
 type MetaFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type CoexistenceSignupDiagnostics = {
+  onboarding_event: SignupCompletionMetadata["eventName"];
+  onboarding_mode: SignupCompletionMetadata["onboardingMode"];
+  business_app_coexistence_completed: boolean;
+  waba_id: string;
+  phone_number_id: string;
+  waba_phone_get_success: boolean;
+  waba_phone_get_http_status: number | null;
+  phone_get_success: boolean;
+  phone_get_http_status: number | null;
+  normalized_phone_status: string | null;
+  code_verification_status: string | null;
+  platform_type: string | null;
+  is_on_biz_app: boolean | null;
+  phone_found_in_waba: ValidationStatus;
+  optional_phone_fields: "AVAILABLE" | "UNAVAILABLE" | "UNKNOWN";
+};
+type CoexistenceSignupPhone = {
+  id: string;
+  display_phone_number: string | null;
+  verified_name: string | null;
+  status: string | null;
+  code_verification_status: string | null;
+  platform_type: string | null;
+  is_on_biz_app: boolean | null;
+};
+type CoexistenceSignupValidation = {
+  ok: boolean;
+  error?:
+    | "coexistence_completion_invalid"
+    | "coexistence_waba_access_failed"
+    | "coexistence_phone_not_in_waba"
+    | "coexistence_phone_access_failed"
+    | "coexistence_phone_identity_mismatch";
+  phone?: CoexistenceSignupPhone;
+  diagnostics: CoexistenceSignupDiagnostics;
+  meta_diagnostic?: SafeMetaReadDiagnostic;
+};
+type CoexistenceSignupValidationInput = {
+  graphVersion: string;
+  accessToken: string;
+  wabaId: string;
+  phoneNumberId: string;
+  completion: SignupCompletionMetadata;
+  fetchFn?: MetaFetch;
+};
 type MetaAssetValidationInput = {
   graphVersion: string;
   accessToken: string;
@@ -566,6 +614,186 @@ async function readMetaJson(response: Response) {
       : { diagnostic: invalidMetaResponseDiagnostic(response.status) };
   } catch {
     return { diagnostic: invalidMetaResponseDiagnostic(response.status) };
+  }
+}
+
+function unsupportedOptionalCoexistencePhoneField(
+  diagnostic: SafeMetaReadDiagnostic,
+) {
+  const message = diagnostic.meta_error?.message?.toLowerCase() ?? "";
+  return diagnostic.http_status === 400 && diagnostic.meta_error?.code === 100 &&
+    /(is_on_biz_app|platform_type)/.test(message);
+}
+
+/**
+ * Validates only a completed WhatsApp Business App coexistence signup. It is
+ * read-only: exact WABA membership first, then exact phone access. The standard
+ * Embedded Signup registration predicate remains in the exchange handler.
+ */
+export async function validateCoexistenceSignupAssets(
+  input: CoexistenceSignupValidationInput,
+): Promise<CoexistenceSignupValidation> {
+  const diagnostics: CoexistenceSignupDiagnostics = {
+    onboarding_event: input.completion.eventName,
+    onboarding_mode: input.completion.onboardingMode,
+    business_app_coexistence_completed:
+      input.completion.businessAppCoexistenceCompleted,
+    waba_id: input.wabaId,
+    phone_number_id: input.phoneNumberId,
+    waba_phone_get_success: false,
+    waba_phone_get_http_status: null,
+    phone_get_success: false,
+    phone_get_http_status: null,
+    normalized_phone_status: null,
+    code_verification_status: null,
+    platform_type: null,
+    is_on_biz_app: null,
+    phone_found_in_waba: "UNKNOWN",
+    optional_phone_fields: "UNKNOWN",
+  };
+  const exactCompletion =
+    input.completion.eventName ===
+      "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" &&
+    input.completion.onboardingMode === "COEXISTENCE" &&
+    input.completion.businessAppCoexistenceCompleted === true;
+  if (!exactCompletion) {
+    return {
+      ok: false,
+      error: "coexistence_completion_invalid",
+      diagnostics,
+    };
+  }
+
+  const fetchFn = input.fetchFn ?? fetch;
+  const graphUrl = (path: string) =>
+    `https://graph.facebook.com/${input.graphVersion}/${path}`;
+  const authorization = { Authorization: `Bearer ${input.accessToken}` };
+  try {
+    const wabaPhonesResponse = await fetchFn(
+      graphUrl(
+        `${encodeURIComponent(input.wabaId)}/phone_numbers?fields=id&limit=100`,
+      ),
+      { method: "GET", headers: authorization },
+    );
+    diagnostics.waba_phone_get_http_status = wabaPhonesResponse.status;
+    const wabaPhonesResult = await readMetaJson(wabaPhonesResponse);
+    const wabaPhones = metaRows(wabaPhonesResult.payload);
+    if (!wabaPhonesResponse.ok || wabaPhonesResult.diagnostic || !wabaPhones) {
+      const metaDiagnostic = !wabaPhonesResponse.ok
+        ? safeMetaReadDiagnostic(
+          wabaPhonesResponse.status,
+          wabaPhonesResult.payload,
+        )
+        : wabaPhonesResult.diagnostic ??
+          invalidMetaResponseDiagnostic(wabaPhonesResponse.status);
+      return {
+        ok: false,
+        error: "coexistence_waba_access_failed",
+        diagnostics,
+        meta_diagnostic: metaDiagnostic,
+      };
+    }
+    diagnostics.waba_phone_get_success = true;
+    const phoneFoundInWaba = wabaPhones.some((phone) =>
+      text(phone.id, 100) === input.phoneNumberId
+    );
+    diagnostics.phone_found_in_waba = phoneFoundInWaba ? "PASS" : "FAIL";
+    if (!phoneFoundInWaba) {
+      return {
+        ok: false,
+        error: "coexistence_phone_not_in_waba",
+        diagnostics,
+      };
+    }
+
+    const extendedFields =
+      "id,display_phone_number,verified_name,status,code_verification_status,platform_type,is_on_biz_app";
+    const coreFields =
+      "id,display_phone_number,verified_name,status,code_verification_status";
+    let phoneResponse = await fetchFn(
+      graphUrl(
+        `${encodeURIComponent(input.phoneNumberId)}?fields=${extendedFields}`,
+      ),
+      { method: "GET", headers: authorization },
+    );
+    let phoneResult = await readMetaJson(phoneResponse);
+    if (!phoneResponse.ok) {
+      const extendedDiagnostic = safeMetaReadDiagnostic(
+        phoneResponse.status,
+        phoneResult.payload,
+      );
+      if (unsupportedOptionalCoexistencePhoneField(extendedDiagnostic)) {
+        diagnostics.optional_phone_fields = "UNAVAILABLE";
+        phoneResponse = await fetchFn(
+          graphUrl(
+            `${encodeURIComponent(input.phoneNumberId)}?fields=${coreFields}`,
+          ),
+          { method: "GET", headers: authorization },
+        );
+        phoneResult = await readMetaJson(phoneResponse);
+      }
+    } else {
+      diagnostics.optional_phone_fields = "AVAILABLE";
+    }
+    diagnostics.phone_get_http_status = phoneResponse.status;
+    if (!phoneResponse.ok || phoneResult.diagnostic) {
+      const metaDiagnostic = !phoneResponse.ok
+        ? safeMetaReadDiagnostic(phoneResponse.status, phoneResult.payload)
+        : phoneResult.diagnostic ?? invalidMetaResponseDiagnostic(phoneResponse.status);
+      return {
+        ok: false,
+        error: "coexistence_phone_access_failed",
+        diagnostics,
+        meta_diagnostic: metaDiagnostic,
+      };
+    }
+
+    const returnedPhoneId = text(phoneResult.payload?.id, 100);
+    const status = text(phoneResult.payload?.status, 100).toUpperCase() || null;
+    const codeVerificationStatus =
+      text(phoneResult.payload?.code_verification_status, 100).toUpperCase() ||
+      null;
+    const platformType =
+      text(phoneResult.payload?.platform_type, 100).toUpperCase() || null;
+    const isOnBizApp = typeof phoneResult.payload?.is_on_biz_app === "boolean"
+      ? phoneResult.payload.is_on_biz_app
+      : null;
+    diagnostics.phone_get_success = true;
+    diagnostics.normalized_phone_status = status;
+    diagnostics.code_verification_status = codeVerificationStatus;
+    diagnostics.platform_type = platformType;
+    diagnostics.is_on_biz_app = isOnBizApp;
+    if (returnedPhoneId !== input.phoneNumberId) {
+      return {
+        ok: false,
+        error: "coexistence_phone_identity_mismatch",
+        diagnostics,
+      };
+    }
+
+    return {
+      ok: true,
+      phone: {
+        id: returnedPhoneId,
+        display_phone_number:
+          text(phoneResult.payload?.display_phone_number, 100) || null,
+        verified_name: text(phoneResult.payload?.verified_name, 160) || null,
+        status,
+        code_verification_status: codeVerificationStatus,
+        platform_type: platformType,
+        is_on_biz_app: isOnBizApp,
+      },
+      diagnostics,
+    };
+  } catch {
+    return {
+      ok: false,
+      error: diagnostics.waba_phone_get_success
+        ? "coexistence_phone_access_failed"
+        : "coexistence_waba_access_failed",
+      diagnostics,
+      meta_diagnostic: networkMetaReadDiagnostic(),
+    };
   }
 }
 
@@ -3012,6 +3240,11 @@ if (import.meta.main) {
       let wabaId = text(body.waba_id, 100);
       let phoneNumberId = text(body.phone_number_id, 100);
       const completion = signupCompletionMetadata(body);
+      const coexistenceCompletion =
+        completion.eventName ===
+          "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" &&
+        completion.onboardingMode === "COEXISTENCE" &&
+        completion.businessAppCoexistenceCompleted === true;
       const exchangeTelemetry = {
         request_received: true,
         authenticated_org: REFERRAL_HUB_ORGANIZATION_ID,
@@ -3028,6 +3261,22 @@ if (import.meta.main) {
         meta_code_exchange_status: "NOT_ATTEMPTED",
         meta_code_exchange_http_status: null as number | null,
         asset_validation: "NOT_ATTEMPTED",
+        phone_get_success: null as boolean | null,
+        phone_get_http_status: null as number | null,
+        normalized_phone_status: null as string | null,
+        code_verification_status: null as string | null,
+        platform_type: null as string | null,
+        is_on_biz_app: null as boolean | null,
+        waba_phone_get_success: null as boolean | null,
+        waba_phone_get_http_status: null as number | null,
+        phone_found_in_waba: "UNKNOWN" as ValidationStatus,
+        optional_phone_fields: "UNKNOWN" as
+          | "AVAILABLE"
+          | "UNAVAILABLE"
+          | "UNKNOWN",
+        subscription_before: "UNKNOWN" as WabaSubscriptionStatus,
+        subscription_after: "UNKNOWN" as WabaSubscriptionStatus,
+        expected_app_present_after_subscription: "UNKNOWN" as ValidationStatus,
         org_settings_write_attempted: false,
         org_settings_write_succeeded: false,
         whatsapp_enabled_final: null as boolean | null,
@@ -3110,53 +3359,143 @@ if (import.meta.main) {
         return exchangeFailure(409, "replacement_confirmation_required");
       }
 
-      const phoneRes = await fetch(
-        `https://graph.facebook.com/${graphVersion}/${
-          encodeURIComponent(phoneNumberId)
-        }?fields=id,display_phone_number,verified_name,code_verification_status,status`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-      const phoneData = await phoneRes.json();
-      if (!phoneRes.ok) {
-        exchangeTelemetry.asset_validation = "FAIL";
-        return exchangeFailure(502, "registration_check_failed");
-      }
-      const registrationReady =
-        phoneData.code_verification_status === "VERIFIED" &&
-        ["CONNECTED", "PENDING"].includes(
-          String(phoneData.status ?? "").toUpperCase(),
-      );
-      if (!registrationReady) {
-        exchangeTelemetry.asset_validation = "FAIL";
-        return json(req, 409, {
-          ok: false,
-          error: "registration_failed",
-          connection_state: "error_registration",
-          telemetry: exchangeTelemetry,
+      let phoneData: Record<string, unknown>;
+      if (coexistenceCompletion) {
+        const coexistenceValidation = await validateCoexistenceSignupAssets({
+          graphVersion,
+          accessToken,
+          wabaId,
+          phoneNumberId,
+          completion,
         });
+        Object.assign(exchangeTelemetry, coexistenceValidation.diagnostics);
+        if (!coexistenceValidation.ok || !coexistenceValidation.phone) {
+          exchangeTelemetry.asset_validation = "FAIL";
+          console.warn("[whatsapp-signup] coexistence_validation_failed", {
+            ...coexistenceValidation.diagnostics,
+            error: coexistenceValidation.error ?? "coexistence_validation_failed",
+            ...(coexistenceValidation.meta_diagnostic
+              ? { meta_diagnostic: coexistenceValidation.meta_diagnostic }
+              : {}),
+          });
+          const upstreamFailure =
+            coexistenceValidation.error === "coexistence_waba_access_failed" ||
+            coexistenceValidation.error === "coexistence_phone_access_failed";
+          return json(req, upstreamFailure ? 502 : 409, {
+            ok: false,
+            error: coexistenceValidation.error ??
+              "coexistence_validation_failed",
+            connection_state: "error_registration",
+            telemetry: exchangeTelemetry,
+            ...(coexistenceValidation.meta_diagnostic
+              ? { meta_diagnostic: coexistenceValidation.meta_diagnostic }
+              : {}),
+          });
+        }
+        phoneData = coexistenceValidation.phone;
+      } else {
+        const phoneRes = await fetch(
+          `https://graph.facebook.com/${graphVersion}/${
+            encodeURIComponent(phoneNumberId)
+          }?fields=id,display_phone_number,verified_name,code_verification_status,status`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        phoneData = await phoneRes.json();
+        exchangeTelemetry.phone_get_http_status = phoneRes.status;
+        exchangeTelemetry.phone_get_success = phoneRes.ok;
+        exchangeTelemetry.normalized_phone_status =
+          text(phoneData.status, 100).toUpperCase() || null;
+        exchangeTelemetry.code_verification_status =
+          text(phoneData.code_verification_status, 100).toUpperCase() || null;
+        if (!phoneRes.ok) {
+          exchangeTelemetry.asset_validation = "FAIL";
+          return exchangeFailure(502, "registration_check_failed");
+        }
+        // STANDARD Embedded Signup keeps its existing registration readiness
+        // semantics. This predicate is intentionally not applied to an exact
+        // WhatsApp Business App coexistence completion.
+        const registrationReady =
+          phoneData.code_verification_status === "VERIFIED" &&
+          ["CONNECTED", "PENDING"].includes(
+            String(phoneData.status ?? "").toUpperCase(),
+          );
+        if (!registrationReady) {
+          exchangeTelemetry.asset_validation = "FAIL";
+          return json(req, 409, {
+            ok: false,
+            error: "registration_failed",
+            connection_state: "error_registration",
+            telemetry: exchangeTelemetry,
+          });
+        }
       }
 
-      const subscribeRes = await fetch(
-        `https://graph.facebook.com/${graphVersion}/${
-          encodeURIComponent(wabaId)
-        }/subscribed_apps`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-      const subscribeData = await subscribeRes.json();
-      if (!subscribeRes.ok || subscribeData?.success !== true) {
-        exchangeTelemetry.asset_validation = "FAIL";
-        return json(req, 502, {
-          ok: false,
-          error: "webhook_subscription_failed",
-          connection_state: "error_webhook",
-          telemetry: exchangeTelemetry,
+      if (coexistenceCompletion) {
+        const subscription = await subscribeLuisWabaApp({
+          graphVersion,
+          accessToken,
+          wabaId,
+          expectedAppId: metaAppId,
         });
+        exchangeTelemetry.subscription_before =
+          subscription.operation === "ALREADY_SUBSCRIBED"
+            ? "SUBSCRIBED"
+            : subscription.post_executed
+            ? "NOT_SUBSCRIBED"
+            : "UNKNOWN";
+        exchangeTelemetry.subscription_after =
+          subscription.expected_app_present === "PASS"
+            ? "SUBSCRIBED"
+            : subscription.expected_app_present === "FAIL"
+            ? "NOT_SUBSCRIBED"
+            : "UNKNOWN";
+        exchangeTelemetry.expected_app_present_after_subscription =
+          subscription.expected_app_present;
+        if (
+          subscription.operation === "FAILED" ||
+          subscription.expected_app_present !== "PASS"
+        ) {
+          exchangeTelemetry.asset_validation = "FAIL";
+          return json(req, 502, {
+            ok: false,
+            error: "webhook_subscription_failed",
+            connection_state: "error_webhook",
+            telemetry: exchangeTelemetry,
+            subscription: {
+              operation: subscription.operation,
+              post_executed: subscription.post_executed,
+              meta_post_result: subscription.meta_post_result,
+              meta_post_http_status: subscription.meta_post_http_status,
+              expected_app_present: subscription.expected_app_present,
+            },
+            ...(subscription.meta_diagnostic
+              ? { meta_diagnostic: subscription.meta_diagnostic }
+              : {}),
+          });
+        }
+      } else {
+        const subscribeRes = await fetch(
+          `https://graph.facebook.com/${graphVersion}/${
+            encodeURIComponent(wabaId)
+          }/subscribed_apps`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+          },
+        );
+        const subscribeData = await subscribeRes.json();
+        if (!subscribeRes.ok || subscribeData?.success !== true) {
+          exchangeTelemetry.asset_validation = "FAIL";
+          return json(req, 502, {
+            ok: false,
+            error: "webhook_subscription_failed",
+            connection_state: "error_webhook",
+            telemetry: exchangeTelemetry,
+          });
+        }
       }
       exchangeTelemetry.asset_validation = "PASS";
 
@@ -3164,10 +3503,15 @@ if (import.meta.main) {
       const expiresAt = expiresIn > 0
         ? new Date(Date.now() + expiresIn * 1_000).toISOString()
         : null;
-      const connectionState =
-        String(phoneData.status ?? "").toUpperCase() === "CONNECTED"
-          ? "connected"
-          : "pending_verification";
+      // A successful coexistence completion is not, by itself, proof that the
+      // current local `whatsapp_enabled` meaning (Cloud API send readiness) is
+      // satisfied. Persist the fresh credential and coexistence metadata while
+      // leaving activation conservative until a coexistence-aware read check is
+      // explicitly established.
+      const connectionState = !coexistenceCompletion &&
+          String(phoneData.status ?? "").toUpperCase() === "CONNECTED"
+        ? "connected"
+        : "pending_verification";
       exchangeTelemetry.org_settings_write_attempted = true;
       exchangeTelemetry.whatsapp_enabled_final = connectionState === "connected";
       const update = await admin.from("org_settings").update({

@@ -7,6 +7,7 @@ export type ReferralHubCouponAssetConfig = {
   image_url: string;
   active: boolean;
   intro_text: string;
+  benefit_text?: string;
   instructions: string;
   campaign_key: string;
 };
@@ -20,8 +21,9 @@ export const REFERRAL_HUB_COUPON_ASSETS: Record<
     image_url:
       "https://referral.creatyv.io/images/coupons/lg-medical-coupon.jpeg",
     active: true,
-    intro_text: "¡Claro! Aquí tienes tu cupón médico.",
-    instructions: "Preséntalo en una clínica participante.",
+    intro_text: "Tu beneficio está listo ✅",
+    benefit_text: "20% de descuento en servicios médicos participantes.",
+    instructions: "Muéstralo al llegar a una clínica participante.",
     campaign_key: "medico_urgencias_20",
   },
   luis_cupon_super: {
@@ -29,7 +31,7 @@ export const REFERRAL_HUB_COUPON_ASSETS: Record<
     image_url:
       "https://referral.creatyv.io/images/coupons/lg-supermarket-coupon.jpeg",
     active: true,
-    intro_text: "¡Claro! Aquí tienes tu cupón de supermercado.",
+    intro_text: "¡Listo! 🎟️ Tu cupón de supermercado está preparado.",
     instructions: "Preséntalo al momento de pagar en un comercio participante.",
     campaign_key: "mi_tierra_10",
   },
@@ -38,7 +40,7 @@ export const REFERRAL_HUB_COUPON_ASSETS: Record<
     image_url:
       "https://referral.creatyv.io/images/coupons/lg-dental-coupon.jpeg",
     active: true,
-    intro_text: "¡Claro! Aquí tienes tu cupón dental.",
+    intro_text: "Tu cupón dental está listo ✅",
     instructions: "Preséntalo en una clínica dental participante.",
     campaign_key: "dental_now_14_29",
   },

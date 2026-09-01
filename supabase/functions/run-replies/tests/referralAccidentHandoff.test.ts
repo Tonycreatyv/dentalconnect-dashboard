@@ -27,6 +27,7 @@ Deno.test("successful deterministic handoff uses exact new copy", () => {
   const confirmationIndex = outcome.reply.indexOf("Un asesor te contactará en breve");
   assert(disclaimerIndex >= 0 && confirmationIndex > disclaimerIndex);
   assertEquals((outcome.statePatch.collected as any).referral_hub.handoff_status, "created");
+  assertEquals((outcome.statePatch as any).handoff_to_human, undefined);
 });
 
 Deno.test("failed handoff does not promise advisor contact", () => {

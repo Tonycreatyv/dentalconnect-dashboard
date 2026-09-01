@@ -1,6 +1,7 @@
 export type NormalizedWhatsAppInbound = {
   content: string;
   payload_action: string | null;
+  flow_response?: Record<string, unknown>;
 };
 
 function safeString(input: unknown): string {
@@ -15,12 +16,26 @@ export function normalizeWhatsAppInboundMessage(msg: any): NormalizedWhatsAppInb
   const interactiveButtonId = safeString(msg?.interactive?.button_reply?.id);
   const interactiveListTitle = safeString(msg?.interactive?.list_reply?.title);
   const interactiveListId = safeString(msg?.interactive?.list_reply?.id);
+  const flowReply = msg?.interactive?.nfm_reply;
+  const hasFlowReply = Boolean(flowReply && typeof flowReply === "object");
+  const rawFlowResponse = safeString(flowReply?.response_json);
+  let flowResponse: Record<string, unknown> | null = null;
+  if (rawFlowResponse) {
+    try {
+      const parsed = JSON.parse(rawFlowResponse);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        flowResponse = parsed as Record<string, unknown>;
+      }
+    } catch { /* Flow payload remains invalid and is handled safely downstream. */ }
+  }
 
-  const content = textBody || interactiveButtonTitle || interactiveListTitle || buttonText || buttonPayload;
+  const content = textBody || interactiveButtonTitle || interactiveListTitle || buttonText || buttonPayload ||
+    (hasFlowReply ? "__whatsapp_flow_completed__" : "");
   if (!content) return null;
 
-  const payload_action = interactiveButtonId || interactiveListId || buttonPayload || null;
-  return { content, payload_action };
+  const payload_action = interactiveButtonId || interactiveListId || buttonPayload ||
+    (hasFlowReply ? "whatsapp_flow:complete" : null);
+  return { content, payload_action, ...(hasFlowReply ? { flow_response: flowResponse ?? {} } : {}) };
 }
 
 export function normalizeInboundFromPayloadAction(rawText: string, payloadActionRaw: string): string {

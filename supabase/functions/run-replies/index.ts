@@ -72,10 +72,22 @@ import {
 } from "./domain/referralHub/accidentHandoff.ts";
 import {
   customerCopyForServiceRequest,
+  type OperationalServiceId,
   operationalStatePatch,
   orchestrateCompletedServiceRequest,
-  type OperationalServiceId,
 } from "./domain/referralHub/serviceRequestOrchestrator.ts";
+import { captureImmigrationFlowRequest } from "./domain/referralHub/immigrationFlowRequest.ts";
+import {
+  clearMetaTestDemoTakeoverState,
+  metaTestDemoResetAction,
+} from "./domain/referralHub/demoTakeoverReset.ts";
+import {
+  isMetaTestTransport,
+  META_TEST_DEMO_ORGANIZATION_ID,
+  META_TEST_DEMO_PHONE_NUMBER_ID,
+  META_TEST_DEMO_ROUTE_TYPE,
+  selectWhatsAppTransport,
+} from "./domain/referralHub/metaTestTransport.ts";
 import {
   activateHumanTakeoverState,
   isHumanTakeoverActive,
@@ -97,6 +109,46 @@ import {
   type WhatsAppInteractiveListSpec,
 } from "../_shared/metaMessageAdapter.ts";
 import { handleReferralHubProductTurn } from "../_products/referral-hub/index.ts";
+import {
+  LUIS_BENEFITS,
+  LUIS_BENEFITS_FLOW_ACTION,
+  LUIS_BENEFITS_MARKETING_COPY_VERSION,
+  type LuisBenefitKey,
+  type LuisLegalState,
+  classifyLuisFlowCompletion,
+  diagnoseLuisBenefitFlowCompletionFailure,
+  diagnoseLuisIntentRoute,
+  isLuisLegalIntakeActive,
+  isLuisMainMenuCommand,
+  luisBenefitsActivationText,
+  LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN,
+  LUIS_UNIFIED_FLOW_DIRECT_ENTRY_SCREENS,
+  luisBenefitsFlowCta,
+  luisUnifiedFlowCta,
+  parseLuisBenefitFlowCompletion,
+  parseLuisLegalFlowCompletion,
+  resolveCouponMediaUrl,
+  resolveCouponPartnerName,
+  routeLuisTestFlowIntent,
+  routeLuisConversation,
+} from "../_products/referral-hub/luisBenefits.ts";
+import {
+  extractReferralQrPublicCode,
+  resolveReferralQrEntry,
+} from "../_products/referral-hub/qrEntries.ts";
+import {
+  mapQrEntryToLuisRoute,
+  recordLuisQrVisit,
+  withLuisQrAttribution,
+} from "./domain/referralHub/luisQrCampaign.ts";
+import { renderCouponMessage } from "../_shared/couponMessageTemplate.ts";
+import {
+  findSupermarketMatch,
+  formatNearestSupermarketIntroText,
+  formatNearestSupermarketLocation,
+  NEAREST_SUPERMARKET_CONFIRM_QUESTION,
+} from "./domain/referralHub/nearestSupermarket.ts";
+import { createGoogleMapsClient } from "../referral-voice-tools/googleMaps.ts";
 
 // =============================================================================
 // TYPES
@@ -139,6 +191,8 @@ interface GenerateReplyArgs {
   jobId: string;
   payloadAction?: string | null;
   channel?: "messenger" | "whatsapp";
+  channelUserId?: string | null;
+  allowTransientLuisMenuReset?: boolean;
 }
 
 interface GenerateReplyResult {
@@ -154,7 +208,1164 @@ interface GenerateReplyResult {
   outboundMessages?: Array<
     | { type: "text"; text: string }
     | { type: "image"; url: string; altText?: string; reusable?: boolean }
+    | { type: "location"; latitude: number; longitude: number; name: string; address: string }
   >;
+}
+
+type BenefitClaimRpcRow = {
+  claim_id?: unknown;
+  claim_code?: unknown;
+  claim_status?: unknown;
+  official_media_url?: unknown;
+  supermarket_location_name?: unknown;
+  requires_location_verification?: unknown;
+};
+
+function firstNameFromFlowName(fullName: string) {
+  return safeStr(fullName, "").trim().split(/\s+/)[0] || "";
+}
+
+// Best-effort, sanitized persistence for a single unresolved
+// tryFindNearestSupermarket outcome - reuses the existing, already-live
+// referral_operational_events table (see luisQrCampaign.ts's
+// recordLuisQrVisit for the same insert pattern), no schema change. Never
+// throws, never blocks the caller's existing fallback response. metadata
+// carries only: stage, googleHttpStatus, googleErrorCategory,
+// activeLocationCount, resultClassification - never an API key, raw
+// provider body, phone number, name, address, or ZIP.
+async function recordNearestSupermarketDiagnosticEvent(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  stage: string;
+  resultClassification: string;
+  googleHttpStatus?: number | null;
+  googleErrorCategory?: string | null;
+  activeLocationCount?: number | null;
+}): Promise<void> {
+  if (!args.leadId) return;
+  try {
+    const result = await args.supabase.from("referral_operational_events").insert({
+      organization_id: args.organizationId,
+      aggregate_type: "lead",
+      aggregate_id: args.leadId,
+      event_type: "luis_nearest_supermarket_diagnostic",
+      actor_type: "system",
+      source: "run-replies",
+      metadata: {
+        stage: args.stage,
+        googleHttpStatus: args.googleHttpStatus ?? null,
+        googleErrorCategory: args.googleErrorCategory ?? null,
+        activeLocationCount: args.activeLocationCount ?? null,
+        resultClassification: args.resultClassification,
+      },
+    });
+    if (result.error) {
+      console.warn("[nearest supermarket] diagnostic event insert failed", { reason: result.error.message });
+    }
+  } catch (error) {
+    console.warn("[nearest supermarket] diagnostic event insert threw", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+  }
+}
+
+// Thin, failure-safe wrapper around findSupermarketMatch: resolves the real
+// campaign_id for the given campaign_key (the module works in terms of the
+// canonical referral_coupon_campaigns.id, not the human campaign_key), and
+// collapses every possible failure mode (missing Maps key, missing/errored
+// campaign lookup, geocoding/Routes failure, "unresolved" match) into a
+// single null - the caller's existing "estamos verificando" fallback stays
+// the only behavior on any of those paths, so this can never regress into
+// a guess.
+async function tryFindNearestSupermarket(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  campaignKey: string;
+  postalCode: string;
+}): Promise<Extract<Awaited<ReturnType<typeof findSupermarketMatch>>, { status: "matched" }> | null> {
+  const mapsKey = Deno.env.get("GOOGLE_MAPS_PLATFORM_API_KEY") ?? "";
+  if (!mapsKey) {
+    logEvent("nearest_supermarket_diagnostic", {
+      stage: "maps_key_missing",
+      keyPresent: false,
+    });
+    await recordNearestSupermarketDiagnosticEvent({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      stage: "maps_key_missing",
+      resultClassification: "maps_key_missing",
+      activeLocationCount: null,
+    });
+    return null;
+  }
+  try {
+    const campaignRow = await args.supabase
+      .from("referral_coupon_campaigns")
+      .select("id")
+      .eq("organization_id", args.organizationId)
+      .eq("campaign_key", args.campaignKey)
+      .maybeSingle();
+    const campaignId = safeStr((campaignRow.data as { id?: unknown } | null)?.id, "");
+    if (campaignRow.error || !campaignId) {
+      logEvent("nearest_supermarket_diagnostic", {
+        stage: "campaign_lookup_failed",
+        keyPresent: true,
+        campaignKey: args.campaignKey,
+        campaignFound: Boolean(campaignId),
+        supabaseErrorCode: campaignRow.error?.code ?? null,
+      });
+      await recordNearestSupermarketDiagnosticEvent({
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        stage: "campaign_lookup_failed",
+        resultClassification: "campaign_lookup_failed",
+        activeLocationCount: null,
+      });
+      return null;
+    }
+    const match = await findSupermarketMatch({
+      supabase: args.supabase,
+      googleMaps: createGoogleMapsClient(mapsKey),
+      organizationId: args.organizationId,
+      campaignId,
+      postalCode: args.postalCode,
+    });
+    if (match.status !== "matched") {
+      // Sanitized diagnostic only - never the API key, never a customer
+      // phone number/name. postal_code alone is not sensitive and is
+      // exactly what's needed to reproduce "why did ZIP X fail" -
+      // everything else here is Google's own error status/message (safe,
+      // never contains request credentials) or booleans.
+      logEvent("nearest_supermarket_diagnostic", {
+        stage: `unresolved:${match.reason}`,
+        keyPresent: true,
+        campaignFound: true,
+        postalCode: match.customerZip,
+        httpStatus: match.debugDetail?.httpStatus ?? null,
+        googleErrorStatus: match.debugDetail?.googleErrorStatus ?? null,
+        googleErrorMessage: match.debugDetail?.googleErrorMessage ?? null,
+        networkError: match.debugDetail?.networkError ?? null,
+      });
+      await recordNearestSupermarketDiagnosticEvent({
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        stage: `unresolved:${match.reason}`,
+        resultClassification: match.reason,
+        googleHttpStatus: match.debugDetail?.httpStatus ?? null,
+        googleErrorCategory: match.debugDetail?.googleErrorStatus ??
+          (match.debugDetail?.networkError ? "NETWORK_ERROR" : null),
+        activeLocationCount: match.activeLocationCount,
+      });
+      return null;
+    }
+    return match;
+  } catch (err) {
+    logEvent("nearest_supermarket_diagnostic", {
+      stage: "unexpected_exception",
+      keyPresent: true,
+      // Only the exception's class name is logged (e.g. "TypeError"),
+      // never its full message/stack, which could in principle echo back
+      // request data - the class name alone is enough to distinguish a
+      // real bug from a timeout/network failure.
+      exceptionType: err instanceof Error ? err.name : typeof err,
+    });
+    await recordNearestSupermarketDiagnosticEvent({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      stage: "unexpected_exception",
+      resultClassification: "unexpected_exception",
+      activeLocationCount: null,
+    });
+    return null;
+  }
+}
+
+async function buildLuisBenefitsFlowCompletionResult(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  rawFlowResponse: unknown;
+  orgSettings: Record<string, unknown>;
+}): Promise<GenerateReplyResult | null> {
+  if (args.organizationId !== "luis-gabriel-referral-hub" || !args.leadId) {
+    return null;
+  }
+  const completion = parseLuisBenefitFlowCompletion(args.rawFlowResponse);
+  if (!completion) {
+    // Sanitized diagnostic (2026-08-25, Problem 1) - a real customer
+    // (lead 0bb34495, ZIP 30096) hit this exact branch with an
+    // apparently-valid submission and no claim was ever created. Never
+    // logs the raw name/email/postal_code, only which rule rejected it.
+    logEvent("luis_benefit_flow_completion_rejected", {
+      leadId: args.leadId,
+      ...diagnoseLuisBenefitFlowCompletionFailure(args.rawFlowResponse),
+    });
+    return {
+      reply: "No pudimos validar tu beneficio. Por favor abre el formulario nuevamente e inténtalo otra vez.",
+      // lastIntent set here (and in every other branch below) so a lead
+      // whose entire interaction history is a Flow completion is still
+      // correctly recognized as "returning" on their next free-text
+      // "Menú" - otherwise buildLuisConversationResult's isReturningLead
+      // check (which reads leadState.lastIntent) never sees a value and
+      // repeats the full first-contact greeting every time.
+      statePatch: { lastIntent: "luis_benefit_claim" },
+      debugNote: "referral_hub:benefit_claim_invalid_flow",
+    };
+  }
+  const benefit = LUIS_BENEFITS[completion.benefit_key];
+  const leadUpdate = await args.supabase.from("leads").update({
+    full_name: completion.full_name,
+    first_name: firstNameFromFlowName(completion.full_name),
+    ...(completion.email ? { email: completion.email } : {}),
+    updated_at: nowIso(),
+  }).eq("id", args.leadId).eq("organization_id", args.organizationId);
+  if (leadUpdate.error) throw new Error("benefit_claim_lead_update_failed");
+
+  const claimResult = await args.supabase.rpc("request_referral_benefit_claim", {
+    p_organization_id: args.organizationId,
+    p_campaign_key: benefit.campaignKey,
+    p_lead_id: args.leadId,
+    p_postal_code: completion.postal_code,
+    p_email: completion.email,
+    p_marketing_consent: completion.marketing_consent,
+    p_marketing_source: completion.marketing_consent ? "whatsapp_flow" : null,
+    p_marketing_copy_version: completion.marketing_consent
+      ? LUIS_BENEFITS_MARKETING_COPY_VERSION
+      : null,
+  });
+  if (claimResult.error) throw new Error("benefit_claim_request_failed");
+  const row = (Array.isArray(claimResult.data)
+    ? claimResult.data[0]
+    : claimResult.data) as BenefitClaimRpcRow | null;
+  const claimId = safeStr(row?.claim_id, "");
+  const claimCode = safeStr(row?.claim_code, "");
+  const status = safeStr(row?.claim_status, "");
+  if (!claimId || !claimCode || !["REQUESTED", "ISSUED", "REDEEMED"].includes(status)) {
+    throw new Error("benefit_claim_response_invalid");
+  }
+  const integrations = getIntegrationsConfig(args.orgSettings);
+  if (status === "REDEEMED") {
+    return {
+      reply: "Ya utilizaste este beneficio ✅\n\nTodavía podés activar otro de tus beneficios disponibles.",
+      statePatch: { lastIntent: "luis_benefit_claim" },
+      flowCta: luisBenefitsFlowCta(safeStr(integrations.luis_benefits_flow_id, "")) ?? undefined,
+      debugNote: `referral_hub:benefit_claim_redeemed:${claimId}`,
+    };
+  }
+  if (row?.requires_location_verification === true) {
+    const verifyingFallback: GenerateReplyResult = {
+      reply: "Estamos verificando cuál de nuestras ubicaciones te corresponde.\n\nTe ayudaremos por este mismo WhatsApp.",
+      statePatch: { lastIntent: "luis_benefit_claim" },
+      debugNote: `referral_hub:benefit_claim_location_verification:${claimId}`,
+    };
+    // Nearest-supermarket proposal: only for SUPERMARKET (the RPC only ever
+    // sets requires_location_verification for that benefit), only when the
+    // already-configured Google Maps key is present, and only ever a
+    // proposal requiring explicit confirmation - never an issuance. Any
+    // failure (missing key, missing campaign row, geocoding/Routes error,
+    // no active location within range) falls back to the exact original
+    // "estamos verificando" behavior, never a guess.
+    const nearestMatch = completion.benefit_key === "SUPERMARKET"
+      ? await tryFindNearestSupermarket({
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        campaignKey: benefit.campaignKey,
+        postalCode: completion.postal_code,
+      })
+      : null;
+    if (!nearestMatch) return verifyingFallback;
+    // Native WhatsApp location message (2026-08-27) replaces the raw pasted
+    // Google Maps URL - only ever built from real coordinates a successful
+    // Google geocode already produced (see findSupermarketMatch). If
+    // coordinates are somehow unavailable, this is not a location the
+    // customer can honestly be shown a map for - fall back to the existing
+    // truthful "estamos verificando" text rather than invent one or send a
+    // broken location message. No coupon is issued on this path regardless.
+    const nearestLocation = formatNearestSupermarketLocation(nearestMatch);
+    if (!nearestLocation) return verifyingFallback;
+    return {
+      reply: NEAREST_SUPERMARKET_CONFIRM_QUESTION,
+      statePatch: {
+        lastIntent: "luis_benefit_claim",
+        nextExpected: "luis_nearest_supermarket_confirm",
+        collected: {
+          luis_pending_nearest_supermarket: {
+            claimId,
+            locationId: nearestMatch.locationId,
+            storeName: nearestMatch.storeName,
+            address: nearestMatch.address,
+          },
+        },
+      },
+      interactiveButtons: [
+        { id: "luis_nearest:confirm", title: "Sí, enviar cupón" },
+        { id: "luis_nearest:reject", title: "No, gracias" },
+      ],
+      // Sent in order, before this main reply+buttons: 1) short intro text
+      // naming the store, 2) a native WhatsApp location message (tappable
+      // map, no raw URL, no external shortener) - see the outboundMessages
+      // send loop, which sends these strictly before the main reply below.
+      outboundMessages: [
+        { type: "text", text: formatNearestSupermarketIntroText(nearestMatch) },
+        { type: "location", ...nearestLocation },
+      ],
+      debugNote: `referral_hub:benefit_claim_nearest_proposed:${claimId}`,
+    };
+  }
+  // Rollback-safe DB-driven lookup. Never consulted for SUPERMARKET at all —
+  // that benefit's image is exclusively resolved by the existing RPC via
+  // row.official_media_url (exact-ZIP location match or nothing, per
+  // request_referral_benefit_claim), which this block does not touch.
+  // For every other benefit: delivery_source='db' (the default is
+  // 'legacy') is the entire cutover switch. If the lookup fails for any
+  // reason, or delivery_source isn't 'db', behavior is byte-for-byte
+  // identical to today - see couponMessageTemplateParity.test.ts.
+  const isSupermarket = completion.benefit_key === "SUPERMARKET";
+  let dbCoupon: {
+    image_url: string;
+    customer_copy: string;
+    terms_text: string;
+    businessName: string;
+    businessAddress: string;
+  } | null = null;
+  if (!isSupermarket) {
+    const couponRow = await args.supabase
+      .from("referral_coupon_campaigns")
+      .select("image_url, customer_copy, terms_text, delivery_source, referral_partners(name, address_text)")
+      .eq("organization_id", args.organizationId)
+      .eq("campaign_key", benefit.campaignKey)
+      .maybeSingle();
+    const data = couponRow.data as {
+      image_url: string | null;
+      customer_copy: string | null;
+      terms_text: string | null;
+      delivery_source: string | null;
+      referral_partners: { name: string | null; address_text: string | null } | null;
+    } | null;
+    if (!couponRow.error && data?.delivery_source === "db") {
+      dbCoupon = {
+        image_url: safeStr(data.image_url, ""),
+        customer_copy: safeStr(data.customer_copy, ""),
+        terms_text: safeStr(data.terms_text, ""),
+        businessName: safeStr(data.referral_partners?.name, ""),
+        businessAddress: safeStr(data.referral_partners?.address_text, ""),
+      };
+    }
+  }
+  const mediaUrl = resolveCouponMediaUrl({
+    isSupermarket,
+    rpcOfficialMediaUrl: safeStr(row?.official_media_url, ""),
+    dbImageUrl: dbCoupon?.image_url ?? "",
+    hardcodedFallback: benefit.mediaUrl ?? "",
+  });
+  if (!/^https:\/\//.test(mediaUrl)) {
+    return {
+      reply: "Estamos preparando tu beneficio. Te ayudaremos por este mismo WhatsApp.",
+      statePatch: { lastIntent: "luis_benefit_claim" },
+      debugNote: `referral_hub:benefit_claim_media_pending:${claimId}`,
+    };
+  }
+  const partnerName = resolveCouponPartnerName({
+    rpcSupermarketLocationName: safeStr(row?.supermarket_location_name, ""),
+    dbBusinessName: dbCoupon?.businessName ?? "",
+    hardcodedFallback: benefit.partnerName ?? null,
+  });
+  const activationText = dbCoupon?.customer_copy
+    ? [
+      renderCouponMessage(dbCoupon.customer_copy, {
+        customer_first_name: firstNameFromFlowName(completion.full_name),
+        business_name: partnerName ?? "",
+        benefit_name: benefit.displayName,
+        claim_code: claimCode,
+        address: dbCoupon.businessAddress,
+      }),
+      ...(dbCoupon.terms_text ? [dbCoupon.terms_text] : []),
+    ].join("\n\n")
+    : luisBenefitsActivationText({
+      firstName: firstNameFromFlowName(completion.full_name),
+      benefitDisplayName: benefit.displayName,
+      claimCode,
+      partnerName,
+    });
+  return {
+    // Problem 2 (2026-08-25): the required activation message (image +
+    // "¡Listo, {name}! ... Código de activación: ..." above, sent via
+    // outboundMessages) already delivers the coupon - this second message
+    // is the interactive-button container the buttons must ride on
+    // (WhatsApp requires a dedicated message for that), not a duplicate
+    // dispatch. It repeated "Listo, {name} 🎉 Tu beneficio ya está
+    // disponible" right under the real activation message and read as an
+    // accidental duplicate, so its copy is now just the CTA question -
+    // buttons/ids unchanged.
+    reply: "¿Te gustaría ver otro beneficio o consultar alguno de nuestros servicios?",
+    statePatch: { lastIntent: "luis_benefit_claim" },
+    interactiveButtons: [
+      { id: "luis_benefits:another", title: "Ver beneficios" },
+      { id: "luis_benefits:services", title: "Ver servicios" },
+      { id: "luis_benefits:finalize", title: "Finalizar" },
+    ],
+    // Order (2026-08-27): image only here - the claim is issued
+    // immediately after this image is accepted (see the shared send-
+    // processing gate on this exact debugNote prefix), strictly before the
+    // activation text is sent, so the text is never shown claiming the
+    // benefit is active while the database still says otherwise.
+    // activationText moves to outboundPrelude, which the same gate sends
+    // right after issuance and strictly before this reply+menu below.
+    outboundMessages: [
+      { type: "image", url: mediaUrl, altText: `Beneficio ${benefit.displayName}` },
+    ],
+    outboundPrelude: [{ text: activationText }],
+    debugNote: `referral_hub:benefit_claim_delivery:${claimId}`,
+  };
+}
+
+// Production regression (2026-08-26): organization_settings.integrations
+// for the Luis org only ever configures luis_unified_flow_id — the
+// separate, legacy standalone Benefits Flow's luis_benefits_flow_id has
+// never been set. Every route that resolves to {kind:"benefits"} (natural-
+// language specific-benefit requests, all three benefits_clarify buttons,
+// the pre-existing "luis main benefits"/"luis benefits another" button
+// actions, and benefit-campaign QR scans) went through this function,
+// which previously only ever tried the unconfigured legacy Flow and fell
+// straight to a dead-end fallback text — never a real Flow — instead of
+// gracefully degrading to the one real, configured, working destination
+// (the Unified Services Flow), exactly like every other confident-intent
+// route already does (see luisUnifiedFlowEntryResult). If the legacy Flow
+// IS configured, it is still preferred, unchanged from before.
+//
+// Follow-up (2026-08-26, same day): the contextual-copy-only mitigation
+// above was not enough — the customer still landed on SERVICE_SELECT (the
+// full general menu) and had to re-pick the same category. Real fix
+// requires 3 new zero-inbound-edge screens on the published Flow
+// (SUPERMARKET_ENTRY/MEDICAL_ENTRY/BENEFITS_ENTRY — see
+// docs/proposed-migrations/20260826_draft_luis_unified_services_flow_direct_entry_screens.{json,md},
+// not yet applied/published). LUIS_UNIFIED_FLOW_DIRECT_ENTRY_SCREENS/
+// LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN below name those (still draft-only)
+// screens. DO NOT DEPLOY this file until that Flow change is live — sending
+// WhatsApp a flow_action_payload.screen the published Flow doesn't recognize
+// will fail for real customers.
+function luisBenefitsFlowEntryResult(args: {
+  organizationId: string;
+  orgSettings: Record<string, unknown>;
+  leadState: Json | null;
+  directCampaignEntry?: boolean;
+  // Which specific benefit the customer already named (via text or a
+  // benefits_clarify button tap). Selects the direct-entry screen (see the
+  // note above) so the customer is never asked to re-pick the same benefit
+  // — undefined (directCampaignEntry, "Ver otros", "Ver beneficios") targets
+  // the shared BENEFITS_ENTRY picker instead of the single-benefit screens.
+  requestedBenefitKey?: LuisBenefitKey;
+}): GenerateReplyResult | null {
+  const integrations = getIntegrationsConfig(args.orgSettings);
+  const flowCta = luisBenefitsFlowCta(
+    safeStr(integrations.luis_benefits_flow_id, ""),
+  );
+  if (flowCta) {
+    return {
+      reply: args.directCampaignEntry
+        ? "Hola, te saluda Luis Gabriel 👋\n\nTocá el botón para activar uno de tus beneficios."
+        : "Elegí el beneficio que querés activar.",
+      statePatch: {
+        lastIntent: args.directCampaignEntry
+          ? "luis_benefits_flyer_direct_entry"
+          : "luis_benefits_flow_cta",
+      },
+      flowCta,
+      debugNote: "referral_hub:luis_benefits_flow_cta",
+    };
+  }
+  const requestedBenefit = args.requestedBenefitKey ? LUIS_BENEFITS[args.requestedBenefitKey] : null;
+  const directEntryScreen = args.requestedBenefitKey
+    ? LUIS_UNIFIED_FLOW_DIRECT_ENTRY_SCREENS[args.requestedBenefitKey]
+    : undefined;
+  const entryScreen = directEntryScreen ?? LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN;
+  const contextualGreeting = requestedBenefit
+    ? `Perfecto, vamos a tu beneficio de ${requestedBenefit.displayName}.\n\nTocá el botón para continuar.`
+    : "Elegí el beneficio que querés activar.\n\nTocá el botón para ver las opciones.";
+  const contextualCtaText = requestedBenefit ? "Ver mi beneficio" : "Ver beneficios";
+  return luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting, contextualCtaText, entryScreen) ?? {
+    reply: "Estamos preparando tus beneficios. Te ayudaremos por este mismo WhatsApp.",
+    statePatch: {},
+    debugNote: "referral_hub:luis_benefits_flow_not_configured",
+  };
+}
+
+function clearLuisTemporaryState(leadState: Json | null): Json {
+  const state = leadState && typeof leadState === "object"
+    ? { ...(leadState as Record<string, unknown>) }
+    : {};
+  const collected = state.collected && typeof state.collected === "object"
+    ? { ...(state.collected as Record<string, unknown>) }
+    : {};
+  delete collected.luis_legal;
+  delete collected.luis_legal_draft;
+  delete collected.luis_legal_answers;
+  delete state.pending_intent;
+  delete state.awaiting_field;
+  delete state.pending_field;
+  delete state.active_legal_intake;
+  delete state.legal_intake;
+  if (safeStr(state.lastIntent, "").startsWith("luis_legal_")) delete state.lastIntent;
+  if (safeStr(state.nextExpected, "") === "luis_legal") delete state.nextExpected;
+  return { ...state, collected };
+}
+
+function hasActiveLuisLegalIntake(leadState: Json | null): boolean {
+  const legal = (leadState as any)?.collected?.luis_legal;
+  return Boolean(legal && typeof legal === "object" &&
+    safeStr((legal as any).topic, "") &&
+    safeStr((legal as any).step, "") !== "completed");
+}
+
+function luisMainMenuResult(leadState: Json | null, contextualGreeting?: string): GenerateReplyResult {
+  const cleared = clearLuisTemporaryState(leadState) as Record<string, unknown>;
+  const greeting = contextualGreeting || "Hola, te saluda Luis Gabriel 👋\nEstamos aquí para conectarte con ayuda y beneficios para nuestra comunidad.\n¿Qué necesitás hoy?";
+  return {
+    reply: greeting,
+    statePatch: {
+      ...cleared,
+      stage: "DISCOVERY",
+      lastIntent: "luis_main_menu",
+      nextExpected: "luis_main_menu",
+      conversation_mode: null,
+      bot_paused_until: null,
+      paused_reason: null,
+      collected: (cleared.collected as Record<string, unknown>) ?? {},
+    },
+    leadPatch: { handoff_to_human: false, updated_at: nowIso() },
+    interactiveList: {
+      body: greeting,
+      buttonText: "Ver opciones",
+      sections: [{
+        title: "Opciones",
+        rows: [
+          {
+            id: "luis_legal:immigration",
+            title: "🛂 Inmigración",
+            description: "Ayuda con procesos y consultas migratorias.",
+          },
+          {
+            id: "luis_legal:accident",
+            title: "🚗 Accidente de auto",
+            description: "Ayuda después de un accidente.",
+          },
+          {
+            id: "luis_legal:criminal",
+            title: "⚖️ DUI / Defensa criminal",
+            description: "DUI, arrestos y cargos criminales.",
+          },
+          { id: "luis_main:benefits", title: "🎁 Beneficios y cupones" },
+          {
+            id: "luis_main:team",
+            title: "👤 Hablar con equipo",
+            description: "Hablar con nuestro equipo",
+          },
+        ],
+      }],
+    },
+    debugNote: "referral_hub:luis_main_menu",
+  };
+}
+
+// Normal entry / MENU / return-to-menu for real Luis WhatsApp traffic now
+// opens the unified Flow (SERVICE_SELECT) instead of the legacy interactive
+// list, driven entirely by organization_settings.integrations.luis_unified_flow_id
+// so it degrades safely to the untouched legacy menu when unset.
+function luisUnifiedFlowEntryResult(
+  orgSettings: Record<string, unknown>,
+  leadState: Json | null,
+  contextualGreeting?: string,
+  contextualCtaText?: string,
+  // Draft-only direct-entry screen (see LUIS_UNIFIED_FLOW_DIRECT_ENTRY_SCREENS/
+  // LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN doc comments) — omit to keep the
+  // existing, live SERVICE_SELECT behavior unchanged.
+  entryScreen?: string,
+): GenerateReplyResult | null {
+  const integrations = getIntegrationsConfig(orgSettings);
+  // Pass the same contextualGreeting into the flowCta body: WhatsApp actually
+  // displays flowCta.bodyText for this message, not the `reply` field below
+  // (see sendViaWhatsApp) — varying only `reply` would leave the customer
+  // seeing the full first-contact intro every time regardless.
+  const flowCta = luisUnifiedFlowCta(
+    safeStr(integrations.luis_unified_flow_id, ""),
+    contextualGreeting,
+    contextualCtaText,
+    entryScreen,
+  );
+  if (!flowCta) return null;
+  const cleared = clearLuisTemporaryState(leadState) as Record<string, unknown>;
+  const greeting = contextualGreeting ||
+    "Hola, te saluda Luis Gabriel 👋\n\nQué gusto tenerte por aquí. Contanos qué necesitás y te ayudamos a encontrar la opción correcta.";
+  return {
+    reply: greeting,
+    statePatch: {
+      ...cleared,
+      stage: "DISCOVERY",
+      lastIntent: "luis_unified_flow_cta",
+      nextExpected: "luis_unified_flow_cta",
+      conversation_mode: null,
+      bot_paused_until: null,
+      paused_reason: null,
+      collected: (cleared.collected as Record<string, unknown>) ?? {},
+    },
+    leadPatch: { handoff_to_human: false, updated_at: nowIso() },
+    flowCta,
+    debugNote: "referral_hub:luis_unified_flow_cta",
+  };
+}
+
+function luisLegalPatch(
+  existing: Json | null,
+  legal: Record<string, unknown> | null,
+): Json {
+  const collected = {
+    ...(((existing as any)?.collected ?? {}) as Record<string, unknown>),
+  };
+  const completed = Boolean(legal &&
+    (safeStr(legal.step, "") === "completed" || safeStr(legal.intake_type, "")));
+  if (completed) {
+    delete collected.luis_legal;
+    collected.luis_legal_last_completed = legal;
+    return {
+      stage: "DISCOVERY",
+      lastIntent: "luis_legal_completed",
+      nextExpected: null,
+      collected,
+    };
+  }
+  return {
+    stage: "DISCOVERY",
+    lastIntent: "luis_legal_intake",
+    nextExpected: "luis_legal",
+    collected: { ...collected, luis_legal: legal },
+  };
+}
+
+async function luisHumanHandoffResult(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  leadState: Json | null;
+  channel: string;
+  messagePreview: string;
+  reply: string;
+  statePatch: Json;
+  debugNote: string;
+}): Promise<GenerateReplyResult> {
+  await recordHumanHandoffEvent({
+    supabase: args.supabase,
+    organizationId: args.organizationId,
+    leadId: args.leadId,
+    channel: args.channel,
+    messagePreview: args.messagePreview,
+  });
+  return {
+    reply: args.reply,
+    statePatch: args.statePatch,
+    leadPatch: { handoff_to_human: true, updated_at: nowIso() },
+    debugNote: args.debugNote,
+  };
+}
+
+async function buildLuisLegalFlowCompletionResult(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  leadState: Json | null;
+  rawFlowResponse: unknown;
+  channel: string;
+  channelUserId: string;
+  deliveryKey: string;
+}): Promise<GenerateReplyResult | null> {
+  if (args.organizationId !== "luis-gabriel-referral-hub" || !args.leadId) {
+    return null;
+  }
+  const completion = parseLuisLegalFlowCompletion(args.rawFlowResponse);
+  if (!completion) return null;
+  const leadUpdate = await args.supabase.from("leads").update({
+    full_name: completion.full_name,
+    first_name: firstNameFromFlowName(completion.full_name),
+    updated_at: nowIso(),
+  }).eq("id", args.leadId).eq("organization_id", args.organizationId);
+  if (leadUpdate.error) throw new Error("legal_flow_lead_update_failed");
+  const legalIntake = {
+    source: "whatsapp_flow",
+    ...completion,
+    completed_at: nowIso(),
+  };
+  if (completion.intake_type === "IMMIGRATION") {
+    await captureImmigrationFlowRequest({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      channelUserId: args.channelUserId,
+      deliveryKey: args.deliveryKey,
+      completion: {
+        topic: completion.topic,
+        postal_code: completion.postal_code,
+        description: completion.description,
+        completed_at: legalIntake.completed_at,
+        sharing_consent: completion.sharing_consent,
+        consent_version: completion.consent_version,
+        consent_source: completion.consent_source,
+      },
+    });
+  }
+  // Preserve the existing staff-side follow-up event, but do not use
+  // luisHumanHandoffResult: a completion is not a request for live human
+  // control, and that helper also sets leads.handoff_to_human.
+  await recordHumanHandoffEvent({
+    supabase: args.supabase,
+    organizationId: args.organizationId,
+    leadId: args.leadId,
+    channel: args.channel,
+    messagePreview: `Solicitud legal Flow: ${completion.intake_type}`,
+  });
+  return {
+    reply: completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "DECLINED"
+      ? "Gracias. Guardamos tu solicitud, pero no compartiremos tu información con un aliado. Si deseas continuar más adelante, puedes volver a escribirnos."
+      : completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "AUTHORIZED"
+      ? "Gracias. Recibimos tu información. En breve uno de nuestros aliados de inmigración se pondrá en contacto contigo."
+      : "Gracias. Recibimos tu solicitud y un integrante del equipo te dará seguimiento por este mismo WhatsApp.",
+    statePatch: luisLegalPatch(args.leadState, legalIntake),
+    debugNote: `referral_hub:luis_legal_flow_${completion.intake_type.toLowerCase()}_completed`,
+  };
+}
+
+function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "LEGAL" | "UNKNOWN"): GenerateReplyResult {
+  if (kind === "LEGAL") {
+    return {
+      reply: "No pudimos validar tu solicitud. Por favor abre el formulario nuevamente e inténtalo otra vez.",
+      statePatch: {},
+      debugNote: "referral_hub:legal_intake_invalid_flow",
+    };
+  }
+  if (kind === "BENEFITS") {
+    return {
+      reply: "No pudimos validar tu beneficio. Por favor abre el formulario nuevamente e inténtalo otra vez.",
+      statePatch: {},
+      debugNote: "referral_hub:benefit_claim_invalid_flow",
+    };
+  }
+  return {
+    reply: "No pudimos procesar el formulario. Por favor abre el formulario nuevamente e inténtalo otra vez.",
+    statePatch: {},
+    debugNote: "referral_hub:unknown_flow_completion_contract",
+  };
+}
+
+export async function buildLuisConversationResult(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  leadState: Json | null;
+  inboundText: string;
+  payloadAction?: string | null;
+  channel: string;
+  orgSettings: Record<string, unknown>;
+  testFlowIds?: LuisTestFlowIds | null;
+}): Promise<GenerateReplyResult | null> {
+  if (args.organizationId !== "luis-gabriel-referral-hub" || args.channel !== "whatsapp") {
+    return null;
+  }
+  const collected = ((args.leadState as any)?.collected ?? {}) as Record<string, unknown>;
+  const rawLegal = collected.luis_legal;
+  const legalState = rawLegal && typeof rawLegal === "object"
+    ? rawLegal as LuisLegalState
+    : null;
+  const route = routeLuisConversation({
+    inboundText: args.inboundText,
+    payloadAction: args.payloadAction,
+    legalState,
+    nextExpected: (args.leadState as any)?.nextExpected,
+  });
+
+  if (args.testFlowIds) {
+    const testFlowEntry = luisTestFlowEntryResult({
+      inboundText: args.inboundText,
+      payloadAction: args.payloadAction,
+      flowIds: args.testFlowIds,
+    });
+    if (testFlowEntry) return testFlowEntry;
+  }
+
+  // Deterministic campaign entry via QR/flyer link: a fresh scan carries an
+  // opaque [[rhq:code]] marker in THIS turn's inboundText (never persisted
+  // state), so it can never be "stale" and always reflects the customer's
+  // most recent scan, overriding the freeform-text route for this turn only.
+  // Falls through to normal routing (unresolved, e.g. paused campaign,
+  // wrong org, or a non-benefit QR entry type) rather than blocking.
+  let qrEntryForAttribution: Awaited<ReturnType<typeof resolveReferralQrEntry>> = null;
+  const qrPublicCode = extractReferralQrPublicCode(args.inboundText);
+  if (qrPublicCode) {
+    const resolved = await resolveReferralQrEntry(args.supabase, qrPublicCode);
+    if (resolved && resolved.organizationId === args.organizationId) {
+      qrEntryForAttribution = resolved;
+      void recordLuisQrVisit({
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        entry: resolved,
+      });
+    }
+  }
+  const qrRoute = qrEntryForAttribution
+    ? mapQrEntryToLuisRoute(qrEntryForAttribution)
+    : null;
+  const effectiveRoute = qrRoute ?? route;
+
+  // Sanitized routing diagnostic: booleans/enums/categories only, never the
+  // raw inbound text, name, phone, email, or any other personal data (Part
+  // 22 of the required test corpus). routeSource is derived from the same
+  // cheap, already-available signals routeLuisConversation itself checks in
+  // priority order (QR > button/payload > active structured state > text
+  // classification), not by re-deriving its internal pattern logic, so this
+  // can never drift from the real routing decision.
+  const luisLegalActiveThisTurn = Boolean(
+    legalState?.topic &&
+      isLuisLegalIntakeActive({ legalState, nextExpected: (args.leadState as any)?.nextExpected }),
+  );
+  const intentDiagnostic = diagnoseLuisIntentRoute({ inboundText: args.inboundText });
+  const routeSource = qrRoute
+    ? "qr"
+    : args.payloadAction
+    ? "button_or_payload"
+    : luisLegalActiveThisTurn
+    ? "structured_state"
+    : intentDiagnostic.selectedIntentKind === "LEGAL_AMBIGUOUS"
+    ? "clarification"
+    : effectiveRoute.kind === "main_menu" && effectiveRoute.trigger === "greeting"
+    ? "greeting"
+    : effectiveRoute.kind === "main_menu"
+    ? "fallback"
+    : "text_classification";
+  logEvent("luis_intent_route_resolved", {
+    selectedIntentKind: intentDiagnostic.selectedIntentKind,
+    matchedRuleCategory: intentDiagnostic.matchedRuleCategory,
+    negationBlockedCandidate: intentDiagnostic.negationBlockedCandidate,
+    thirdPartyReferentDetected: intentDiagnostic.thirdPartyReferentDetected,
+    routeSource,
+    effectiveRouteKind: effectiveRoute.kind,
+  });
+
+  // A lead that has already received a prior Luis intent (any previous
+  // turn) has already seen a greeting — reopening the menu should feel like
+  // a quick reentry, not repeat the full first-contact introduction. Which
+  // reentry copy depends on WHY the menu is reopening: a bare greeting
+  // ("Hola") reads oddly with the "Claro 👌 ..." explicit-menu-return copy,
+  // so it gets its own warmer, personalized text instead (Priority 2,
+  // 2026-08-24) — an explicit "Menú principal"/"Volver al menú" keeps the
+  // original copy unchanged.
+  const isReturningLead = Boolean(safeStr((args.leadState as any)?.lastIntent, ""));
+  const explicitReentryGreeting = "Claro 👌 Acá tenés nuevamente nuestras opciones.";
+  function returningCustomerGreeting(): string {
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    return firstName
+      ? `¡Hola, ${firstName}! Qué gusto tenerte de nuevo 👋 ¿En qué te podemos ayudar hoy?`
+      : "¡Hola! Qué gusto tenerte de nuevo 👋 ¿En qué te podemos ayudar hoy?";
+  }
+
+  async function withQrAttributionIfResolved(
+    result: GenerateReplyResult | null,
+  ): Promise<GenerateReplyResult | null> {
+    return result && qrEntryForAttribution
+      ? withLuisQrAttribution(result, qrEntryForAttribution)
+      : result;
+  }
+
+  if (effectiveRoute.kind === "main_menu") {
+    const contextualGreeting = !isReturningLead
+      ? undefined
+      : effectiveRoute.trigger === "greeting"
+      ? returningCustomerGreeting()
+      : explicitReentryGreeting;
+    return await withQrAttributionIfResolved(
+      luisUnifiedFlowEntryResult(
+        args.orgSettings,
+        args.leadState,
+        contextualGreeting,
+      ) ?? luisMainMenuResult(args.leadState, contextualGreeting),
+    );
+  }
+  if (effectiveRoute.kind === "benefits") {
+    return await withQrAttributionIfResolved(
+      luisBenefitsFlowEntryResult({
+        organizationId: args.organizationId,
+        orgSettings: args.orgSettings,
+        leadState: args.leadState,
+        directCampaignEntry: effectiveRoute.directCampaignEntry,
+        requestedBenefitKey: effectiveRoute.requestedBenefitKey,
+      }),
+    );
+  }
+  if (effectiveRoute.kind === "benefits_clarify") {
+    return {
+      reply: "Claro 👌 ¿Qué beneficio te interesa?",
+      statePatch: { lastIntent: "luis_benefits_clarify" },
+      interactiveButtons: [
+        { id: "luis_benefits_clarify:supermarket", title: "Supermercado" },
+        { id: "luis_benefits_clarify:medical", title: "Médico" },
+        { id: "luis_benefits_clarify:other", title: "Ver otros" },
+      ],
+      debugNote: "referral_hub:luis_benefits_clarify",
+    };
+  }
+  if (route.kind === "post_benefit_menu") {
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    const contextualGreeting = `Perfecto${firstName ? `, ${firstName}` : ""}. ¿En qué más te podemos ayudar?`;
+    return luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting) ??
+      luisMainMenuResult(args.leadState, contextualGreeting);
+  }
+  if (route.kind === "post_benefit_services") {
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    const contextualGreeting = `Claro${firstName ? `, ${firstName}` : ""}. Estas son las opciones disponibles:`;
+    return luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting) ??
+      luisMainMenuResult(args.leadState, contextualGreeting);
+  }
+  if (route.kind === "post_benefit_finalize") {
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    return {
+      reply: `Perfecto${firstName ? `, ${firstName}` : ""}. Guardá tu cupón y escribinos cuando necesités ayuda. 👋`,
+      statePatch: {
+        lastIntent: "luis_benefit_finalize",
+        nextExpected: "luis_main_menu",
+      },
+      // Never a handoff trigger - stays fully automated for the next
+      // inbound message, per Part 12 (service/coupon completion must not
+      // set handoff_to_human).
+      leadPatch: { handoff_to_human: false, updated_at: nowIso() },
+      debugNote: "referral_hub:luis_benefit_finalize",
+    };
+  }
+  if (route.kind === "nearest_supermarket_confirm" || route.kind === "nearest_supermarket_reject") {
+    const pending = (collected as any)?.luis_pending_nearest_supermarket as
+      { claimId?: unknown; locationId?: unknown; storeName?: unknown } | null | undefined;
+    const pendingClaimId = safeStr(pending?.claimId, "");
+    const pendingLocationId = safeStr(pending?.locationId, "");
+    const clearedCollected = { ...collected, luis_pending_nearest_supermarket: null };
+
+    if (route.kind === "nearest_supermarket_reject") {
+      return {
+        reply: "Sin problema. Cuando quieras, escribinos y vemos otra opción. 👋",
+        statePatch: {
+          lastIntent: "luis_benefit_claim",
+          nextExpected: "luis_main_menu",
+          collected: clearedCollected,
+        },
+        // A declined nearby-store proposal is not a handoff trigger -
+        // automation stays active for the next inbound message.
+        leadPatch: { handoff_to_human: false, updated_at: nowIso() },
+        debugNote: "referral_hub:luis_nearest_supermarket_rejected",
+      };
+    }
+
+    if (!pendingClaimId || !pendingLocationId) {
+      return {
+        reply: "No encontramos una propuesta pendiente para confirmar. Escribí Menú para ver tus opciones.",
+        statePatch: { lastIntent: "luis_benefit_claim", collected: clearedCollected },
+        debugNote: "referral_hub:luis_nearest_supermarket_confirm_no_pending",
+      };
+    }
+
+    // Truthful-only: the confirmed store's own official image, fetched
+    // fresh (never a generic fallback, never reused from a stale claim).
+    const locationRow = await args.supabase
+      .from("referral_benefit_campaign_locations")
+      .select("display_name, official_media_url")
+      .eq("organization_id", args.organizationId)
+      .eq("id", pendingLocationId)
+      .eq("active", true)
+      .maybeSingle();
+    const mediaUrl = safeStr((locationRow.data as any)?.official_media_url, "");
+    const storeName = safeStr((locationRow.data as any)?.display_name, "") || safeStr(pending?.storeName, "");
+    if (locationRow.error || !/^https:\/\//.test(mediaUrl)) {
+      return {
+        reply: "Estamos preparando tu cupón para esta tienda. Te ayudaremos por este mismo WhatsApp.",
+        statePatch: { lastIntent: "luis_benefit_claim", collected: clearedCollected },
+        debugNote: "referral_hub:luis_nearest_supermarket_confirm_media_pending",
+      };
+    }
+
+    // Location assignment ONLY, via the dedicated, org-scoped, idempotent
+    // RPC (docs/proposed-migrations/20260824_draft_confirm_nearest_
+    // supermarket_claim_location.sql, corrected 2026-08-24) — it validates
+    // the claim, validates the location is active and belongs to the
+    // claim's own campaign, associates supermarket_location_id, and
+    // records the reroute audit. It deliberately never touches status —
+    // the claim stays REQUESTED here. Marking ISSUED must never happen
+    // before the store-specific image has actually been accepted by the
+    // outbound delivery provider (see debugNote below), so this call is
+    // NOT where issuance happens, unlike an earlier draft of this handler.
+    const confirmResult = await args.supabase.rpc("confirm_referral_benefit_claim_location", {
+      p_organization_id: args.organizationId,
+      p_claim_id: pendingClaimId,
+      p_location_id: pendingLocationId,
+    });
+    const confirmedClaim = confirmResult.data as { claim_code?: string; status?: string } | null;
+    const claimCode = safeStr(confirmedClaim?.claim_code, "");
+    if (confirmResult.error || !claimCode) {
+      return {
+        reply: "No pudimos confirmar tu cupón en este momento. Escribí Menú para intentar de nuevo.",
+        statePatch: { lastIntent: "luis_benefit_claim", collected: clearedCollected },
+        debugNote: "referral_hub:luis_nearest_supermarket_confirm_claim_lookup_failed",
+      };
+    }
+
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    const activationText = luisBenefitsActivationText({
+      firstName,
+      benefitDisplayName: LUIS_BENEFITS.SUPERMARKET.displayName,
+      claimCode,
+      partnerName: storeName || null,
+    });
+    return {
+      // Same CTA-copy correction as the regular delivery path above -
+      // this is the interactive-button container, not a duplicate of the
+      // activation message sent via outboundMessages below.
+      reply: "¿Te gustaría ver otro beneficio o consultar alguno de nuestros servicios?",
+      statePatch: { lastIntent: "luis_benefit_claim", collected: clearedCollected },
+      interactiveButtons: [
+        { id: "luis_benefits:another", title: "Ver beneficios" },
+        { id: "luis_benefits:services", title: "Ver servicios" },
+        { id: "luis_benefits:finalize", title: "Finalizar" },
+      ],
+      // Order (2026-08-27): image only here - the claim is issued
+      // immediately after this image is accepted (see the shared send-
+      // processing gate on this exact debugNote prefix), strictly before
+      // the activation text is sent. activationText moves to
+      // outboundPrelude, sent right after issuance and strictly before
+      // this reply+menu below.
+      outboundMessages: [
+        { type: "image", url: mediaUrl, altText: `Beneficio ${LUIS_BENEFITS.SUPERMARKET.displayName}` },
+      ],
+      outboundPrelude: [{ text: activationText }],
+      // Reuses the exact same debugNote convention the regular (exact-ZIP)
+      // claim-finalization path already uses (see line ~596 above) — the
+      // shared send-processing code issues the claim right after this
+      // image is accepted, before activationText/the main reply are ever
+      // sent. If the image send throws, execution never reaches that
+      // point and the claim correctly stays REQUESTED/retryable.
+      debugNote: `referral_hub:benefit_claim_delivery:${pendingClaimId}`,
+    };
+  }
+  if (route.kind === "human_handoff") {
+    return await luisHumanHandoffResult({
+      ...args,
+      messagePreview: "Solicitud para hablar con el equipo",
+      reply: "Listo. Un integrante de nuestro equipo te escribirá por este mismo WhatsApp.",
+      statePatch: {
+        stage: "HANDOFF",
+        lastIntent: "human_handoff",
+        nextExpected: undefined,
+        collected: { ...collected, luis_legal: null },
+      },
+      debugNote: "referral_hub:luis_human_handoff_requested",
+    });
+  }
+  if (route.kind === "legal_menu") {
+    return {
+      reply: "Elegí el tipo de ayuda legal que necesitás.",
+      statePatch: luisLegalPatch(args.leadState, null),
+      interactiveList: {
+        body: "Elegí el tipo de ayuda legal que necesitás.",
+        buttonText: "Ver opciones",
+        sections: [{
+          title: "Ayuda legal",
+          rows: [
+            { id: "luis_legal:immigration", title: "🛂 Inmigración" },
+            { id: "luis_legal:accident", title: "🚗 Accidente de Auto" },
+            { id: "luis_legal:criminal", title: "⚖️ Caso Criminal" },
+          ],
+        }],
+      },
+      debugNote: "referral_hub:luis_legal_menu",
+    };
+  }
+  if (route.kind === "legal_emergency") {
+    return {
+      reply: "Si hay una emergencia o peligro inmediato, llamá al 911 o a los servicios de emergencia locales ahora. Este WhatsApp no puede atender emergencias.",
+      statePatch: luisLegalPatch(args.leadState, null),
+      debugNote: "referral_hub:luis_legal_emergency_redirect",
+    };
+  }
+  if (route.kind === "legal_prompt") {
+    const existingLegal = rawLegal && typeof rawLegal === "object"
+      ? { ...(rawLegal as Record<string, unknown>) }
+      : {};
+    const nextLegal: Record<string, unknown> = {
+      ...existingLegal,
+      topic: route.topic,
+      step: route.step,
+    };
+    if (legalState?.topic === "AUTO_ACCIDENT" && legalState.step === "date" && route.step === "medical_attention") {
+      nextLegal.accident_date = args.inboundText.trim().slice(0, 80);
+    }
+    if (legalState?.topic === "AUTO_ACCIDENT" && legalState.step === "medical_attention" && route.step === "medical_location") {
+      nextLegal.medical_attention = "yes";
+    }
+    const prompt = route.step === "description"
+      ? "Contanos brevemente qué ayuda necesitás. No envíes documentos, números de Seguro Social ni información médica detallada."
+      : route.step === "date"
+      ? "¿Qué fecha ocurrió el accidente?"
+      : route.step === "medical_attention"
+      ? "¿Recibiste atención médica?"
+      : "¿En qué lugar recibiste atención médica?";
+    return {
+      reply: prompt,
+      statePatch: luisLegalPatch(args.leadState, nextLegal),
+      ...(route.step === "medical_attention"
+        ? { interactiveButtons: [
+          { id: "luis_legal:accident_medical:yes", title: "Sí" },
+          { id: "luis_legal:accident_medical:no", title: "No" },
+        ] }
+        : {}),
+      debugNote: `referral_hub:luis_legal_${route.topic.toLowerCase()}_${route.step}`,
+    };
+  }
+  if (route.kind === "legal_complete") {
+    const existingLegal = rawLegal && typeof rawLegal === "object"
+      ? { ...(rawLegal as Record<string, unknown>) }
+      : {};
+    if (route.topic === "AUTO_ACCIDENT") {
+      if (legalState?.step === "medical_location") {
+        existingLegal.medical_location = args.inboundText.trim().slice(0, 160);
+      }
+      if (legalState?.step === "medical_attention") existingLegal.medical_attention = "no";
+      if (normalizeTextForMatch(args.payloadAction || "") === "luis legal accident medical no") {
+        existingLegal.medical_attention = "no";
+      }
+    } else {
+      existingLegal.brief_description = args.inboundText.trim().slice(0, 400);
+    }
+    // Completing an intake is a follow-up request, not an active takeover.
+    // Keep the staff-side event and leave any pre-existing legitimate takeover
+    // untouched by omitting a leadPatch altogether.
+    await recordHumanHandoffEvent({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      channel: args.channel,
+      messagePreview: `Solicitud de ayuda legal: ${route.topic}`,
+    });
+    return {
+      reply: "Gracias. Recibimos tu solicitud y un integrante del equipo te dará seguimiento por este mismo WhatsApp.",
+      statePatch: luisLegalPatch(args.leadState, {
+        ...existingLegal,
+        topic: route.topic,
+        step: "completed",
+        completed_at: nowIso(),
+      }),
+      debugNote: `referral_hub:luis_legal_${route.topic.toLowerCase()}_completed`,
+    };
+  }
+  return null;
 }
 
 type BarbershopProviderOption = {
@@ -215,6 +1426,121 @@ function safeStr(x: any, d = ""): string {
   if (typeof x === "string") return x;
   if (x == null) return d;
   return String(x);
+}
+
+async function safeTokenFingerprint(value: string): Promise<string | null> {
+  const token = safeStr(value, "").trim();
+  if (!token) return null;
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token),
+  );
+  return Array.from(new Uint8Array(digest)).slice(0, 6)
+    .map((part) => part.toString(16).padStart(2, "0")).join("");
+}
+
+const META_TEST_DEMO_WABA_ID = "2080644335858568";
+const LUIS_BENEFITS_TEST_FLOW_ID = "2161490298097845";
+const LUIS_IMMIGRATION_TEST_FLOW_ID = "1593418642409687";
+const LUIS_AUTO_ACCIDENT_TEST_FLOW_ID = "1569608901419546";
+const LUIS_DUI_CRIMINAL_TEST_FLOW_ID = "1081861051024333";
+
+function metaTestDemoEnabled() {
+  return safeStr(Deno.env.get("META_WHATSAPP_TEST_DEMO_ENABLED"), "")
+    .trim().toLowerCase() === "true";
+}
+
+function metaTestDemoPhoneNumberId() {
+  return META_TEST_DEMO_PHONE_NUMBER_ID;
+}
+
+function metaTestDemoAccessToken() {
+  return normalizeSecretValue(
+    safeStr(Deno.env.get("META_WHATSAPP_TEST_ACCESS_TOKEN"), ""),
+  );
+}
+
+type LuisTestFlowIds = {
+  benefits: string;
+  immigration: string;
+  autoAccident: string;
+  duiCriminal: string;
+};
+
+const LUIS_TEST_FLOW_IDS: LuisTestFlowIds = {
+  benefits: LUIS_BENEFITS_TEST_FLOW_ID,
+  immigration: LUIS_IMMIGRATION_TEST_FLOW_ID,
+  autoAccident: LUIS_AUTO_ACCIDENT_TEST_FLOW_ID,
+  duiCriminal: LUIS_DUI_CRIMINAL_TEST_FLOW_ID,
+};
+
+function luisTestFlowEntryResult(args: {
+  inboundText: string;
+  payloadAction?: string | null;
+  flowIds: LuisTestFlowIds;
+}): GenerateReplyResult | null {
+  const intent = routeLuisTestFlowIntent(args);
+  const flow = intent === "BENEFITS"
+    ? { id: args.flowIds.benefits, screen: "BENEFIT_SELECT", cta: "Ver beneficios", body: "Activá tus beneficios de prueba." }
+    : intent === "IMMIGRATION"
+    ? { id: args.flowIds.immigration, screen: "IMMIGRATION_TOPIC", cta: "Solicitar orientación", body: "Completá tu solicitud de migración de prueba." }
+    : intent === "AUTO_ACCIDENT"
+    ? { id: args.flowIds.autoAccident, screen: "ACCIDENT_BASICS", cta: "Continuar", body: "Completá tu solicitud de accidente de prueba." }
+    : intent === "DUI_CRIMINAL"
+    ? { id: args.flowIds.duiCriminal, screen: "CRIMINAL_TOPIC", cta: "Solicitar ayuda", body: "Completá tu solicitud legal de prueba." }
+    : null;
+  if (!flow) return null;
+  if (!flow.id) {
+    return {
+      reply: "El Flow de prueba todavía no está listo. Intentá nuevamente cuando la validación termine.",
+      statePatch: {},
+      debugNote: "referral_hub:luis_test_flow_unavailable",
+    };
+  }
+  return {
+    reply: "Abrí el formulario de prueba para continuar.",
+    statePatch: { lastIntent: "luis_test_flow_cta" },
+    flowCta: {
+      flowId: flow.id,
+      flowMode: "draft",
+      ctaText: flow.cta,
+      bodyText: flow.body,
+      flowAction: "navigate",
+      flowActionPayload: { screen: flow.screen },
+    },
+    debugNote: "referral_hub:luis_test_flow_cta",
+  };
+}
+
+export function isExplicitMetaTestDemoOutbound(args: {
+  organizationId: string;
+  channel: string;
+  payload: Record<string, unknown> | null | undefined;
+  demoEnabled: boolean;
+  testTokenConfigured: boolean;
+  testPhoneNumberId: string;
+}) {
+  return args.testTokenConfigured && isMetaTestTransport({
+    organizationId: args.organizationId,
+    channel: args.channel,
+    payload: args.payload,
+    testDemoEnabled: args.demoEnabled,
+  });
+}
+
+function isExplicitMetaTestDemoContext(args: {
+  organizationId: string;
+  channel: string;
+  payload: Record<string, unknown> | null | undefined;
+  demoEnabled: boolean;
+  testPhoneNumberId: string;
+}) {
+  return isMetaTestTransport({
+    organizationId: args.organizationId,
+    channel: args.channel,
+    payload: args.payload,
+    testDemoEnabled: args.demoEnabled,
+  });
 }
 
 function isDentalOrganization(organizationId: string): boolean {
@@ -611,16 +1937,20 @@ function getBarbershopBrandName(
   clinicSettings: Record<string, unknown>,
   orgSettings?: Record<string, unknown> | null,
 ): string {
-  const location = clinicSettings.location && typeof clinicSettings.location === "object"
-    ? (clinicSettings.location as Record<string, unknown>)
-    : {};
+  const location =
+    clinicSettings.location && typeof clinicSettings.location === "object"
+      ? (clinicSettings.location as Record<string, unknown>)
+      : {};
   const configuredBrand = safeStr(
     location.name,
     safeStr(
       clinicSettings.brand_name,
       safeStr(
         clinicSettings.display_name,
-        safeStr(orgSettings?.brand_name, safeStr(orgSettings?.display_name, "")),
+        safeStr(
+          orgSettings?.brand_name,
+          safeStr(orgSettings?.display_name, ""),
+        ),
       ),
     ),
   ).trim();
@@ -2295,7 +3625,9 @@ async function showDentalAllSlotsForDate(args: {
         ],
     };
   }
-  const body = `Para *${formatRequestedDayLabel(args.selectedDate)}*, estos son los horarios disponibles 🦷`;
+  const body = `Para *${
+    formatRequestedDayLabel(args.selectedDate)
+  }*, estos son los horarios disponibles 🦷`;
   return {
     reply: body,
     statePatch: {
@@ -3371,11 +4703,12 @@ async function handleDentalGuidedRuntimeTurn(args: {
     const appointmentId = normalizePayloadActionValue(normalizedAction)
       .replace(/^select_active_appointment:/, "")
       .trim();
-    const options = Array.isArray((collected as any).active_appointments_options)
-      ? ((collected as any).active_appointments_options as Array<
-        Record<string, unknown>
-      >)
-      : [];
+    const options =
+      Array.isArray((collected as any).active_appointments_options)
+        ? ((collected as any).active_appointments_options as Array<
+          Record<string, unknown>
+        >)
+        : [];
     const selected = options.find((appointment) =>
       safeStr(appointment.id, "") === appointmentId
     );
@@ -3548,7 +4881,9 @@ async function handleDentalGuidedRuntimeTurn(args: {
     /\b(agendar cita|quiero agendar|necesito una cita|necesito cita|quiero cita|agendar|reservar)\b/
       .test(text)
   ) {
-    const allowAdditionalBooking = Boolean((collected as any).allow_additional_booking);
+    const allowAdditionalBooking = Boolean(
+      (collected as any).allow_additional_booking,
+    );
     if (!allowAdditionalBooking) {
       const active = await loadActiveAppointmentForLead({
         supabase,
@@ -4227,7 +5562,9 @@ async function handleDentalGuidedRuntimeTurn(args: {
     const available = (slots as Array<Record<string, unknown>>).filter((slot) =>
       safeStr(slot.time, "") !== currentTime
     );
-    const body = `Perfecto 🦷 Mantengo tu cita para *${formatRequestedDayLabel(date)}*.\n\nEscogé la nueva hora:`;
+    const body = `Perfecto 🦷 Mantengo tu cita para *${
+      formatRequestedDayLabel(date)
+    }*.\n\nEscogé la nueva hora:`;
     return {
       reply: body,
       statePatch: {
@@ -5939,7 +7276,10 @@ async function handleDentalGuidedRuntimeTurn(args: {
             },
             patient_name: safeStr(
               pending.patient_name,
-              resolveReliableDentalPatientName(leadState, confirmationCollected),
+              resolveReliableDentalPatientName(
+                leadState,
+                confirmationCollected,
+              ),
             ),
             patient_phone: safeStr(
               (leadState as any)?.phone,
@@ -7825,8 +9165,9 @@ function extractRequestedPreconfirmData(statePatch: Json): {
     string,
     unknown
   >;
-  const pending = (collected.pending_booking as Record<string, unknown> | null) ??
-    {};
+  const pending =
+    (collected.pending_booking as Record<string, unknown> | null) ??
+      {};
   const service = safeStr(
     pending.service,
     safeStr(
@@ -8302,6 +9643,11 @@ function preventRepeatedReplyLoop(
   leadState: Json | null,
   statePatch?: Json | null,
 ): string {
+  const stateOrgType = safeStr(
+    (statePatch as any)?.orgType,
+    safeStr((leadState as any)?.orgType, ""),
+  ).toLowerCase();
+  if (stateOrgType === "referral_hub") return reply;
   const prev = safeStr((leadState as any)?.last_bot_text, "").trim();
   if (!prev) return reply;
   if (prev !== reply.trim()) return reply;
@@ -9103,8 +10449,8 @@ async function executeToolCalls(args: {
 
     try {
       if (toolName === "book_appointment") {
-        const collectedForTool = ((leadState as any)?.collected ?? {}) as
-          Record<string, unknown>;
+        const collectedForTool =
+          ((leadState as any)?.collected ?? {}) as Record<string, unknown>;
         const currentFlow = (collectedForTool as any).current_flow;
         const allowAdditionalBooking = Boolean(
           (collectedForTool as any).allow_additional_booking ||
@@ -9394,12 +10740,14 @@ async function resolveEngineReply(args: {
       leadState,
       clinicSettings,
     );
-    const dentalAppointments = isBarbershopConversation ? [] : await loadFutureActiveAppointmentsForLead({
-      supabase,
-      organizationId,
-      leadId,
-      timezone: safeStr((clinicSettings as any)?.timezone, DEFAULT_TIMEZONE),
-    });
+    const dentalAppointments = isBarbershopConversation
+      ? []
+      : await loadFutureActiveAppointmentsForLead({
+        supabase,
+        organizationId,
+        leadId,
+        timezone: safeStr((clinicSettings as any)?.timezone, DEFAULT_TIMEZONE),
+      });
     if (!isBarbershopConversation && dentalAppointments.length > 1) {
       return buildDentalMultipleAppointmentsReviewResult({
         appointments: dentalAppointments,
@@ -12321,13 +13669,15 @@ export async function generateReply(
       leadState: leadState as Json | null,
       inboundText,
       payloadAction: effectivePayloadAction,
-      channelUserId: safeStr((leadState as any)?.channel_user_id, "") || null,
+      channelUserId: args.channelUserId ??
+        (safeStr((leadState as any)?.channel_user_id, "") || null),
       channel,
       timezone: safeStr((clinicSettings as any)?.timezone, "America/New_York"),
       integrations: (clinicSettings as any)?.integrations &&
           typeof (clinicSettings as any).integrations === "object"
         ? (clinicSettings as any).integrations as Record<string, unknown>
         : {},
+      allowTransientLuisMenuReset: args.allowTransientLuisMenuReset,
     });
     return {
       reply: referralResult.reply,
@@ -16595,7 +17945,6 @@ async function persistReferralAccidentHandoff(args: {
       .from("leads")
       .update({
         state: nextState,
-        handoff_to_human: true,
         updated_at: nowIso(),
       })
       .eq("id", args.leadId)
@@ -16618,29 +17967,46 @@ function operationalCompletionForDebugNote(debugNote: string): {
 } | null {
   switch (debugNote) {
     case "referral_hub:accident_complete":
-      return { serviceId: "luis_accidente", completionOutcome: "confirmed_intake" };
+      return {
+        serviceId: "luis_accidente",
+        completionOutcome: "confirmed_intake",
+      };
     case "referral_hub:immigration_complete":
-      return { serviceId: "luis_inmigracion", completionOutcome: "confirmed_intake" };
+      return {
+        serviceId: "luis_inmigracion",
+        completionOutcome: "confirmed_intake",
+      };
     case "referral_hub:advisor_handoff_requested":
-      return { serviceId: "luis_representante", completionOutcome: "confirmed_intake" };
+      return {
+        serviceId: "luis_representante",
+        completionOutcome: "confirmed_intake",
+      };
     case "referral_hub:events_followup_requested":
-      return { serviceId: "luis_eventos", completionOutcome: "follow_up_requested" };
+      return {
+        serviceId: "luis_eventos",
+        completionOutcome: "follow_up_requested",
+      };
     default:
       return null;
   }
 }
 
-function operationalIntakeSnapshot(leadState: Json | null, statePatch: Json): Json {
+function operationalIntakeSnapshot(
+  leadState: Json | null,
+  statePatch: Json,
+): Json {
   const merged = mergeLeadState(leadState, statePatch);
   const collected = merged.collected && typeof merged.collected === "object"
     ? merged.collected as Json
     : {};
-  const referral = collected.referral_hub && typeof collected.referral_hub === "object"
-    ? collected.referral_hub as Json
-    : {};
-  const extracted = referral.extracted_data && typeof referral.extracted_data === "object"
-    ? referral.extracted_data as Json
-    : {};
+  const referral =
+    collected.referral_hub && typeof collected.referral_hub === "object"
+      ? collected.referral_hub as Json
+      : {};
+  const extracted =
+    referral.extracted_data && typeof referral.extracted_data === "object"
+      ? referral.extracted_data as Json
+      : {};
   return {
     ...extracted,
     profile_name: safeStr(referral.profile_name, "").trim() || null,
@@ -16648,13 +18014,18 @@ function operationalIntakeSnapshot(leadState: Json | null, statePatch: Json): Js
   };
 }
 
-function mergeOperationalStatePatch(statePatch: Json, operationalPatch: Json): Json {
-  const collected = statePatch.collected && typeof statePatch.collected === "object"
-    ? { ...(statePatch.collected as Json) }
-    : {};
-  const referral = collected.referral_hub && typeof collected.referral_hub === "object"
-    ? { ...(collected.referral_hub as Json) }
-    : {};
+function mergeOperationalStatePatch(
+  statePatch: Json,
+  operationalPatch: Json,
+): Json {
+  const collected =
+    statePatch.collected && typeof statePatch.collected === "object"
+      ? { ...(statePatch.collected as Json) }
+      : {};
+  const referral =
+    collected.referral_hub && typeof collected.referral_hub === "object"
+      ? { ...(collected.referral_hub as Json) }
+      : {};
   return {
     ...statePatch,
     collected: {
@@ -16915,8 +18286,8 @@ async function processSingleJob(
     supabase,
     metaGraphVersion,
     pageAccessToken,
-    whatsappAccessToken,
-    whatsappPhoneNumberId,
+    whatsappAccessToken: configuredWhatsAppAccessToken,
+    whatsappPhoneNumberId: configuredWhatsAppPhoneNumberId,
     organizationId,
     executionId,
     productKnowledge,
@@ -16953,6 +18324,22 @@ async function processSingleJob(
   );
   const effectiveRecipientId = payloadRecipientId || payloadRecipientNested ||
     recipientId;
+  const testPhoneNumberId = metaTestDemoPhoneNumberId();
+  const testAccessToken = metaTestDemoAccessToken();
+  const testTransport = selectWhatsAppTransport({
+    organizationId,
+    channel,
+    payload: (job?.payload as Record<string, unknown> | null) ?? null,
+    configuredAccessToken: configuredWhatsAppAccessToken,
+    configuredPhoneNumberId: configuredWhatsAppPhoneNumberId,
+    testAccessToken,
+    testDemoEnabled: metaTestDemoEnabled(),
+  });
+  const explicitMetaTestDemo = testTransport.isTestTransport &&
+    testTransport.credentialSource === "META_WHATSAPP_TEST_ACCESS_TOKEN";
+  const explicitMetaTestDemoContext = testTransport.isTestTransport;
+  const whatsappAccessToken = testTransport.accessToken;
+  const whatsappPhoneNumberId = testTransport.phoneNumberId;
 
   let outboundMessageId: string | null = null;
   let effectiveOrganizationId = organizationId;
@@ -16963,6 +18350,26 @@ async function processSingleJob(
 
   if (!effectiveRecipientId) {
     throw new Error("missing_recipient_id");
+  }
+  if (explicitMetaTestDemo) {
+    const selectedFingerprint = await safeTokenFingerprint(testTransport.accessToken);
+    const canonicalFingerprint = await safeTokenFingerprint(testAccessToken);
+    logEvent("meta_test_demo_outbound_selected", {
+      execution_id: executionId,
+      organization_id: organizationId,
+      job_id: jobId,
+      phone_number_id: testPhoneNumberId,
+      route_type: META_TEST_DEMO_ROUTE_TYPE,
+      credential_source: testTransport.credentialSource,
+      selected_token_fingerprint: selectedFingerprint,
+      canonical_test_token_fingerprint: canonicalFingerprint,
+      credential_fingerprint_match: selectedFingerprint === canonicalFingerprint,
+      graph_messages_endpoint: `/${whatsappPhoneNumberId}/messages`,
+      recipient_wa_id: effectiveRecipientId,
+    });
+  }
+  if (testTransport.isTestTransport && !explicitMetaTestDemo) {
+    throw new Error("meta_test_transport_credential_missing");
   }
 
   // 1) pre-send dedupe
@@ -16986,8 +18393,8 @@ async function processSingleJob(
     }
   }
 
-    const manualText = safeStr(job?.payload?.text, "");
-    const manualImageUrl = safeStr(job?.payload?.image_url, "");
+  const manualText = safeStr(job?.payload?.text, "");
+  const manualImageUrl = safeStr(job?.payload?.image_url, "");
   let inboundPayloadAction = normalizePayloadActionValue(
     safeStr((job?.payload as any)?.payload_action, ""),
   );
@@ -17288,6 +18695,97 @@ async function processSingleJob(
         lead_id: leadId,
         job_organization_id: organizationId,
         lead_organization_id: leadOrganizationId,
+      });
+    }
+    const demoResetAction = explicitMetaTestDemoContext &&
+        effectiveOrganizationId === META_TEST_DEMO_ORGANIZATION_ID
+      ? metaTestDemoResetAction(inboundText, inboundPayloadAction)
+      : null;
+    if (demoResetAction) {
+      logEvent("demo_takeover_reset_requested", {
+        execution_id: executionId,
+        trace_id: traceId,
+        organization_id: effectiveOrganizationId,
+        lead_id: leadId,
+        action: demoResetAction,
+        handoff_to_human: leadHandoffToHuman,
+        test_demo_route_confirmed: true,
+      });
+      const resetLeadState = clearMetaTestDemoTakeoverState(leadState);
+      const resetResult = await supabase
+        .from("leads")
+        .update({
+          handoff_to_human: false,
+          state: resetLeadState,
+          updated_at: nowIso(),
+        })
+        .eq("id", leadId)
+        .eq("organization_id", META_TEST_DEMO_ORGANIZATION_ID)
+        .select("id")
+        .maybeSingle();
+      if (resetResult.error || !resetResult.data?.id) {
+        throw new Error("demo_takeover_reset_failed");
+      }
+      leadState = resetLeadState;
+      leadHandoffToHuman = false;
+      logEvent("demo_takeover_reset_applied", {
+        execution_id: executionId,
+        trace_id: traceId,
+        organization_id: effectiveOrganizationId,
+        lead_id: leadId,
+        action: demoResetAction,
+        handoff_to_human: false,
+        test_demo_route_confirmed: true,
+      });
+      logEvent("demo_takeover_reset_continuing", {
+        execution_id: executionId,
+        trace_id: traceId,
+        organization_id: effectiveOrganizationId,
+        lead_id: leadId,
+        action: demoResetAction,
+        handoff_to_human: false,
+        test_demo_route_confirmed: true,
+      });
+    }
+    const testLuisFlowIntent = explicitMetaTestDemoContext &&
+        effectiveOrganizationId === META_TEST_DEMO_ORGANIZATION_ID
+      ? routeLuisTestFlowIntent({
+        inboundText,
+        payloadAction: inboundPayloadAction,
+      })
+      : null;
+    const normalizedLuisInbound = normalizeTextForMatch(inboundText);
+    const isTestLuisTeamNavigation = explicitMetaTestDemoContext &&
+      normalizeTextForMatch(inboundPayloadAction || "") === "luis main team";
+    const isTestLuisFreshGreeting = explicitMetaTestDemoContext &&
+      normalizedLuisInbound === "hola" && !hasActiveLuisLegalIntake(leadState);
+    // Only explicit top-level navigation, MENU (handled above), or a greeting
+    // after a completed/non-active test intake can clear the test cursor.
+    // Ordinary answers remain inside a genuinely active legal intake.
+    if (!demoResetAction && (testLuisFlowIntent || isTestLuisTeamNavigation || isTestLuisFreshGreeting)) {
+      const resetLeadState = clearMetaTestDemoTakeoverState(leadState);
+      const resetResult = await supabase
+        .from("leads")
+        .update({
+          handoff_to_human: false,
+          state: resetLeadState,
+          updated_at: nowIso(),
+        })
+        .eq("id", leadId)
+        .eq("organization_id", META_TEST_DEMO_ORGANIZATION_ID)
+        .select("id")
+        .maybeSingle();
+      if (resetResult.error || !resetResult.data?.id) {
+        throw new Error("demo_luis_navigation_reset_failed");
+      }
+      leadState = resetLeadState;
+      leadHandoffToHuman = false;
+      logEvent("demo_luis_temporary_state_cleared_for_navigation", {
+        execution_id: executionId,
+        trace_id: traceId,
+        organization_id: effectiveOrganizationId,
+        lead_id: leadId,
+        navigation: testLuisFlowIntent ?? (isTestLuisTeamNavigation ? "TEAM" : "FRESH_GREETING"),
       });
     }
     if (leadRes.data?.full_name && !(leadState as any).full_name) {
@@ -17636,6 +19134,11 @@ async function processSingleJob(
 
     const automationMode = safeStr((leadState as any)?.automation_mode, "");
     const takeoverActive = isHumanTakeoverActive((leadState as any) ?? null);
+    // Luis's explicit MENU/MENÚ command is the one customer-controlled escape
+    // hatch from a pending handoff. Its result clears the handoff flag safely.
+    const isLuisMenuReset =
+      effectiveOrganizationId === "luis-gabriel-referral-hub" &&
+      isLuisMainMenuCommand(inboundText);
     const takeoverPolicy = shouldAllowAutomationDuringTakeover({
       payloadAction: inboundPayloadAction || null,
       payloadSource,
@@ -17670,6 +19173,7 @@ async function processSingleJob(
       });
     }
     if (
+      !isLuisMenuReset &&
       !allowDentalAdditionalBookingDuringTakeover &&
       (leadHandoffToHuman === true ||
         automationMode === "human_takeover" ||
@@ -17711,7 +19215,7 @@ async function processSingleJob(
   const channelAutomationEnabled = channel === "messenger"
     ? (orgSettings as any)?.messenger_enabled !== false
     : channel === "whatsapp"
-    ? (orgSettings as any)?.whatsapp_enabled !== false
+    ? explicitMetaTestDemo || (orgSettings as any)?.whatsapp_enabled !== false
     : true;
   if (!automationEnabled || !channelAutomationEnabled) {
     const reason = !automationEnabled
@@ -17776,6 +19280,91 @@ async function processSingleJob(
     __inbound_message_created_at: inboundMessageCreatedAt || null,
   });
 
+  if (
+    channel === "whatsapp" &&
+    inboundPayloadAction === "whatsapp_flow:complete" &&
+    (job?.payload as any)?.flow_response !== undefined
+  ) {
+    const rawFlowResponse = (job?.payload as any)?.flow_response;
+    const completionKind = classifyLuisFlowCompletion(rawFlowResponse);
+    const response = rawFlowResponse && typeof rawFlowResponse === "object"
+      ? rawFlowResponse as Record<string, unknown>
+      : {};
+    // Never log values from a customer Flow response. Key names and value
+    // types are enough to diagnose a contract mismatch safely.
+    logEvent("luis_flow_completion_contract_received", {
+      execution_id: executionId,
+      organization_id: effectiveOrganizationId,
+      lead_id: leadId,
+      job_id: jobId,
+      completion_kind: completionKind,
+      response_keys: Object.keys(response).sort(),
+      response_value_types: Object.fromEntries(
+        Object.entries(response).map(([key, value]) => [key, value === null ? "null" : typeof value]),
+      ),
+    });
+    if (completionKind === "BENEFITS") {
+      earlyGeneratedOverride = await buildLuisBenefitsFlowCompletionResult({
+        supabase,
+        organizationId: effectiveOrganizationId,
+        leadId,
+        rawFlowResponse,
+        orgSettings: (clinicSettings ?? {}) as Record<string, unknown>,
+      });
+    } else if (completionKind === "LEGAL") {
+      earlyGeneratedOverride = await buildLuisLegalFlowCompletionResult({
+        supabase,
+        organizationId: effectiveOrganizationId,
+        leadId,
+        leadState,
+        rawFlowResponse,
+        channel,
+        channelUserId: effectiveRecipientId,
+        deliveryKey: inboundMessageId || jobId,
+      }) ?? invalidLuisFlowCompletionResult("LEGAL");
+    } else if (completionKind === "HANDOFF") {
+      // Unified Flow HANDOFF_CONFIRM adapter: reuses the exact existing
+      // human-handoff behavior (recordHumanHandoffEvent + handoff_to_human
+      // lead patch) rather than introducing new handoff logic.
+      earlyGeneratedOverride = effectiveOrganizationId === "luis-gabriel-referral-hub"
+        ? await luisHumanHandoffResult({
+          supabase,
+          organizationId: effectiveOrganizationId,
+          leadId,
+          leadState,
+          channel,
+          messagePreview: "Solicitud para hablar con el equipo (Flow)",
+          reply: "Listo. Un integrante de nuestro equipo te escribirá por este mismo WhatsApp.",
+          statePatch: {
+            stage: "HANDOFF",
+            lastIntent: "human_handoff",
+            nextExpected: undefined,
+            collected: {
+              ...(((leadState as any)?.collected ?? {}) as Record<string, unknown>),
+              luis_legal: null,
+            },
+          },
+          debugNote: "referral_hub:luis_unified_flow_handoff_requested",
+        })
+        : invalidLuisFlowCompletionResult("UNKNOWN");
+    } else {
+      earlyGeneratedOverride = invalidLuisFlowCompletionResult("UNKNOWN");
+    }
+  } else if (channel === "whatsapp") {
+    const testFlowIds = explicitMetaTestDemoContext ? LUIS_TEST_FLOW_IDS : null;
+    earlyGeneratedOverride = await buildLuisConversationResult({
+      supabase,
+      organizationId: effectiveOrganizationId,
+      leadId,
+      leadState,
+      inboundText,
+      payloadAction: inboundPayloadAction,
+      channel,
+      orgSettings: (clinicSettings ?? {}) as Record<string, unknown>,
+      testFlowIds,
+    });
+  }
+
   const generated = earlyGeneratedOverride ?? await generateReply({
     supabase,
     organizationId: effectiveOrganizationId,
@@ -17795,6 +19384,8 @@ async function processSingleJob(
     jobId,
     payloadAction: inboundPayloadAction || null,
     channel: channel as "messenger" | "whatsapp",
+    channelUserId: effectiveRecipientId,
+    allowTransientLuisMenuReset: explicitMetaTestDemoContext,
   });
   const stateBeforeSnapshot = {
     stage_before: safeStr((leadState as any)?.stage, ""),
@@ -17832,15 +19423,16 @@ async function processSingleJob(
       leadState,
       statePatch,
     });
-    const handoffOutcome = debugNote === "referral_hub:advisor_handoff_requested"
-      ? resolveAdvisorHandoffOutcome({
-        persisted: handoffPersistence.persisted,
-        createdStatePatch: handoffPersistence.createdStatePatch,
-      })
-      : resolveAccidentHandoffOutcome({
-        persisted: handoffPersistence.persisted,
-        createdStatePatch: handoffPersistence.createdStatePatch,
-      });
+    const handoffOutcome =
+      debugNote === "referral_hub:advisor_handoff_requested"
+        ? resolveAdvisorHandoffOutcome({
+          persisted: handoffPersistence.persisted,
+          createdStatePatch: handoffPersistence.createdStatePatch,
+        })
+        : resolveAccidentHandoffOutcome({
+          persisted: handoffPersistence.persisted,
+          createdStatePatch: handoffPersistence.createdStatePatch,
+        });
     reply = handoffOutcome.reply;
     statePatch = handoffOutcome.statePatch;
     handoffPersistenceSucceeded = handoffPersistence.persisted;
@@ -17885,12 +19477,18 @@ async function processSingleJob(
       service_id: operationalCompletion.serviceId,
       success: operationalResult.success,
       outcome: operationalResult.success ? operationalResult.outcome : null,
-      request_id: operationalResult.success ? operationalResult.requestId : null,
-      assignment_id: operationalResult.success ? operationalResult.assignmentId : null,
+      request_id: operationalResult.success
+        ? operationalResult.requestId
+        : null,
+      assignment_id: operationalResult.success
+        ? operationalResult.assignmentId
+        : null,
       notification_status: operationalResult.success
         ? operationalResult.notificationStatus
         : null,
-      exception_type: operationalResult.success ? operationalResult.exceptionType : null,
+      exception_type: operationalResult.success
+        ? operationalResult.exceptionType
+        : null,
       idempotent_replay: operationalResult.success
         ? operationalResult.idempotentReplay
         : null,
@@ -17994,9 +19592,23 @@ async function processSingleJob(
 
   // 3) send ordered channel-specific messages before the main interactive response
   for (const [index, message] of (generated.outboundMessages ?? []).entries()) {
-    const messageText = message.type === "text" ? safeStr(message.text, "").trim() : "";
-    const messageImageUrl = message.type === "image" ? safeStr(message.url, "").trim() : "";
-    const failureStage = index === 0 ? "coupon_intro_failed" : "coupon_image_failed";
+    const messageText = message.type === "text"
+      ? safeStr(message.text, "").trim()
+      : "";
+    const messageImageUrl = message.type === "image"
+      ? safeStr(message.url, "").trim()
+      : "";
+    // Native WhatsApp location message (2026-08-27) - only ever sent when
+    // channel === "whatsapp" (Messenger has no equivalent primitive);
+    // skipped for any other channel exactly like outboundPrelude already
+    // skips itself for non-whatsapp below, never thrown as a failure.
+    const messageLocation = message.type === "location" && channel === "whatsapp"
+      ? { latitude: message.latitude, longitude: message.longitude, name: message.name, address: message.address }
+      : undefined;
+    if (message.type === "location" && channel !== "whatsapp") continue;
+    const failureStage = index === 0
+      ? "coupon_image_failed"
+      : "coupon_activation_failed";
     const preludeMessageId = await insertOutboundMessage({
       supabase,
       organizationId: effectiveOrganizationId,
@@ -18004,7 +19616,12 @@ async function processSingleJob(
       channel,
       actor: isOperatorOutbound ? "operator" : "bot",
       recipientId: effectiveRecipientId,
-      reply: messageText || safeStr(message.type === "image" ? message.altText : "", "Imagen del cupón"),
+      reply: messageText ||
+        (messageLocation ? `Ubicación: ${messageLocation.name}` : "") ||
+        safeStr(
+          message.type === "image" ? message.altText : "",
+          "Imagen del cupón",
+        ),
     });
     const preludeResp = await sendViaMetaAdapter({
       channel: channel as "messenger" | "whatsapp",
@@ -18012,6 +19629,7 @@ async function processSingleJob(
       recipientId: effectiveRecipientId,
       text: messageText || undefined,
       imageUrl: messageImageUrl || undefined,
+      location: messageLocation,
       pageAccessToken,
       whatsappAccessToken,
       whatsappPhoneNumberId,
@@ -18028,6 +19646,23 @@ async function processSingleJob(
         "",
       ) || null,
     });
+  }
+
+  // A benefit is ISSUED strictly after its official image (outboundMessages
+  // above - the only thing sent so far) is accepted by the provider, and
+  // strictly before the activation text/menu below are ever sent (2026-08-27
+  // ordering fix). Previously this ran after the main reply+menu too, which
+  // meant a customer could already see the activation text claiming their
+  // benefit was active while the database still said REQUESTED, if the
+  // later menu send happened to fail. Moving it here closes that gap: if
+  // this RPC fails, execution never reaches the activation text or menu
+  // below, and the claim correctly stays REQUESTED/retryable.
+  if (debugNote.startsWith("referral_hub:benefit_claim_delivery:")) {
+    const claimId = debugNote.slice("referral_hub:benefit_claim_delivery:".length);
+    const issued = await supabase.rpc("issue_referral_benefit_claim", {
+      p_claim_id: claimId,
+    });
+    if (issued.error) throw new Error("benefit_claim_issue_transition_failed");
   }
 
   // Preserve the legacy WhatsApp-only prelude behavior.
@@ -18081,7 +19716,9 @@ async function processSingleJob(
     ? generated.interactiveList
     : undefined;
   const interactiveButtons = !generatedList && generatedButtons.length > 0
-    ? (channel === "messenger" ? generatedButtons.slice(0, 13) : generatedButtons.slice(0, 3))
+    ? (channel === "messenger"
+      ? generatedButtons.slice(0, 13)
+      : generatedButtons.slice(0, 3))
     : (!generatedList ? buildInteractiveButtonsForState(statePatch) : []);
   let flowCtaPayload: WhatsAppFlowCtaSpec | undefined;
   if (flowCtaSpec && channel === "whatsapp") {
@@ -18098,6 +19735,7 @@ async function processSingleJob(
     const payloadPreview = buildWhatsAppFlowCtaMessage({
       to: effectiveRecipientId,
       flow_id: flowCtaPayload.flowId,
+      mode: flowCtaPayload.flowMode,
       flow_token: flowCtaPayload.flowToken,
       cta_text: flowCtaPayload.ctaText,
       body_text: flowCtaPayload.bodyText,
@@ -18130,7 +19768,7 @@ async function processSingleJob(
       ),
     });
   }
-  const metaResp = await sendViaMetaAdapter({
+  let metaResp = await sendViaMetaAdapter({
     channel: channel as "messenger" | "whatsapp",
     graphVersion: metaGraphVersion,
     recipientId: effectiveRecipientId,
@@ -18142,6 +19780,50 @@ async function processSingleJob(
     whatsappAccessToken,
     whatsappPhoneNumberId,
   });
+
+  if (!metaResp?.ok) {
+    await deleteMessageIfExists(supabase, outboundMessageId);
+    if (explicitMetaTestDemo && flowCtaPayload?.flowMode === "draft") {
+      // The test Flow was attempted first. Only a provider failure may fall
+      // back to text; never route the test menu into legacy legal intake.
+      logEvent("luis_test_draft_flow_delivery_failed", {
+        execution_id: executionId,
+        trace_id: traceId,
+        organization_id: effectiveOrganizationId,
+        lead_id: leadId,
+        flow_id: flowCtaPayload.flowId,
+        upstream_status: metaResp.status,
+      });
+      reply = "No pudimos abrir el formulario de prueba. Intentá nuevamente en unos minutos.";
+      flowCtaPayload = undefined;
+      outboundMessageId = await insertOutboundMessage({
+        supabase,
+        organizationId: effectiveOrganizationId,
+        leadId,
+        channel,
+        actor: isOperatorOutbound ? "operator" : "bot",
+        recipientId: effectiveRecipientId,
+        reply,
+      });
+      metaResp = await sendViaMetaAdapter({
+        channel: channel as "messenger" | "whatsapp",
+        graphVersion: metaGraphVersion,
+        recipientId: effectiveRecipientId,
+        text: reply,
+        pageAccessToken,
+        whatsappAccessToken,
+        whatsappPhoneNumberId,
+      });
+      if (metaResp?.ok) {
+        logEvent("luis_test_draft_flow_fallback_sent", {
+          execution_id: executionId,
+          trace_id: traceId,
+          organization_id: effectiveOrganizationId,
+          lead_id: leadId,
+        });
+      }
+    }
+  }
 
   if (!metaResp?.ok) {
     await deleteMessageIfExists(supabase, outboundMessageId);
@@ -18161,12 +19843,14 @@ async function processSingleJob(
   ) || null;
 
   if (debugNote.startsWith("referral_hub:persistent_coupon:")) {
-    const collected = statePatch.collected && typeof statePatch.collected === "object"
-      ? { ...(statePatch.collected as Record<string, unknown>) }
-      : {};
-    const referralHub = collected.referral_hub && typeof collected.referral_hub === "object"
-      ? { ...(collected.referral_hub as Record<string, unknown>) }
-      : {};
+    const collected =
+      statePatch.collected && typeof statePatch.collected === "object"
+        ? { ...(statePatch.collected as Record<string, unknown>) }
+        : {};
+    const referralHub =
+      collected.referral_hub && typeof collected.referral_hub === "object"
+        ? { ...(collected.referral_hub as Record<string, unknown>) }
+        : {};
     statePatch = {
       ...statePatch,
       collected: {

@@ -35,9 +35,15 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
     let active = true;
     async function load() {
       if (!user) {
-        if (active) setLoading(false);
+        if (active) {
+          setError("");
+          setMembershipRole("");
+          setFeatures(DEFAULT_LG_FEATURE_FLAGS);
+          setLoading(false);
+        }
         return;
       }
+      setError("");
       setLoading(true);
       const membership = await supabase
         .from("org_members")
@@ -47,7 +53,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
         .maybeSingle();
       if (membership.error || !membership.data) {
         if (active) {
-          setError("Tu cuenta no pertenece a LG Community Network.");
+          setError("Tu cuenta no está asociada a una organización.");
           setLoading(false);
         }
         return;
@@ -68,7 +74,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
       ]);
       if (!active) return;
       if (settings.error || !settings.data) {
-        setError("La organización canónica de Referral Hub no está configurada.");
+        setError("La organización principal de Conexxion no está configurada.");
       } else {
         setName(settings.data.brand_name || "LG Community Network");
         const integrations = profile.data?.integrations as Record<string, unknown> | null;

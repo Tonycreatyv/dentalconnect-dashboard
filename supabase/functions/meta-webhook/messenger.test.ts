@@ -88,6 +88,8 @@ Deno.test("X-Hub-Signature-256 validation accepts only matching raw body", async
   assert(await validateMetaSignature({ rawBody, signatureHeader: signature, appSecret: secret }));
   assertEquals(await validateMetaSignature({ rawBody: `${rawBody} `, signatureHeader: signature, appSecret: secret }), false);
   assertEquals(await validateMetaSignature({ rawBody, signatureHeader: null, appSecret: secret }), false);
+  assertEquals(await validateMetaSignature({ rawBody, signatureHeader: "sha256=malformed", appSecret: secret }), false);
+  assertEquals(await validateMetaSignature({ rawBody, signatureHeader: signature, appSecret: "" }), false);
 });
 
 Deno.test("Messenger adapter sends quick-reply IDs without rewriting the payload", async () => {

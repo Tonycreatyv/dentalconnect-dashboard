@@ -21,7 +21,6 @@ export function buildCreatedAccidentHandoffState(
     : {};
   return {
     ...statePatch,
-    handoff_to_human: true,
     collected: {
       ...collected,
       referral_hub: {

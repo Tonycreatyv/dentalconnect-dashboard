@@ -43,6 +43,7 @@ Deno.test("Google client uses v4 geocoding and sanitized route matrix contracts"
       longitude: -84.29,
     },
     error: null,
+    diagnostics: { httpStatus: 200, googleErrorStatus: null, googleErrorMessage: null, networkError: false },
   });
   assert(requests[0].url.includes("123%20Main%20Street%20%234"));
   assert(!requests[0].url.includes("test-secret-key"));
@@ -62,6 +63,7 @@ Deno.test("Google client uses v4 geocoding and sanitized route matrix contracts"
       durationSeconds: 300,
     }],
     error: null,
+    diagnostics: { httpStatus: 200, googleErrorStatus: null, googleErrorMessage: null, networkError: false },
   });
   assertEquals(requests[1].url, GOOGLE_ROUTE_MATRIX_ENDPOINT);
   const body = JSON.parse(String(requests[1].init?.body));
@@ -81,6 +83,10 @@ Deno.test("Google client rejects HTTP and route-element failures", async () => {
   assertEquals(await httpFailure.geocodeAddress("123 Main Street"), {
     data: null,
     error: "geocoding_failed",
+    // Response body is plain text ("denied"), not Google's JSON error
+    // envelope, so googleErrorStatus/Message stay null - httpStatus alone
+    // is still real, useful signal (403 = likely auth/permission issue).
+    diagnostics: { httpStatus: 403, googleErrorStatus: null, googleErrorMessage: null, networkError: false },
   });
 
   const routeFailure = createGoogleMapsClient(
@@ -97,6 +103,13 @@ Deno.test("Google client rejects HTTP and route-element failures", async () => {
     origin: { latitude: 33.85, longitude: -84.29 },
     destinationCoordinates: [{ latitude: 33.9, longitude: -84.3 }],
   });
-  assertEquals(result, { data: null, error: "routes_failed" });
+  assertEquals(result, {
+    data: null,
+    error: "routes_failed",
+    // The per-element rejection reason is the route's `condition` field
+    // (a safe Google-defined enum value), never the raw provider
+    // `status.message` text - verified below.
+    diagnostics: { httpStatus: 200, googleErrorStatus: "5", googleErrorMessage: "condition:ROUTE_NOT_FOUND", networkError: false },
+  });
   assert(!JSON.stringify(result).includes("raw provider message"));
 });

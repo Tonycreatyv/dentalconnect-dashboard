@@ -5,7 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./apps/referral-hub/App";
 import "./index.css";
 
-document.title = "LG Community Network | Creatyv Referral Hub";
+document.title = "Conexxion | LG Community Network";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

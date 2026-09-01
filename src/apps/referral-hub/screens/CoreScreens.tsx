@@ -1,55 +1,221 @@
-import { ArrowLeft, CheckCircle2, ChevronRight, Handshake, Inbox, MessageCircle, Search, Send, ShoppingBag, Store } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ShoppingBag, Store } from "lucide-react";
+import { useMemo } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useReferralOrders } from "../../../referral/useReferralOrders";
 import { REFERRAL_ORDER_NEXT_STATUSES, REFERRAL_ORDER_STATUS_LABELS } from "../../../referral/orders";
 import type { ReferralOrderStatus } from "../../../referral/orderTypes";
-import { leadName, leadPhone } from "../../../referral/status";
-import { useReferralData } from "../../../referral/useReferralData";
 import { useOperationalPilot } from "../operations/useOperationalPilot";
-import { useReferralOperations } from "../operations/useReferralOperations";
-import { countActiveAutomations, countActiveOrders, countHumanInterventions, groceryLocations, groceryPartnerIds, isProfessionalPartner, latestFailedNotifications } from "../operations/referralDataMapping";
+import { groceryLocations, latestFailedNotifications } from "../operations/referralDataMapping";
+import Avatar from "../ui/Avatar";
+import PageHeader from "../ui/PageHeader";
+import StatusBadge, { type StatusTone } from "../ui/StatusBadge";
+import FilterTabs from "../ui/FilterTabs";
+import EmptyState from "../ui/EmptyState";
+import { SkeletonRows } from "../ui/Skeleton";
+import { Table, TableCell, TableHead, TableRow } from "../ui/Table";
 
-function Page({ title, subtitle, back, children }: { title: string; subtitle?: string; back?: string; children: React.ReactNode }) {
-  return <main className="bolt-rh-page">{back ? <Link className="bolt-rh-back" to={back}><ArrowLeft />Volver</Link> : null}<header className="bolt-rh-heading"><h1>{title}</h1>{subtitle ? <p>{subtitle}</p> : null}</header>{children}</main>;
-}
-function Empty({ icon: Icon = CheckCircle2, children }: { icon?: typeof CheckCircle2; children: React.ReactNode }) { return <div className="bolt-rh-empty"><Icon /><p>{children}</p></div>; }
-function Failure({ children }: { children: React.ReactNode }) { return <div className="bolt-rh-empty" role="alert"><MessageCircle /><p>{children}</p></div>; }
 function formatDate(value: unknown) { const date = new Date(String(value ?? "")); return Number.isNaN(date.getTime()) ? "Sin fecha" : new Intl.DateTimeFormat("es-US", { dateStyle: "medium", timeStyle: "short" }).format(date); }
 function serviceLabel(value: unknown) { return String(value ?? "Servicio").replace(/^luis_/, "").replace(/_/g, " "); }
-function lastMessage(rows: ReturnType<typeof useReferralOperations>["messages"]) { return rows.length ? rows[rows.length - 1] : undefined; }
 function rowId(value: unknown) { return String(value ?? ""); }
 function rowText(value: unknown, fallback = "") { return typeof value === "string" || typeof value === "number" ? String(value) : fallback; }
 function partnerName(item: { commercial_name?: unknown; name?: unknown; legal_name?: unknown } | null | undefined) { return String(item?.commercial_name || item?.name || item?.legal_name || "Aliado"); }
 
-export function HomeScreen(){const data=useReferralData();const ops=useReferralOperations();const pilot=useOperationalPilot();const orders=useReferralOrders();const latest=Array.from(ops.byLead.values()).map(lastMessage).filter(Boolean);const failure=data.error||ops.error||orders.error||pilot.operationalAccessError||pilot.error;const rows=[{label:"Conversaciones pendientes",value:latest.filter((x)=>x?.actor==="user"||x?.role==="user").length,to:"/messages"},{label:"Requieren intervención",value:countHumanInterventions(pilot.exceptions,pilot.notifications,pilot.assignments),to:"/work"},{label:"Automatizaciones activas",value:countActiveAutomations(pilot.requests,pilot.conversationOperations),to:"/work?tab=seguimiento"},{label:"Pedidos activos",value:countActiveOrders(orders.orders),to:"/orders"}];return <Page title="Inicio" subtitle="Esto es lo que necesita tu atención.">{data.loading||ops.loading||pilot.loading||orders.loading?<Empty>Cargando datos reales…</Empty>:failure?<Failure>{failure}</Failure>:<><div className="bolt-rh-menu">{rows.map((row)=><Link key={row.label} to={row.to}><span><strong>{row.label}</strong><small>{row.value===0?"Sin pendientes":"Revisar operación"}</small></span><b>{row.value}</b><ChevronRight/></Link>)}</div><section className="bolt-rh-section"><h2>Alertas</h2>{pilot.exceptions.filter((x)=>x.status==="open").slice(0,5).map((item)=><Link key={item.id} to="/work" className="bolt-rh-alert"><span/><div><strong>{item.summary||"Intervención requerida"}</strong><small>Próximo paso: revisar y resolver.</small></div></Link>)}{pilot.exceptions.filter((x)=>x.status==="open").length===0?<Empty>Operación al día.</Empty>:null}</section></>}<span className="sr-only">{data.leads.length} contactos</span></Page>}
+type WorkCaseRow = { id: string; tone: StatusTone; title: string; detail: string; source: string; timestamp: unknown };
 
-export function InboxScreen() {
-  const data = useReferralData(); const ops = useReferralOperations(); const navigate = useNavigate(); const [query, setQuery] = useState("");
-  const conversations = useMemo(() => data.leads.map((lead) => { const rows = ops.byLead.get(lead.id) ?? []; return { lead, rows, latest: lastMessage(rows) }; }).filter((item) => item.latest && `${leadName(item.lead)} ${item.latest?.content || ""}`.toLowerCase().includes(query.toLowerCase())).sort((a,b) => +new Date(b.latest!.created_at)-+new Date(a.latest!.created_at)), [data.leads, ops.byLead, query]);
-  return <Page title="Inbox" subtitle="Conversaciones reales de Messenger y WhatsApp"><label className="bolt-rh-search"><Search /><span className="sr-only">Buscar conversaciones</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar conversación…" /></label>{ops.loading || data.loading ? <Empty icon={Inbox}>Cargando conversaciones…</Empty> : ops.error || data.error ? <Failure>{ops.error || data.error}</Failure> : conversations.length === 0 ? <Empty icon={Inbox}>No hay conversaciones.</Empty> : <div className="bolt-rh-list">{conversations.map(({ lead, latest }) => <button key={lead.id} onClick={() => navigate(`/messages/${lead.id}`)}><span className="bolt-rh-avatar">{leadName(lead).slice(0,2).toUpperCase()}</span><div><strong>{leadName(lead)}</strong><small>{latest?.content || "Mensaje interactivo"}</small></div><time>{latest ? formatDate(latest.created_at) : ""}</time><ChevronRight /></button>)}</div>}</Page>;
-}
-
-export function ConversationScreen() {
-  const { conversationId = "" } = useParams(); const data = useReferralData(); const ops = useReferralOperations(); const lead = data.leads.find((item) => item.id === conversationId); const rows = ops.byLead.get(conversationId) ?? []; const latest = lastMessage(rows); const [draft,setDraft]=useState(""); const [sending,setSending]=useState(false); const [notice,setNotice]=useState("");
-  async function send(){if(!lead||!draft.trim())return;setSending(true);setNotice("");const result=await ops.sendMessage({leadId:lead.id,channel:latest?.channel??lead.last_channel??"messenger",channelUserId:latest?.channel_user_id??lead.channel_user_id,content:draft});setSending(false);if(result.ok){setDraft("");setNotice("Mensaje en cola de entrega.");}else setNotice(result.message??"No se pudo enviar.");}
-  if (data.loading || ops.loading) return <Page title="Conversación" back="/messages"><Empty icon={MessageCircle}>Cargando conversación…</Empty></Page>;
-  if (data.error || ops.error) return <Page title="Conversación" back="/messages"><Failure>{data.error || ops.error}</Failure></Page>;
-  if (!lead) return <Page title="Conversación no encontrada" back="/messages"><Empty icon={MessageCircle}>No existe una conversación para este contacto.</Empty></Page>;
-  return <Page title={leadName(lead)} subtitle={leadPhone(lead) || "Sin teléfono"} back="/messages">{rows.length?<div className="bolt-rh-thread">{rows.map((message) => {const inbound=message.actor==="user"||message.role==="user";return <article key={message.id} className={inbound?"inbound":"outbound"}><p>{message.content||"Mensaje interactivo"}</p><time>{formatDate(message.created_at)}</time></article>;})}</div>:<Empty icon={MessageCircle}>Esta conversación todavía no tiene mensajes.</Empty>}<footer className="bolt-rh-composer">{notice?<p role="status">{notice}</p>:null}<textarea value={draft} onChange={(event)=>setDraft(event.target.value)} rows={2} placeholder="Escribe una respuesta manual…" aria-label="Mensaje"/><button disabled={sending||!draft.trim()} onClick={()=>void send()}><Send />{sending?"Enviando…":"Enviar"}</button></footer></Page>;
+function workToneLabel(tone: StatusTone) {
+  if (tone === "danger") return "Requiere acción";
+  if (tone === "warning") return "En seguimiento";
+  return "Resuelto";
 }
 
 export function WorkScreen() {
-  const pilot=useOperationalPilot();const [params,setParams]=useSearchParams();const tab=params.get("tab")||"intervencion";
-  const exceptions=pilot.exceptions.filter((x)=>tab==="resueltos"?x.status==="resolved":x.status==="open");const assignments=pilot.assignments.filter((x)=>tab==="seguimiento"?["assigned","accepted"].includes(x.status):tab==="resueltos"?["cancelled","expired"].includes(x.status):false);const failed=tab==="intervencion"?latestFailedNotifications(pilot.notifications):[];
-  return <Page title="Trabajo" subtitle="Intervención, seguimiento automático y resueltos">{pilot.loading?<Empty>Cargando operación…</Empty>:pilot.operationalAccessError||pilot.error?<Failure>{pilot.operationalAccessError||pilot.error}</Failure>:<><div className="bolt-rh-tabs">{[["intervencion","Intervención"],["seguimiento","En seguimiento"],["resueltos","Resueltos"]].map(([id,label])=><button key={id} aria-selected={tab===id} onClick={()=>setParams(id==="intervencion"?{}:{tab:id})}>{label}</button>)}</div><div className="bolt-rh-cases">{exceptions.map((item)=><article key={item.id} className={tab==="resueltos"?"resolved":"danger"}><i/><div><strong>{item.summary||"Intervención requerida"}</strong><small>{formatDate(item.created_at)}</small><b>{tab==="resueltos"?"Incidencia resuelta.":"Próximo paso: revisar el contexto y resolver."}</b></div></article>)}{failed.map((item)=><article key={rowId(item.id)} className="danger"><i/><div><strong>Notificación no entregada</strong><small>{formatDate(item.created_at)}</small><b>Próximo paso: revisar el contacto y reenviar.</b></div></article>)}{assignments.map((item)=>{const request=pilot.requests.find((x)=>x.id===item.request_id);const partner=pilot.partners.find((x)=>x.id===item.partner_id);return <article key={item.id} className={tab==="resueltos"?"resolved":"waiting"}><i/><div><strong>{serviceLabel(request?.service_id)}</strong><small>{partnerName(partner)} · {formatDate(item.assigned_at)}</small><b>{item.status==="accepted"?"Aliado aceptó. Próximo paso: contactar al cliente.":tab==="resueltos"?"Proceso concluido.":"Esperando respuesta del aliado."}</b></div></article>})}{exceptions.length+assignments.length+failed.length===0?<Empty>No hay registros reales en esta cola.</Empty>:null}</div></>}</Page>;
+  const pilot = useOperationalPilot();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") || "intervencion";
+
+  const exceptions = pilot.exceptions.filter((x) => tab === "resueltos" ? x.status === "resolved" : x.status === "open");
+  const assignments = pilot.assignments.filter((x) => tab === "seguimiento" ? ["assigned", "accepted"].includes(x.status) : tab === "resueltos" ? ["cancelled", "expired"].includes(x.status) : false);
+  const failed = tab === "intervencion" ? latestFailedNotifications(pilot.notifications) : [];
+
+  const openExceptionCount = pilot.exceptions.filter((x) => x.status === "open").length;
+  const resolvedExceptionCount = pilot.exceptions.filter((x) => x.status === "resolved").length;
+  const failedNotificationCount = latestFailedNotifications(pilot.notifications).length;
+  const followingAssignmentCount = pilot.assignments.filter((x) => ["assigned", "accepted"].includes(x.status)).length;
+  const resolvedAssignmentCount = pilot.assignments.filter((x) => ["cancelled", "expired"].includes(x.status)).length;
+  const tabs = [
+    { id: "intervencion", label: "Intervención", count: openExceptionCount + failedNotificationCount },
+    { id: "seguimiento", label: "En seguimiento", count: openExceptionCount + followingAssignmentCount },
+    { id: "resueltos", label: "Resueltos", count: resolvedExceptionCount + resolvedAssignmentCount },
+  ];
+
+  const rows: WorkCaseRow[] = useMemo(() => {
+    const list: WorkCaseRow[] = [];
+    for (const item of exceptions) {
+      list.push({
+        id: `exception-${rowId(item.id)}`,
+        tone: tab === "resueltos" ? "success" : "danger",
+        title: item.summary || "Intervención requerida",
+        detail: tab === "resueltos" ? "Incidencia resuelta." : "Próximo paso: revisar el contexto y resolver.",
+        source: "Excepción operativa",
+        timestamp: item.created_at,
+      });
+    }
+    for (const item of failed) {
+      list.push({
+        id: `notification-${rowId(item.id)}`,
+        tone: "danger",
+        title: "Notificación no entregada",
+        detail: "Próximo paso: revisar el contacto y reenviar.",
+        source: "Notificación",
+        timestamp: item.created_at,
+      });
+    }
+    for (const item of assignments) {
+      const request = pilot.requests.find((x) => x.id === item.request_id);
+      const partner = pilot.partners.find((x) => x.id === item.partner_id);
+      list.push({
+        id: `assignment-${rowId(item.id)}`,
+        tone: tab === "resueltos" ? "success" : "warning",
+        title: serviceLabel(request?.service_id),
+        detail: item.status === "accepted" ? "Aliado aceptó. Próximo paso: contactar al cliente." : tab === "resueltos" ? "Proceso concluido." : "Esperando respuesta del aliado.",
+        source: partnerName(partner),
+        timestamp: item.assigned_at,
+      });
+    }
+    return list.sort((a, b) => +new Date(String(b.timestamp ?? 0)) - +new Date(String(a.timestamp ?? 0)));
+  }, [exceptions, failed, assignments, pilot.requests, pilot.partners, tab]);
+
+  const failure = pilot.operationalAccessError || pilot.error;
+
+  return (
+    <div className="hub-page">
+      <PageHeader
+        eyebrow="Operación"
+        title="Trabajo"
+        subtitle="Intervención, seguimiento automático y resueltos."
+        meta={!pilot.loading && !failure ? <span className="hub-page-count">{rows.length} {rows.length === 1 ? "caso" : "casos"}</span> : null}
+      />
+      <FilterTabs tabs={tabs} activeId={tab} onChange={(id) => setParams(id === "intervencion" ? {} : { tab: id })} />
+      {pilot.loading ? (
+        <SkeletonRows count={5} />
+      ) : failure ? (
+        <EmptyState tone="error" icon={AlertTriangle} title="No se pudo cargar la operación" description={failure} />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle2}
+          title={tab === "resueltos" ? "Todavía no hay casos resueltos" : "Todo al día"}
+          description={
+            tab === "intervencion"
+              ? "No hay excepciones abiertas ni notificaciones fallidas en este momento."
+              : tab === "seguimiento"
+              ? "No hay asignaciones activas de aliados en este momento."
+              : "Los casos resueltos aparecerán aquí."
+          }
+        />
+      ) : (
+        <Table ariaLabel="Cola de trabajo">
+          <TableHead columns={["Caso", "Detalle", "Origen", "Actualizado"]} />
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell variant="primary">
+                <StatusBadge tone={row.tone} label={workToneLabel(row.tone)} />
+                <strong>{row.title}</strong>
+              </TableCell>
+              <TableCell label="Detalle"><span className="hub-table-detail">{row.detail}</span></TableCell>
+              <TableCell variant="muted" label="Origen">{row.source}</TableCell>
+              <TableCell variant="time" label="Actualizado">{formatDate(row.timestamp)}</TableCell>
+            </TableRow>
+          ))}
+        </Table>
+      )}
+    </div>
+  );
 }
 
-export function OrdersScreen(){const data=useReferralOrders();const navigate=useNavigate();return <Page title="Pedidos" subtitle="Pedidos activos y completados">{data.loading?<Empty icon={ShoppingBag}>Cargando pedidos…</Empty>:data.error?<Failure>{data.error}</Failure>:data.orders.length===0?<Empty icon={ShoppingBag}>No hay pedidos.</Empty>:<div className="bolt-rh-list">{data.orders.map((order)=><button key={order.id} onClick={()=>navigate(`/orders/${order.id}`)}><span className="bolt-rh-icon"><ShoppingBag/></span><div><strong>{order.customer_name}</strong><small>{order.basket_name_snapshot} · {order.partner_location_name_snapshot}</small></div><span className="bolt-rh-status">{REFERRAL_ORDER_STATUS_LABELS[order.status]}</span><ChevronRight/></button>)}</div>}</Page>}
-export function OrderDetailScreen(){const {orderId=""}=useParams();const data=useReferralOrders();const order=data.orders.find((x)=>x.id===orderId);if(data.loading)return <Page title="Pedido" back="/orders"><Empty>Cargando pedido…</Empty></Page>;if(data.error)return <Page title="Pedido" back="/orders"><Failure>{data.error}</Failure></Page>;if(!order)return <Page title="Pedido no encontrado" back="/orders"><Empty>No existe este pedido.</Empty></Page>;const next=REFERRAL_ORDER_NEXT_STATUSES[order.status]??[];return <Page title={order.customer_name} subtitle={`${order.order_code} · ${REFERRAL_ORDER_STATUS_LABELS[order.status]}`} back="/orders"><dl className="bolt-rh-facts"><div><dt>Canasta</dt><dd>{order.basket_name_snapshot}</dd></div><div><dt>Supermercado</dt><dd>{order.partner_name_snapshot} · {order.partner_location_name_snapshot}</dd></div><div><dt>Entrega</dt><dd>{order.delivery_address}, {order.delivery_city} {order.delivery_postal_code}</dd></div><div><dt>Total</dt><dd>{new Intl.NumberFormat("es-US",{style:"currency",currency:order.currency}).format(order.total_cents/100)}</dd></div></dl>{data.actionError?<Failure>{data.actionError}</Failure>:null}{next.length?<div className="bolt-rh-actions">{next.map((status)=><button key={status} disabled={data.updatingOrderId===order.id} onClick={()=>void data.updateStatus(order.id,status as ReferralOrderStatus)}>{data.updatingOrderId===order.id?"Guardando…":REFERRAL_ORDER_STATUS_LABELS[status]}</button>)}</div>:<Empty>Este pedido no tiene más cambios de estado disponibles.</Empty>}</Page>}
+const ORDER_STATUS_TONE: Record<string, StatusTone> = { delivered: "success", completed: "success", cancelled: "danger", pending: "warning" };
+export function OrdersScreen() {
+  const data = useReferralOrders();
+  return (
+    <div className="hub-page">
+      <PageHeader eyebrow="Operación" title="Pedidos" subtitle="Pedidos activos y completados" meta={!data.loading && !data.error ? <span className="hub-page-count">{data.orders.length} {data.orders.length === 1 ? "pedido" : "pedidos"}</span> : null} />
+      {data.loading ? (
+        <SkeletonRows count={5} />
+      ) : data.error ? (
+        <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar los pedidos" description={data.error} />
+      ) : data.orders.length === 0 ? (
+        <EmptyState icon={ShoppingBag} title="No hay pedidos" />
+      ) : (
+        <div className="hub-list">
+          {data.orders.map((order) => (
+            <Link key={order.id} className="hub-list-row" to={`/orders/${order.id}`}>
+              <Avatar name={order.customer_name} seed={order.id} />
+              <div><strong>{order.customer_name}</strong><small>{order.basket_name_snapshot} · {order.partner_location_name_snapshot}</small></div>
+              <StatusBadge tone={ORDER_STATUS_TONE[order.status] ?? "neutral"} label={REFERRAL_ORDER_STATUS_LABELS[order.status]} />
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+export function OrderDetailScreen() {
+  const { orderId = "" } = useParams();
+  const data = useReferralOrders();
+  const order = data.orders.find((x) => x.id === orderId);
+  if (data.loading) return <div className="hub-page"><Link className="hub-back" to="/orders"><ArrowLeft />Volver</Link><EmptyState icon={ShoppingBag} title="Cargando pedido…" /></div>;
+  if (data.error) return <div className="hub-page"><Link className="hub-back" to="/orders"><ArrowLeft />Volver</Link><EmptyState tone="error" icon={AlertTriangle} title="No se pudo cargar el pedido" description={data.error} /></div>;
+  if (!order) return <div className="hub-page"><Link className="hub-back" to="/orders"><ArrowLeft />Volver</Link><EmptyState icon={ShoppingBag} title="Pedido no encontrado" /></div>;
+  const next = REFERRAL_ORDER_NEXT_STATUSES[order.status] ?? [];
+  return (
+    <div className="hub-page">
+      <Link className="hub-back" to="/orders"><ArrowLeft />Volver</Link>
+      <PageHeader eyebrow="Pedido" title={order.customer_name} subtitle={`${order.order_code} · ${REFERRAL_ORDER_STATUS_LABELS[order.status]}`} />
+      <dl className="hub-facts">
+        <div><dt>Canasta</dt><dd>{order.basket_name_snapshot}</dd></div>
+        <div><dt>Supermercado</dt><dd>{order.partner_name_snapshot} · {order.partner_location_name_snapshot}</dd></div>
+        <div><dt>Entrega</dt><dd>{order.delivery_address}, {order.delivery_city} {order.delivery_postal_code}</dd></div>
+        <div><dt>Total</dt><dd>{new Intl.NumberFormat("es-US", { style: "currency", currency: order.currency }).format(order.total_cents / 100)}</dd></div>
+      </dl>
+      {data.actionError ? <EmptyState tone="error" icon={AlertTriangle} title="No se pudo actualizar" description={data.actionError} /> : null}
+      {next.length ? (
+        <div className="hub-campaign-actions">
+          {next.map((status) => (
+            <button key={status} type="button" className="hub-chip-btn is-primary" disabled={data.updatingOrderId === order.id} onClick={() => void data.updateStatus(order.id, status as ReferralOrderStatus)}>
+              {data.updatingOrderId === order.id ? "Guardando…" : REFERRAL_ORDER_STATUS_LABELS[status]}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={CheckCircle2} title="Sin más cambios disponibles" description="Este pedido no tiene más cambios de estado disponibles." />
+      )}
+    </div>
+  );
+}
 
-export function NetworkScreen(){return <Page title="Red" subtitle="Aliados y supermercados"><div className="bolt-rh-menu"><Link to="/network/allies"><Handshake/><span><strong>Aliados</strong><small>Profesionales y servicios compatibles</small></span><ChevronRight/></Link><Link to="/network/stores"><Store/><span><strong>Supermercados</strong><small>Ubicaciones, entrega y canastas</small></span><ChevronRight/></Link></div></Page>}
-export function AlliesScreen(){const data=useOperationalPilot();const groceryIds=groceryPartnerIds(data.rules,data.locations,data.offers);const allies=data.partners.filter((partner)=>isProfessionalPartner(partner,data.rules,groceryIds));const failed=["partners","rules","locations","offers"].some((key)=>data.queryErrors[key]);return <Page title="Aliados" subtitle="Red profesional" back="/network">{data.loading?<Empty>Cargando aliados…</Empty>:failed?<Failure>No se pudo cargar la red de aliados.</Failure>:allies.length===0?<Empty>No hay aliados profesionales configurados.</Empty>:<div className="bolt-rh-list">{allies.map((ally)=><Link key={ally.id} to={`/network/allies/${ally.id}`}><span className="bolt-rh-icon"><Handshake/></span><div><strong>{partnerName(ally)}</strong><small>{ally.category||"Categoría pendiente"}</small></div><span className="bolt-rh-status">{ally.active===false?"Inactivo":"Activo"}</span><ChevronRight/></Link>)}</div>}</Page>}
-export function AllyDetailScreen(){const {allyId=""}=useParams();const data=useOperationalPilot();const ally=data.partners.find((x)=>x.id===allyId);if(data.loading)return <Page title="Aliado" back="/network/allies"><Empty>Cargando aliado…</Empty></Page>;if(["partners","rules","contacts"].some((key)=>data.queryErrors[key]))return <Page title="Aliado" back="/network/allies"><Failure>No se pudo cargar la información del aliado.</Failure></Page>;if(!ally)return <Page title="Aliado" back="/network/allies"><Empty>Aliado no encontrado.</Empty></Page>;const rules=data.rules.filter((x)=>x.partner_id===ally.id);const contacts=data.contacts.filter((x)=>x.partner_id===ally.id);return <Page title={partnerName(ally)} subtitle={ally.category||"Categoría no especificada"} back="/network/allies"><dl className="bolt-rh-facts"><div><dt>Estado</dt><dd>{ally.active===false?"Inactivo":"Activo"}</dd></div><div><dt>Servicios</dt><dd>{rules.length?rules.map((x)=>serviceLabel(x.service_id)).join(", "):"No configurado"}</dd></div><div><dt>Contactos activos</dt><dd>{contacts.filter((x)=>x.active).length}</dd></div></dl></Page>}
-export function StoresScreen(){const data=useOperationalPilot();const stores=groceryLocations(data.partners,data.locations,data.rules,data.offers);const failed=["partners","rules","locations","offers"].some((key)=>data.queryErrors[key]);return <Page title="Supermercados" subtitle="Ubicaciones reales" back="/network">{data.loading?<Empty>Cargando supermercados…</Empty>:failed?<Failure>No se pudieron cargar los supermercados.</Failure>:stores.length===0?<Empty>No hay ubicaciones de supermercado configuradas.</Empty>:<div className="bolt-rh-list">{stores.map((store)=><Link key={rowId(store.id)} to={`/network/stores/${rowId(store.id)}`}><span className="bolt-rh-icon"><Store/></span><div><strong>{rowText(store.name, "Supermercado")}</strong><small>{rowText(store.formatted_address) || [store.city, store.state].map((value) => rowText(value)).filter(Boolean).join(", ")}</small></div><span className="bolt-rh-status">{store.delivery_enabled?"Entrega":"Recogida"}</span><ChevronRight/></Link>)}</div>}</Page>}
-export function StoreDetailScreen(){const {locationId=""}=useParams();const data=useOperationalPilot();const store=data.locations.find((x)=>x.id===locationId);if(!store)return <Page title="Supermercado" back="/network/stores"><Empty>Ubicación no encontrada.</Empty></Page>;const offers=data.offers.filter((x)=>x.partner_location_id===store.id);const coverage=data.deliveryCoverage.filter((x)=>x.partner_location_id===store.id&&x.active);return <Page title={store.name} subtitle={store.formatted_address||"Dirección no configurada"} back="/network/stores"><dl className="bolt-rh-facts"><div><dt>Entrega</dt><dd>{store.delivery_enabled?"Habilitada":"Deshabilitada"}</dd></div><div><dt>Canastas activas</dt><dd>{offers.filter((x)=>x.active).length}</dd></div><div><dt>Zonas de cobertura</dt><dd>{coverage.length}</dd></div><div><dt>Coordenadas</dt><dd>{Number.isFinite(Number(store.latitude))&&Number.isFinite(Number(store.longitude))?"Verificadas":"Pendiente de configuración"}</dd></div></dl><Link className="bolt-rh-primary" to={`/baskets/${store.id}`}>Ver canastas</Link></Page>}
+export function StoresScreen() {
+  const data = useOperationalPilot();
+  const stores = groceryLocations(data.partners, data.locations, data.rules, data.offers);
+  const failed = ["partners", "rules", "locations", "offers"].some((key) => data.queryErrors[key]);
+  return (
+    <div className="hub-page">
+      <PageHeader eyebrow="Negocios" title="Supermercados" subtitle="Ubicaciones reales" />
+      {data.loading ? (
+        <SkeletonRows count={4} />
+      ) : failed ? (
+        <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar los supermercados" />
+      ) : stores.length === 0 ? (
+        <EmptyState icon={Store} title="No hay ubicaciones de supermercado configuradas" />
+      ) : (
+        <div className="hub-list">
+          {stores.map((store) => (
+            <Link key={rowId(store.id)} className="hub-list-row" to={`/network/stores/${rowId(store.id)}`}>
+              <Avatar name={rowText(store.name, "Supermercado")} seed={rowId(store.id)} />
+              <div><strong>{rowText(store.name, "Supermercado")}</strong><small>{rowText(store.formatted_address) || [store.city, store.state].map((value) => rowText(value)).filter(Boolean).join(", ")}</small></div>
+              <StatusBadge tone="neutral" label={store.delivery_enabled ? "Entrega" : "Recogida"} />
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

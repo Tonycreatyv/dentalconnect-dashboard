@@ -7,14 +7,33 @@ import {
   stripTestDentalTag,
 } from "../_shared/conversationEngine.ts";
 import { normalizeWhatsAppInboundMessage } from "../shared/whatsappNormalization.ts";
+import { extractMessengerEvents, validateMetaSignature } from "./messenger.ts";
 import {
-  extractMessengerEvents,
-  validateMetaSignature,
-} from "./messenger.ts";
+  booleanFlag,
+  coexistenceActivationMessageId,
+  isDuplicateDatabaseError,
+  isPendingCoexistenceActivation,
+  isWhatsAppAutomationAllowed,
+  resolveExactWhatsAppTenant,
+  type WhatsAppOrganizationSettings,
+} from "./whatsappActivation.ts";
 
 type Json = Record<string, unknown>;
 
 const TESTDENTAL_TAG = "#testdental";
+export const META_TEST_PROBE_PHONE_NUMBER_ID = "1185864697945379";
+const META_TEST_DEMO_ORGANIZATION_ID = "luis-gabriel-referral-hub";
+const META_TEST_DEMO_ROUTE_TYPE = "meta_test_demo";
+
+function isMetaTestDemoEnabled() {
+  return String(Deno.env.get("META_WHATSAPP_TEST_DEMO_ENABLED") ?? "")
+    .trim().toLowerCase() === "true";
+}
+
+function isExplicitMetaTestDemoPhone(phoneNumberId: unknown) {
+  return isMetaTestDemoEnabled() &&
+    safeString(phoneNumberId) === META_TEST_PROBE_PHONE_NUMBER_ID;
+}
 
 function json(status: number, body: Json) {
   return new Response(JSON.stringify(body), {
@@ -61,17 +80,20 @@ function psidSuffix(psid: string) {
 type InboundEvent = {
   channel: "messenger" | "whatsapp";
   page_id?: string;
+  waba_id?: string;
   phone_number_id?: string;
   sender_id: string;
   mid: string;
   text: string;
   payload_action?: string | null;
+  flow_response?: Record<string, unknown>;
   timestamp: number;
   sender_name?: string | null;
 };
 
 type WhatsAppHumanEchoEvent = {
   channel: "whatsapp";
+  waba_id: string;
   phone_number_id: string;
   to: string;
   mid: string;
@@ -79,6 +101,45 @@ type WhatsAppHumanEchoEvent = {
   timestamp: number;
   source: "smb_message_echoes";
 };
+
+export function isMetaTestProbeInbound(event: {
+  channel: string;
+  phone_number_id?: string;
+}) {
+  return event.channel === "whatsapp" &&
+    event.phone_number_id === META_TEST_PROBE_PHONE_NUMBER_ID &&
+    !isExplicitMetaTestDemoPhone(event.phone_number_id);
+}
+
+function metaTestProbeObservation(
+  event: InboundEvent | WhatsAppHumanEchoEvent,
+) {
+  const sender = "sender_id" in event
+    ? normalizeChannelUserId("whatsapp", event.sender_id)
+    : normalizeChannelUserId("whatsapp", event.to);
+  return {
+    probe: "META_TEST_PROBE",
+    received_at: new Date(event.timestamp).toISOString(),
+    phone_number_id: event.phone_number_id,
+    sender,
+    provider_message_id_present: Boolean(event.mid),
+    event_type: "sender_id" in event ? "messages" : event.source,
+  };
+}
+
+function unmappedWhatsAppObservation(args: {
+  phoneNumberId: string;
+  providerMessageId: string;
+  timestamp: number;
+  eventType: string;
+}) {
+  return {
+    phone_number_id: args.phoneNumberId || null,
+    provider_message_id: args.providerMessageId || null,
+    event_type: args.eventType,
+    received_at: new Date(args.timestamp).toISOString(),
+  };
+}
 
 type LeadRoutingDiagnostics = {
   scopedLead: Record<string, any> | null;
@@ -224,6 +285,7 @@ function extractWhatsAppTextEvents(body: any): InboundEvent[] {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
 
   for (const entry of entries) {
+    const wabaId = safeString(entry?.id);
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       if (String(change?.field ?? "") !== "messages") continue;
@@ -244,11 +306,15 @@ function extractWhatsAppTextEvents(body: any): InboundEvent[] {
         ) ?? contacts[0];
         events.push({
           channel: "whatsapp",
+          waba_id: wabaId,
           phone_number_id: phoneNumberId,
           sender_id: senderId,
           mid,
           text,
           payload_action: payloadAction,
+          ...(normalized?.flow_response
+            ? { flow_response: normalized.flow_response }
+            : {}),
           timestamp: Number(
             msg?.timestamp ? Number(msg.timestamp) * 1000 : Date.now(),
           ),
@@ -265,6 +331,7 @@ function extractWhatsAppHumanEchoEvents(body: any): WhatsAppHumanEchoEvent[] {
   const events: WhatsAppHumanEchoEvent[] = [];
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   for (const entry of entries) {
+    const wabaId = safeString(entry?.id);
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       if (String(change?.field ?? "") !== "messages") continue;
@@ -286,6 +353,7 @@ function extractWhatsAppHumanEchoEvents(body: any): WhatsAppHumanEchoEvent[] {
         if (!to || !mid || !text) continue;
         events.push({
           channel: "whatsapp",
+          waba_id: wabaId,
           phone_number_id: phoneNumberId,
           to,
           mid,
@@ -382,14 +450,6 @@ function resolveDemoContactRoute(args: {
   return organizationId ? { organizationId } : null;
 }
 
-function normalizeBooleanFlag(input: unknown): boolean {
-  if (input === true) return true;
-  if (typeof input === "number") return input === 1;
-  const value = safeString(input).toLowerCase();
-  return value === "true" || value === "1" || value === "yes" ||
-    value === "on";
-}
-
 function promptKeyForBusinessType(input: unknown) {
   const businessType = safeString(input).toLowerCase();
   return businessType === "barbershop" ? "barbershop_v1" : "dental_v1";
@@ -399,8 +459,8 @@ function summarizeRoutingCandidates(rows: Array<Record<string, any>>) {
   return rows.map((row) => ({
     organization_id: safeString(row?.organization_id),
     business_type: safeString(row?.business_type),
-    whatsapp_enabled: normalizeBooleanFlag(row?.whatsapp_enabled),
-    bot_enabled: normalizeBooleanFlag(row?.bot_enabled),
+    whatsapp_enabled: booleanFlag(row?.whatsapp_enabled),
+    bot_enabled: booleanFlag(row?.bot_enabled),
     updated_at: safeString(row?.updated_at),
   }));
 }
@@ -410,18 +470,32 @@ async function resolveOrganizationForInbound(args: {
   channel: "messenger" | "whatsapp";
   pageId: string;
   phoneNumberId: string;
+  wabaId?: string;
   channelUserId?: string;
   defaultOrg: string;
 }) {
   const { supabase, channel, pageId, phoneNumberId, defaultOrg } = args;
-  let organizationId: string | null = channel === "messenger" ? null : defaultOrg;
+  let organizationId: string | null = null;
   let businessType = "";
   let source:
     | "demo_contact_route"
+    | "meta_test_demo"
     | "org_settings"
     | "messenger_meta_page_id"
-    | "default_org" = "default_org";
+    | "default_org"
+    | "unmapped_whatsapp_phone" = channel === "whatsapp"
+      ? "unmapped_whatsapp_phone"
+      : "default_org";
+  let routeType: string | null = null;
   let routingCandidates: Array<Record<string, unknown>> = [];
+  let whatsappSettings: WhatsAppOrganizationSettings | null = null;
+  let whatsappResolution:
+    | "resolved"
+    | "unmapped"
+    | "ambiguous"
+    | "phone_mismatch"
+    | "waba_mismatch"
+    | null = null;
 
   if (channel === "messenger" && pageId) {
     const orgLookup = await supabase
@@ -436,75 +510,74 @@ async function resolveOrganizationForInbound(args: {
       source = "messenger_meta_page_id";
     }
   } else if (channel === "whatsapp" && phoneNumberId) {
-    const orgSettingsLookup = await supabase
-      .from("org_settings")
-      .select(
-        "organization_id,business_type,whatsapp_enabled,bot_enabled,updated_at",
-      )
-      .eq("whatsapp_phone_number_id", phoneNumberId)
-      .order("updated_at", { ascending: false })
-      .limit(20);
-    const orgSettingsRows =
-      !orgSettingsLookup.error && Array.isArray(orgSettingsLookup.data)
-        ? orgSettingsLookup.data
-        : [];
-    routingCandidates = summarizeRoutingCandidates(orgSettingsRows);
-    const activeRows = orgSettingsRows.filter((row: Record<string, any>) =>
-      row?.organization_id &&
-      normalizeBooleanFlag(row?.whatsapp_enabled) &&
-      normalizeBooleanFlag(row?.bot_enabled)
-    );
-    if (activeRows.length > 0) {
-      if (activeRows.length > 1) {
-        console.warn("[meta-webhook] whatsapp_org_routing_ambiguous", {
-          phone_number_id: phoneNumberId,
-          active_candidate_count: activeRows.length,
-          selected_organization_id: activeRows[0]?.organization_id ?? null,
-          candidate_orgs: summarizeRoutingCandidates(activeRows),
-          resolution: "updated_at_desc",
-        });
-      }
-      const selected = activeRows[0];
-      organizationId = String(selected.organization_id);
-      businessType = String(selected.business_type ?? "").trim();
-      source = "org_settings";
+    if (isExplicitMetaTestDemoPhone(phoneNumberId)) {
+      organizationId = META_TEST_DEMO_ORGANIZATION_ID;
+      source = "meta_test_demo";
+      routeType = META_TEST_DEMO_ROUTE_TYPE;
     } else {
-      const demoRoute = resolveDemoContactRoute({
+      const orgSettingsLookup = await supabase
+        .from("org_settings")
+        .select(
+          "organization_id,business_type,whatsapp_phone_number_id,whatsapp_waba_id,whatsapp_enabled,bot_enabled,whatsapp_registered,whatsapp_webhooks_subscribed,whatsapp_onboarding_mode,whatsapp_onboarding_event,whatsapp_business_app_coexistence_completed,updated_at",
+        )
+        .eq("whatsapp_phone_number_id", phoneNumberId)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+      const orgSettingsRows =
+        !orgSettingsLookup.error && Array.isArray(orgSettingsLookup.data)
+          ? orgSettingsLookup.data
+          : [];
+      routingCandidates = summarizeRoutingCandidates(orgSettingsRows);
+      const exactResolution = resolveExactWhatsAppTenant(
+        orgSettingsRows,
         phoneNumberId,
-        channelUserId: args.channelUserId ?? "",
-      });
-      if (demoRoute?.organizationId) {
-        organizationId = demoRoute.organizationId;
-        source = "demo_contact_route";
+        args.wabaId ?? "",
+      );
+      whatsappResolution = exactResolution.status;
+      if (exactResolution.status === "resolved") {
+        const selected = exactResolution.settings;
+        organizationId = String(selected.organization_id);
+        businessType = String(selected.business_type ?? "").trim();
+        whatsappSettings = selected;
+        source = "org_settings";
       } else {
-        const canonicalLookup = await supabase
-          .from("organization_settings")
-          .select("organization_id,business_type,integrations")
-          .filter(
-            "integrations->>whatsapp_phone_number_id",
-            "eq",
+        if (exactResolution.status === "ambiguous") {
+          console.warn("[meta-webhook] whatsapp_org_routing_ambiguous", {
+            phone_number_id: phoneNumberId,
+            candidate_count: orgSettingsRows.length,
+            candidate_orgs: summarizeRoutingCandidates(orgSettingsRows),
+            resolution: "rejected",
+          });
+        } else if (exactResolution.status === "waba_mismatch") {
+          console.warn("[meta-webhook] whatsapp_waba_mismatch", {
+            phone_number_id: phoneNumberId,
+            inbound_waba_id: args.wabaId ?? null,
+            resolution: "rejected",
+          });
+        }
+        const demoRoute = exactResolution.status === "unmapped"
+          ? resolveDemoContactRoute({
             phoneNumberId,
-          )
-          .limit(2);
-        const canonicalRows =
-          !canonicalLookup.error && Array.isArray(canonicalLookup.data)
-            ? canonicalLookup.data
-            : [];
-        if (canonicalRows.length === 1 && canonicalRows[0]?.organization_id) {
-          organizationId = String(canonicalRows[0].organization_id);
-          businessType = String(canonicalRows[0].business_type ?? "").trim();
-          source = "org_settings";
+            channelUserId: args.channelUserId ?? "",
+          })
+          : null;
+        if (demoRoute?.organizationId) {
+          organizationId = demoRoute.organizationId;
+          source = "demo_contact_route";
         }
       }
-    }
-    if (source === "demo_contact_route" && organizationId) {
-      const typeLookup = await supabase
-        .from("org_settings")
-        .select("organization_id,business_type")
-        .eq("organization_id", organizationId)
-        .maybeSingle();
-      if (!typeLookup.error) {
-        businessType = String(typeLookup.data?.business_type ?? "").trim();
+      if (source === "demo_contact_route" && organizationId) {
+        const typeLookup = await supabase
+          .from("org_settings")
+          .select("organization_id,business_type")
+          .eq("organization_id", organizationId)
+          .maybeSingle();
+        if (!typeLookup.error) {
+          businessType = String(typeLookup.data?.business_type ?? "").trim();
+        }
+      }
+      if (!organizationId) {
+        source = "unmapped_whatsapp_phone";
       }
     }
   }
@@ -513,7 +586,10 @@ async function resolveOrganizationForInbound(args: {
     organizationId,
     businessType,
     source,
+    routeType,
     routingCandidates,
+    whatsappSettings,
+    whatsappResolution,
     promptKey: promptKeyForBusinessType(businessType),
   };
 }
@@ -641,7 +717,8 @@ serve(async (req) => {
     } catch {
       return json(400, { ok: false, error: "invalid_json" });
     }
-    if (String(body?.object ?? "") === "page") {
+    const metaObject = String(body?.object ?? "");
+    if (metaObject === "page" || metaObject === "whatsapp_business_account") {
       const signatureValid = await validateMetaSignature({
         rawBody,
         signatureHeader: req.headers.get("x-hub-signature-256"),
@@ -652,17 +729,40 @@ serve(async (req) => {
       }
     }
     const echoEvents = extractWhatsAppHumanEchoEvents(body);
-    if (echoEvents.length > 0) {
-      for (const echo of echoEvents) {
+    const probeEchoEvents = echoEvents.filter(isMetaTestProbeInbound);
+    for (const event of probeEchoEvents) {
+      console.log(
+        "[meta-webhook] meta_test_probe_received",
+        metaTestProbeObservation(event),
+      );
+    }
+    const businessEchoEvents = echoEvents.filter((event) =>
+      !isMetaTestProbeInbound(event)
+    );
+    if (businessEchoEvents.length > 0) {
+      for (const echo of businessEchoEvents) {
         const resolvedOrg = await resolveOrganizationForInbound({
           supabase,
           channel: "whatsapp",
           pageId: "",
           phoneNumberId: echo.phone_number_id,
+          wabaId: echo.waba_id,
           channelUserId: echo.to,
           defaultOrg: DEFAULT_ORG,
         });
         const organization_id = resolvedOrg.organizationId;
+        if (!organization_id) {
+          console.warn(
+            "[meta-webhook] unmapped_whatsapp_phone",
+            unmappedWhatsAppObservation({
+              phoneNumberId: echo.phone_number_id,
+              providerMessageId: echo.mid,
+              timestamp: echo.timestamp,
+              eventType: echo.source,
+            }),
+          );
+          continue;
+        }
         console.log("[meta-webhook] human_echo_routing", {
           phone_number_id: echo.phone_number_id,
           channel_user_id: echo.to,
@@ -733,12 +833,27 @@ serve(async (req) => {
         }
       }
     }
-    const events = [
+    const inboundEvents = [
       ...extractMessengerEvents(body),
       ...extractWhatsAppTextEvents(body),
     ];
+    const probeEvents = inboundEvents.filter(isMetaTestProbeInbound);
+    for (const event of probeEvents) {
+      console.log(
+        "[meta-webhook] meta_test_probe_received",
+        metaTestProbeObservation(event),
+      );
+    }
+    const events = inboundEvents.filter((event) =>
+      !isMetaTestProbeInbound(event)
+    );
     if (!events.length) {
-      return json(200, { ok: true, received: 0, organization_ids: [] });
+      return json(200, {
+        ok: true,
+        received: 0,
+        organization_ids: [],
+        probe_events: probeEvents.map(metaTestProbeObservation),
+      });
     }
 
     let received = 0;
@@ -752,6 +867,7 @@ serve(async (req) => {
       const channel = ev.channel;
       const pageId = ev.page_id ?? "";
       const phoneNumberId = (ev as InboundEvent).phone_number_id ?? "";
+      const wabaId = (ev as InboundEvent).waba_id ?? "";
       const rawSenderId = safeString(ev.sender_id);
       const senderId = normalizeChannelUserId(channel, ev.sender_id);
       const providerMid = ev.mid;
@@ -765,7 +881,7 @@ serve(async (req) => {
       const payloadAction = safeString((ev as any).payload_action);
       const isoTime = new Date(ev.timestamp).toISOString();
 
-      let organization_id = DEFAULT_ORG;
+      let organization_id = "";
       let orgBusinessType = "";
       let orgTesterPsids = new Set<string>();
       let organizationSource = "default_org";
@@ -778,6 +894,7 @@ serve(async (req) => {
         channel,
         pageId,
         phoneNumberId,
+        wabaId,
         channelUserId: senderId,
         defaultOrg: DEFAULT_ORG,
       });
@@ -788,26 +905,45 @@ serve(async (req) => {
         });
         return json(404, { ok: false, error: "unknown_messenger_page" });
       }
+      if (channel === "whatsapp" && !resolvedOrg.organizationId) {
+        console.warn(
+          "[meta-webhook] unmapped_whatsapp_phone",
+          unmappedWhatsAppObservation({
+            phoneNumberId,
+            providerMessageId: providerMid,
+            timestamp: ev.timestamp,
+            eventType: "messages",
+          }),
+        );
+        continue;
+      }
       const resolvedOrganizationId = resolvedOrg.organizationId as string;
       let existingLead: Record<string, any> | null = null;
 
-      if (resolvedOrg.source === "demo_contact_route") {
-        organization_id = resolvedOrganizationId;
-        orgBusinessType = resolvedOrg.businessType;
-        organizationSource = resolvedOrg.source;
-        defaultOrgUsed = false;
-      } else if (resolvedOrg.source === "org_settings") {
-        organization_id = resolvedOrganizationId;
-        orgBusinessType = resolvedOrg.businessType;
-        organizationSource = resolvedOrg.source;
-        defaultOrgUsed = false;
-      } else {
-        organization_id = resolvedOrganizationId;
-        orgBusinessType = resolvedOrg.businessType;
-        organizationSource = resolvedOrg.source;
-        defaultOrgUsed = resolvedOrg.source === "default_org";
-      }
+      organization_id = resolvedOrganizationId;
+      orgBusinessType = resolvedOrg.businessType;
+      organizationSource = resolvedOrg.source;
+      defaultOrgUsed = resolvedOrg.source === "default_org";
       orgIds.add(organization_id);
+      const activationProbe = channel === "whatsapp" &&
+        isPendingCoexistenceActivation(resolvedOrg.whatsappSettings);
+      const automationAllowed = channel !== "whatsapp" ||
+        isWhatsAppAutomationAllowed(resolvedOrg.whatsappSettings) ||
+        resolvedOrg.source === "meta_test_demo" ||
+        resolvedOrg.source === "demo_contact_route";
+      if (
+        channel === "whatsapp" &&
+        !activationProbe &&
+        !automationAllowed &&
+        !booleanFlag(resolvedOrg.whatsappSettings?.whatsapp_enabled)
+      ) {
+        console.warn("[meta-webhook] whatsapp_inbound_disabled", {
+          organization_id,
+          phone_number_id: phoneNumberId,
+          waba_id: wabaId || null,
+        });
+        continue;
+      }
       if (channel === "whatsapp") {
         const leadDiagnostics = await findWhatsAppLeadRoutingDiagnostics({
           supabase,
@@ -845,6 +981,7 @@ serve(async (req) => {
       console.log("[meta-webhook] inbound", {
         organization_id,
         organization_source: organizationSource,
+        whatsapp_route_type: resolvedOrg.routeType,
         default_org: DEFAULT_ORG,
         candidate_orgs: resolvedOrg.routingCandidates,
         selected_business_type: orgBusinessType,
@@ -1035,7 +1172,9 @@ serve(async (req) => {
         fallback_default_org_used: defaultOrgUsed,
       });
 
-      const decision = waitlistDecision(text);
+      const decision = activationProbe || !automationAllowed
+        ? null
+        : waitlistDecision(text);
       if (decision) {
         const activeHold = await supabase
           .from("slot_holds")
@@ -1146,32 +1285,54 @@ serve(async (req) => {
         }
       }
 
-      const cancelFollowupsRes = await supabase
-        .from("followup_outbox")
-        .update({
-          status: "cancelled",
-          lock_owner: null,
-          locked_at: null,
-          updated_at: new Date().toISOString(),
-          last_error: "cancelled:user_replied",
-        })
-        .eq("organization_id", organization_id)
-        .eq("lead_id", lead.id)
-        .in("status", ["queued", "processing"]);
-      if (cancelFollowupsRes.error) {
-        const msg = String(cancelFollowupsRes.error.message ?? "");
-        if (!msg.toLowerCase().includes("does not exist")) {
-          console.log("[meta-webhook] followup_cancel_warn", {
-            organization_id,
-            lead_id: lead.id,
-            error: msg,
-          });
+      if (!activationProbe) {
+        const cancelFollowupsRes = await supabase
+          .from("followup_outbox")
+          .update({
+            status: "cancelled",
+            lock_owner: null,
+            locked_at: null,
+            updated_at: new Date().toISOString(),
+            last_error: "cancelled:user_replied",
+          })
+          .eq("organization_id", organization_id)
+          .eq("lead_id", lead.id)
+          .in("status", ["queued", "processing"]);
+        if (cancelFollowupsRes.error) {
+          const msg = String(cancelFollowupsRes.error.message ?? "");
+          if (!msg.toLowerCase().includes("does not exist")) {
+            console.log("[meta-webhook] followup_cancel_warn", {
+              organization_id,
+              lead_id: lead.id,
+              error: msg,
+            });
+          }
         }
       }
 
-      const msgInsert = await supabase
-        .from("messages")
-        .insert({
+      let insertedMessageId: string | null = null;
+      let inboundPersisted = false;
+
+      // Activation webhooks can be delivered more than once. Use the canonical
+      // inbound identifiers for lookup and a deterministic existing PK value
+      // to make concurrent inserts converge without a schema change.
+      if (activationProbe) {
+        const existingMessage = await supabase
+          .from("messages")
+          .select("id")
+          .eq("organization_id", organization_id)
+          .eq("channel", channel)
+          .eq("provider_message_id", providerMid)
+          .eq("inbound_message_id", providerMid)
+          .limit(1)
+          .maybeSingle();
+        if (existingMessage.error) throw existingMessage.error;
+        insertedMessageId = safeString(existingMessage.data?.id) || null;
+        inboundPersisted = Boolean(insertedMessageId);
+      }
+
+      if (!inboundPersisted) {
+        const messagePayload: Record<string, unknown> = {
           organization_id,
           lead_id: lead.id,
           channel,
@@ -1182,19 +1343,105 @@ serve(async (req) => {
           provider_message_id: providerMid,
           inbound_message_id: providerMid,
           channel_user_id: senderId,
-        })
-        .select("id")
-        .maybeSingle();
-      if (msgInsert.error) {
-        console.warn("[meta-webhook] message_insert_failed", {
-          organization_id,
-          lead_id: lead.id,
-          error: String(msgInsert.error.message ?? ""),
-        });
-      }
-      const insertedMessageId = (msgInsert.data as any)?.id ?? null;
+        };
+        if (activationProbe) {
+          messagePayload.id = await coexistenceActivationMessageId(
+            organization_id,
+            channel,
+            providerMid,
+          );
+        }
 
-      const canEnqueue = !botAutoReplyPaused && Boolean(text && text.trim()) &&
+        const msgInsert = await supabase
+          .from("messages")
+          .insert(messagePayload)
+          .select("id")
+          .maybeSingle();
+        insertedMessageId = safeString(msgInsert.data?.id) || null;
+        inboundPersisted = Boolean(insertedMessageId);
+        if (
+          msgInsert.error && activationProbe &&
+          isDuplicateDatabaseError(msgInsert.error)
+        ) {
+          const existingMessage = await supabase
+            .from("messages")
+            .select("id")
+            .eq("organization_id", organization_id)
+            .eq("channel", channel)
+            .eq("provider_message_id", providerMid)
+            .eq("inbound_message_id", providerMid)
+            .limit(1)
+            .maybeSingle();
+          if (existingMessage.error) throw existingMessage.error;
+          insertedMessageId = safeString(existingMessage.data?.id) || null;
+          inboundPersisted = Boolean(insertedMessageId);
+        } else if (msgInsert.error) {
+          console.warn("[meta-webhook] message_insert_failed", {
+            organization_id,
+            lead_id: lead.id,
+            error: String(msgInsert.error.message ?? ""),
+          });
+        }
+      }
+
+      if (activationProbe) {
+        if (!inboundPersisted) {
+          throw new Error("coexistence_activation_inbound_not_persisted");
+        }
+        const activationTime = new Date().toISOString();
+        const activationUpdate = await supabase
+          .from("org_settings")
+          .update({
+            whatsapp_enabled: true,
+            whatsapp_connected_at: activationTime,
+          })
+          .eq("organization_id", organization_id)
+          .eq("whatsapp_phone_number_id", phoneNumberId)
+          .eq("whatsapp_waba_id", wabaId)
+          .eq("whatsapp_enabled", false)
+          .eq(
+            "whatsapp_onboarding_event",
+            "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING",
+          )
+          .eq("whatsapp_onboarding_mode", "COEXISTENCE")
+          .eq("whatsapp_business_app_coexistence_completed", true)
+          .eq("whatsapp_registered", true)
+          .eq("whatsapp_webhooks_subscribed", true)
+          .select("organization_id,whatsapp_connected_at")
+          .maybeSingle();
+        if (activationUpdate.error) throw activationUpdate.error;
+        if (!activationUpdate.data?.organization_id) {
+          const currentActivation = await supabase
+            .from("org_settings")
+            .select("whatsapp_enabled,whatsapp_connected_at")
+            .eq("organization_id", organization_id)
+            .eq("whatsapp_phone_number_id", phoneNumberId)
+            .eq("whatsapp_waba_id", wabaId)
+            .maybeSingle();
+          if (
+            currentActivation.error ||
+            !booleanFlag(currentActivation.data?.whatsapp_enabled) ||
+            !safeString(currentActivation.data?.whatsapp_connected_at)
+          ) {
+            throw currentActivation.error ??
+              new Error("coexistence_activation_transition_failed");
+          }
+        }
+        console.log("[meta-webhook] coexistence_activation_probe", {
+          organization_id,
+          phone_number_id: phoneNumberId,
+          waba_id: wabaId,
+          provider_message_id: providerMid,
+          activation_transitioned: Boolean(
+            activationUpdate.data?.organization_id,
+          ),
+          reply_suppressed: true,
+        });
+        continue;
+      }
+
+      const canEnqueue = automationAllowed && !botAutoReplyPaused &&
+        Boolean(text && text.trim()) &&
         Boolean(providerMid);
       if (canEnqueue) {
         const outboxPayload = {
@@ -1208,10 +1455,17 @@ serve(async (req) => {
           payload: {
             text,
             payload_action: payloadAction || null,
+            ...("flow_response" in ev && ev.flow_response
+              ? { flow_response: ev.flow_response }
+              : {}),
             channel,
             channel_user_id: senderId,
             organization_id,
             inbound_provider_message_id: providerMid,
+            inbound_phone_number_id: channel === "whatsapp"
+              ? phoneNumberId || null
+              : null,
+            whatsapp_route_type: resolvedOrg.routeType,
             trace_id: traceId,
           },
         };
@@ -1274,7 +1528,9 @@ serve(async (req) => {
         }
       }
 
-      if (!botAutoReplyPaused && shouldScheduleFollowup(text)) {
+      if (
+        automationAllowed && !botAutoReplyPaused && shouldScheduleFollowup(text)
+      ) {
         const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupRes = await supabase
           .from("followup_outbox")
@@ -1324,7 +1580,7 @@ serve(async (req) => {
           });
         }
       }
-      if (RUN_REPLIES_SECRET && !botAutoReplyPaused) {
+      if (RUN_REPLIES_SECRET && automationAllowed && !botAutoReplyPaused) {
         const RUN_REPLIES_URL = `${SUPABASE_URL}/functions/v1/run-replies`;
         await fetch(RUN_REPLIES_URL, {
           method: "POST",

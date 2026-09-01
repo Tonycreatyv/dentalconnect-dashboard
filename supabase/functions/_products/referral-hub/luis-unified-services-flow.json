@@ -1,0 +1,207 @@
+{
+  "version": "7.3",
+  "routing_model": {
+    "SERVICE_SELECT": ["BENEFIT_SELECT", "IMMIGRATION_TOPIC", "ACCIDENT_BASICS", "CRIMINAL_TOPIC", "HANDOFF_CONFIRM"],
+    "BENEFIT_SELECT": ["BENEFIT_DETAILS"],
+    "BENEFIT_DETAILS": [],
+    "IMMIGRATION_TOPIC": ["IMMIGRATION_DETAILS"],
+    "IMMIGRATION_DETAILS": ["IMMIGRATION_CONSENT"],
+    "IMMIGRATION_CONSENT": [],
+    "ACCIDENT_BASICS": ["ACCIDENT_DETAILS"],
+    "ACCIDENT_DETAILS": [],
+    "CRIMINAL_TOPIC": ["CRIMINAL_DETAILS"],
+    "CRIMINAL_DETAILS": [],
+    "HANDOFF_CONFIRM": []
+  },
+  "screens": [
+    {
+      "id": "SERVICE_SELECT",
+      "title": "¡Hola! 👋",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "NavigationList",
+            "name": "service_choice",
+            "label": "¿En qué podemos ayudarte hoy?",
+            "description": "Te saluda Luis Gabriel. Qué gusto tenerte por aquí. Contanos qué necesitás y te ayudamos a encontrar la opción correcta.",
+            "list-items": [
+              { "id": "BENEFITS", "main-content": { "title": "🎁 Beneficios y cupones", "description": "Ahorros disponibles" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "BENEFIT_SELECT" }, "payload": {} } },
+              { "id": "IMMIGRATION", "main-content": { "title": "🛂 Inmigración", "description": "Orientación inicial" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "IMMIGRATION_TOPIC" }, "payload": {} } },
+              { "id": "AUTO_ACCIDENT", "main-content": { "title": "🚗 Accidente de auto", "description": "Contanos lo básico" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "ACCIDENT_BASICS" }, "payload": {} } },
+              { "id": "DUI_CRIMINAL", "main-content": { "title": "⚖️ DUI / Defensa criminal", "description": "Orientación inicial" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "CRIMINAL_TOPIC" }, "payload": {} } },
+              { "id": "HANDOFF", "main-content": { "title": "👤 Hablar con nuestro equipo", "description": "Seguimiento personal" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "HANDOFF_CONFIRM" }, "payload": {} } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "BENEFIT_SELECT",
+      "title": "Beneficios para vos",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Tenemos varios beneficios disponibles. Elegí el que más te sirva y te ayudamos con el siguiente paso." },
+          { "type": "RadioButtonsGroup", "name": "benefit_key", "label": "Elegí un beneficio", "required": true, "data-source": [
+            { "id": "SUPERMARKET", "title": "$20 Supermercado", "description": "Para compras de $150 o más." },
+            { "id": "MEDICAL", "title": "20% Servicios médicos", "description": "Beneficio disponible con Médico Urgencias." },
+            { "id": "DENTAL", "title": "Dental completo por $29", "description": "Consulta, limpieza y rayos X." },
+            { "id": "SHIPPING", "title": "$20 en tu próximo envío", "description": "Beneficio disponible con Ultra Cargo." }
+          ] },
+          { "type": "Footer", "label": "Quiero este beneficio", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "BENEFIT_DETAILS" }, "payload": { "benefit_key": "${form.benefit_key}" } } }
+        ]
+      }
+    },
+    {
+      "id": "BENEFIT_DETAILS",
+      "title": "Ya casi está",
+      "terminal": true,
+      "success": true,
+      "data": { "benefit_key": { "type": "string", "__example__": "SUPERMARKET" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Dejanos unos datos para encontrar el beneficio correcto y dejarlo listo para vos." },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "helper-text": "Como querés que aparezca en tu beneficio.", "required": true },
+          { "type": "TextInput", "name": "postal_code", "label": "ZIP / código postal", "helper-text": "Nos ayuda a encontrar la opción disponible cerca de vos.", "input-type": "number", "required": true },
+          { "type": "TextInput", "name": "email", "label": "Correo", "helper-text": "Para enviarte información del beneficio.", "input-type": "email", "required": false },
+          { "type": "OptIn", "name": "marketing_consent", "label": "Sí, quiero recibir beneficios y promociones." },
+          { "type": "Footer", "label": "Ver mi beneficio", "on-click-action": { "name": "complete", "payload": { "service_key": "BENEFITS", "benefit_key": "${data.benefit_key}", "full_name": "${form.full_name}", "postal_code": "${form.postal_code}", "email": "${form.email}", "marketing_consent": "${form.marketing_consent}" } } }
+        ]
+      }
+    },
+    {
+      "id": "IMMIGRATION_TOPIC",
+      "title": "¿Con qué necesitás ayuda?",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Cada caso es diferente. Elegí la opción que más se parece a lo que necesitás y contanos un poco más en el siguiente paso." },
+          { "type": "RadioButtonsGroup", "name": "topic", "label": "Tipo de ayuda", "required": true, "data-source": [
+            { "id": "CONSULTATION", "title": "Consulta de inmigración" },
+            { "id": "GREEN_CARD", "title": "Residencia / Green Card" },
+            { "id": "CITIZENSHIP", "title": "Ciudadanía" },
+            { "id": "WORK_PERMIT", "title": "Permiso de trabajo" },
+            { "id": "FAMILY_PETITION", "title": "Petición familiar" },
+            { "id": "IMMIGRATION_COURT", "title": "Corte de inmigración" },
+            { "id": "OTHER", "title": "Otro" }
+          ] },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "IMMIGRATION_DETAILS" }, "payload": { "topic": "${form.topic}" } } }
+        ]
+      }
+    },
+    {
+      "id": "IMMIGRATION_DETAILS",
+      "title": "Contanos un poco más",
+      "data": { "topic": { "type": "string", "__example__": "CONSULTATION" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Con esta información nuestro equipo puede entender mejor tu situación antes de comunicarse con vos." },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextInput", "name": "postal_code", "label": "ZIP", "input-type": "text", "required": false },
+          { "type": "TextArea", "name": "description", "label": "¿Qué está pasando?", "helper-text": "Contanos brevemente qué necesitás o en qué etapa está tu caso.", "required": true },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "IMMIGRATION_CONSENT" }, "payload": { "topic": "${data.topic}", "full_name": "${form.full_name}", "postal_code": "${form.postal_code}", "description": "${form.description}" } } }
+        ]
+      }
+    },
+    {
+      "id": "IMMIGRATION_CONSENT",
+      "title": "Autorización para compartir",
+      "terminal": true,
+      "success": true,
+      "data": { "topic": { "type": "string", "__example__": "CONSULTATION" }, "full_name": { "type": "string", "__example__": "Ana López" }, "postal_code": { "type": "string", "__example__": "30301" }, "description": { "type": "string", "__example__": "Necesito orientación." } },
+      "layout": { "type": "SingleColumnLayout", "children": [
+        { "type": "TextBody", "text": "Autorizo que Luis Gabriel Referral Hub comparta la información proporcionada con un aliado de inmigración para que pueda contactarme sobre mi solicitud." },
+        { "type": "RadioButtonsGroup", "name": "sharing_consent", "label": "¿Autorizás compartir tu información?", "required": true, "data-source": [{ "id": "AUTHORIZED", "title": "Sí, autorizo" }, { "id": "DECLINED", "title": "No, prefiero no compartirla" }] },
+        { "type": "Footer", "label": "Enviar solicitud", "on-click-action": { "name": "complete", "payload": { "service_key": "IMMIGRATION", "intake_type": "IMMIGRATION", "topic": "${data.topic}", "full_name": "${data.full_name}", "postal_code": "${data.postal_code}", "description": "${data.description}", "sharing_consent": "${form.sharing_consent}", "consent_version": "luis_immigration_sharing_v1", "consent_source": "whatsapp_flow" } } }
+      ] }
+    },
+    {
+      "id": "ACCIDENT_BASICS",
+      "title": "Sobre el accidente",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Sentimos que estés pasando por esto. Vamos a pedirte unos datos básicos para que el equipo pueda entender mejor lo ocurrido." },
+          { "type": "DatePicker", "name": "accident_date", "label": "¿Cuándo fue el accidente?", "required": true },
+          { "type": "RadioButtonsGroup", "name": "participation", "label": "¿Cuál fue tu participación?", "required": true, "data-source": [{ "id": "DRIVER", "title": "Conductor" }, { "id": "PASSENGER", "title": "Pasajero" }, { "id": "OTHER", "title": "Otra situación" }] },
+          { "type": "RadioButtonsGroup", "name": "received_medical_attention", "label": "¿Recibiste atención médica?", "required": true, "data-source": [{ "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }] },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "ACCIDENT_DETAILS" }, "payload": { "accident_date": "${form.accident_date}", "participation": "${form.participation}", "received_medical_attention": "${form.received_medical_attention}" } } }
+        ]
+      }
+    },
+    {
+      "id": "ACCIDENT_DETAILS",
+      "title": "Unos detalles más",
+      "terminal": true,
+      "success": true,
+      "data": { "accident_date": { "type": "string", "__example__": "2026-08-14" }, "participation": { "type": "string", "__example__": "DRIVER" }, "received_medical_attention": { "type": "string", "__example__": "YES" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Ya casi terminamos. Contanos brevemente qué pasó para que nuestro equipo pueda entender mejor tu situación." },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextInput", "name": "medical_provider", "label": "Centro médico", "required": false },
+          { "type": "TextArea", "name": "description", "label": "Contanos qué pasó", "helper-text": "Podés escribirlo con tus propias palabras.", "required": true },
+          { "type": "Footer", "label": "Enviar información", "on-click-action": { "name": "complete", "payload": { "service_key": "AUTO_ACCIDENT", "intake_type": "AUTO_ACCIDENT", "accident_date": "${data.accident_date}", "participation": "${data.participation}", "received_medical_attention": "${data.received_medical_attention}", "full_name": "${form.full_name}", "medical_provider": "${form.medical_provider}", "description": "${form.description}" } } }
+        ]
+      }
+    },
+    {
+      "id": "CRIMINAL_TOPIC",
+      "title": "¿Qué tipo de ayuda necesitás?",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Elegí la opción que mejor describe la situación. Después podés contarnos brevemente qué pasó." },
+          { "type": "RadioButtonsGroup", "name": "topic", "label": "Tipo de situación", "required": true, "data-source": [
+            { "id": "DUI", "title": "DUI" },
+            { "id": "ARREST", "title": "Arresto o detención" },
+            { "id": "CRIMINAL_CHARGE", "title": "Cargo criminal" },
+            { "id": "COURT_SUMMONS", "title": "Citación / corte" },
+            { "id": "OTHER", "title": "Otro" }
+          ] },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "CRIMINAL_DETAILS" }, "payload": { "topic": "${form.topic}" } } }
+        ]
+      }
+    },
+    {
+      "id": "CRIMINAL_DETAILS",
+      "title": "Contanos sobre tu situación",
+      "terminal": true,
+      "success": true,
+      "data": { "topic": { "type": "string", "__example__": "DUI" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Solo necesitamos algunos datos básicos para entender mejor lo que pasó y darle seguimiento." },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextInput", "name": "postal_code", "label": "ZIP", "input-type": "number", "required": false },
+          { "type": "TextArea", "name": "description", "label": "¿Qué pasó?", "helper-text": "Contanos brevemente la situación o qué necesitás resolver.", "required": true },
+          { "type": "Footer", "label": "Enviar información", "on-click-action": { "name": "complete", "payload": { "service_key": "DUI_CRIMINAL", "intake_type": "DUI_CRIMINAL", "topic": "${data.topic}", "full_name": "${form.full_name}", "postal_code": "${form.postal_code}", "description": "${form.description}" } } }
+        ]
+      }
+    },
+    {
+      "id": "HANDOFF_CONFIRM",
+      "title": "¿Preferís hablar con alguien?",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Claro. Podemos dejar tu conversación lista para que alguien de nuestro equipo le dé seguimiento." },
+          { "type": "Footer", "label": "Hablar con el equipo", "on-click-action": { "name": "complete", "payload": { "service_key": "HANDOFF" } } }
+        ]
+      }
+    }
+  ]
+}

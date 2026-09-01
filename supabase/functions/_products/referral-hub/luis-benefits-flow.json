@@ -1,0 +1,73 @@
+{
+  "version": "7.3",
+  "routing_model": {
+    "BENEFIT_SELECT": ["CUSTOMER_DETAILS"],
+    "CUSTOMER_DETAILS": []
+  },
+  "screens": [
+    {
+      "id": "BENEFIT_SELECT",
+      "title": "Tus beneficios",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Hola, te saluda Luis Gabriel 👋" },
+          { "type": "TextBody", "text": "Tenemos beneficios preparados para ayudarte a ahorrar. Elegí el que querés activar y te lo enviamos por este mismo WhatsApp." },
+          {
+            "type": "RadioButtonsGroup",
+            "name": "benefit_key",
+            "label": "Elegí tu beneficio",
+            "required": true,
+            "data-source": [
+              { "id": "SUPERMARKET", "title": "$20 Supermercado", "description": "En compras de $150 o más." },
+              { "id": "MEDICAL", "title": "20% Servicios médicos", "description": "Con Médico Urgencias." },
+              { "id": "DENTAL", "title": "Dental completo por $29", "description": "Consulta, limpieza y rayos X." },
+              { "id": "SHIPPING", "title": "$20 en tu próximo envío", "description": "Con Ultra Cargo." }
+            ]
+          },
+          {
+            "type": "Footer",
+            "label": "Continuar",
+            "on-click-action": {
+              "name": "navigate",
+              "next": { "type": "screen", "name": "CUSTOMER_DETAILS" },
+              "payload": { "benefit_key": "${form.benefit_key}" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CUSTOMER_DETAILS",
+      "title": "¿A nombre de quién preparamos tu beneficio?",
+      "terminal": true,
+      "success": true,
+      "data": { "benefit_key": { "type": "string", "__example__": "SUPERMARKET" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Solo falta esto para enviártelo." },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextInput", "name": "postal_code", "label": "ZIP / código postal", "input-type": "number", "required": true },
+          { "type": "TextInput", "name": "email", "label": "Correo electrónico — opcional", "helper-text": "Si querés recibir nuevos beneficios y promociones.", "input-type": "email", "required": false },
+          { "type": "OptIn", "name": "marketing_consent", "label": "Sí, quiero recibir nuevos beneficios y promociones por email." },
+          {
+            "type": "Footer",
+            "label": "Activar mi beneficio",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "benefit_key": "${data.benefit_key}",
+                "full_name": "${form.full_name}",
+                "postal_code": "${form.postal_code}",
+                "email": "${form.email}",
+                "marketing_consent": "${form.marketing_consent}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

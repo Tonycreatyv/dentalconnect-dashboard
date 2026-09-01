@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
+  controlledDemoQrPhone,
   isReferralQrPublicCode,
   publicReferralQrResolution,
   resolveReferralQrEntry,
@@ -27,17 +28,33 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return response(405, { available: false });
   try {
     const body = await request.json();
-    const publicCode = typeof body?.public_code === "string" ? body.public_code.trim() : "";
-    if (!isReferralQrPublicCode(publicCode)) return response(404, { available: false });
+    const publicCode = typeof body?.public_code === "string"
+      ? body.public_code.trim()
+      : "";
+    if (!isReferralQrPublicCode(publicCode)) {
+      return response(404, { available: false });
+    }
     const client = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
       { auth: { persistSession: false } },
     );
     const entry = await resolveReferralQrEntry(client, publicCode);
-    return response(entry ? 200 : 404, entry ? publicReferralQrResolution(entry) : { available: false });
+    const demoEnabled =
+      String(Deno.env.get("META_WHATSAPP_TEST_DEMO_ENABLED") ?? "")
+        .trim().toLowerCase() === "true";
+    const demoPhone = entry ? controlledDemoQrPhone(entry, demoEnabled) : null;
+    const resolvedEntry = entry && demoPhone
+      ? { ...entry, whatsappPhone: demoPhone }
+      : entry;
+    const result = resolvedEntry
+      ? publicReferralQrResolution(resolvedEntry)
+      : { available: false };
+    return response(resolvedEntry ? 200 : 404, result);
   } catch (error) {
-    console.error("[referral-qr-resolve] failed", { error: String(error).slice(0, 200) });
+    console.error("[referral-qr-resolve] failed", {
+      error: String(error).slice(0, 200),
+    });
     return response(500, { available: false });
   }
 });

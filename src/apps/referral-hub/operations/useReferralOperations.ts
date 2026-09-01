@@ -12,33 +12,69 @@ export type OperationsMessage = {
   role: string | null;
   content: string | null;
   created_at: string;
+  provider_message_id: string | null;
+};
+
+// The reply_outbox row that processed a given inbound message carries the
+// customer's real submitted Flow fields in payload.flow_response — the
+// messages table itself has no such column. Keyed by
+// inbound_provider_message_id, which is the same value stored on the
+// triggering inbound messages row's provider_message_id (see
+// enqueue_reply_outbox_from_message in
+// supabase/migrations/20260301_golden_reply_outbox_trigger.sql).
+export type FlowResponseRecord = {
+  payload: Record<string, unknown> | null;
+  status: string | null;
 };
 
 export function useReferralOperations() {
   const { resolvedOrgId } = useReferralOrganization();
   const [messages, setMessages] = useState<OperationsMessage[]>([]);
+  const [flowResponseByProviderMessageId, setFlowResponseByProviderMessageId] = useState<Map<string, FlowResponseRecord>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     if (!resolvedOrgId) {
       setMessages([]);
+      setFlowResponseByProviderMessageId(new Map());
       setLoading(false);
       return;
     }
     setLoading(true);
     setError("");
-    const result = await supabase
-      .from("messages")
-      .select("id,organization_id,lead_id,channel,channel_user_id,actor,role,content,created_at")
-      .eq("organization_id", resolvedOrgId)
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (result.error) {
+    const [messagesResult, outboxResult] = await Promise.all([
+      supabase
+        .from("messages")
+        .select("id,organization_id,lead_id,channel,channel_user_id,actor,role,content,created_at,provider_message_id")
+        .eq("organization_id", resolvedOrgId)
+        .order("created_at", { ascending: false })
+        .limit(500),
+      supabase
+        .from("reply_outbox")
+        .select("inbound_provider_message_id,payload,status")
+        .eq("organization_id", resolvedOrgId)
+        .not("inbound_provider_message_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(500),
+    ]);
+    if (messagesResult.error) {
       setError("No se pudieron cargar las conversaciones.");
       setMessages([]);
     } else {
-      setMessages((result.data ?? []) as OperationsMessage[]);
+      setMessages((messagesResult.data ?? []) as OperationsMessage[]);
+    }
+    if (!outboxResult.error) {
+      const nextMap = new Map<string, FlowResponseRecord>();
+      for (const row of (outboxResult.data ?? []) as Array<{ inbound_provider_message_id: string | null; payload: unknown; status: string | null }>) {
+        if (!row.inbound_provider_message_id || nextMap.has(row.inbound_provider_message_id)) continue;
+        const payload = row.payload && typeof row.payload === "object" ? row.payload as Record<string, unknown> : null;
+        const flowResponse = payload && payload.flow_response && typeof payload.flow_response === "object"
+          ? payload.flow_response as Record<string, unknown>
+          : null;
+        nextMap.set(row.inbound_provider_message_id, { payload: flowResponse, status: row.status });
+      }
+      setFlowResponseByProviderMessageId(nextMap);
     }
     setLoading(false);
   }, [resolvedOrgId]);
@@ -78,5 +114,5 @@ export function useReferralOperations() {
     return grouped;
   }, [messages]);
 
-  return { messages, byLead, loading, error, load, sendMessage };
+  return { messages, byLead, flowResponseByProviderMessageId, loading, error, load, sendMessage };
 }

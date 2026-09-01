@@ -9,6 +9,13 @@ export type InteractiveButton = {
   title: string;
 };
 
+export type WhatsAppLocationSpec = {
+  latitude: number;
+  longitude: number;
+  name: string;
+  address: string;
+};
+
 export type WhatsAppInteractiveListRow = {
   id: string;
   title: string;
@@ -37,9 +44,17 @@ export type WhatsAppFlowCtaSpec = {
   bodyText: string;
   ctaText: string;
   flowId: string;
+  /** Draft is permitted only by the isolated Meta test transport. */
+  flowMode?: "published" | "draft";
   flowToken?: string;
   flowAction?: "navigate" | "data_exchange";
   flowActionPayload?: Record<string, unknown>;
+  /**
+   * Optional header/title override for the outer WhatsApp CTA message.
+   * Undefined keeps the legacy "Agendá tu cita" default; an explicit empty
+   * string omits the header entirely.
+   */
+  headerText?: string;
 };
 
 export function buildWhatsAppFlowCtaMessage(args: {
@@ -59,7 +74,10 @@ export function buildWhatsAppFlowCtaMessage(args: {
     args.body_text ?? "Tocá aquí para elegir servicio, fecha y hora.",
   ).trim();
   const ctaText = String(args.cta_text ?? "Agendar cita").trim();
-  const headerText = String(args.header_text ?? "Agendá tu cita").trim();
+  // header_text undefined => legacy default header; explicit "" => no header.
+  const headerText = args.header_text === undefined
+    ? "Agendá tu cita"
+    : String(args.header_text).trim();
   const flowId = String(args.flow_id ?? "").trim();
   const flowToken = String(args.flow_token ?? "").trim();
   const flowMode = args.mode ?? "published";
@@ -77,7 +95,7 @@ export function buildWhatsAppFlowCtaMessage(args: {
     type: "interactive",
     interactive: {
       type: "flow",
-      header: { type: "text", text: headerText || "Agendá tu cita" },
+      ...(headerText ? { header: { type: "text", text: headerText } } : {}),
       body: {
         text: bodyText || "Tocá aquí para elegir servicio, fecha y hora.",
       },
@@ -97,6 +115,26 @@ export function buildWhatsAppFlowCtaMessage(args: {
   };
 }
 
+// Pure payload builder, exported for direct testing (same pattern as
+// buildWhatsAppFlowCtaMessage above) - never invents coordinates or an
+// address; whatever the caller passes is what's sent, verbatim.
+export function buildWhatsAppLocationMessage(args: {
+  to: string;
+  location: WhatsAppLocationSpec;
+}): Record<string, unknown> {
+  return {
+    messaging_product: "whatsapp",
+    to: String(args.to ?? "").trim(),
+    type: "location",
+    location: {
+      latitude: args.location.latitude,
+      longitude: args.location.longitude,
+      name: String(args.location.name ?? "").trim(),
+      address: String(args.location.address ?? "").trim(),
+    },
+  };
+}
+
 export async function sendViaMetaAdapter(args: {
   channel: "messenger" | "whatsapp";
   graphVersion: string;
@@ -105,6 +143,7 @@ export async function sendViaMetaAdapter(args: {
   buttons?: InteractiveButton[];
   interactiveList?: WhatsAppInteractiveListSpec;
   imageUrl?: string;
+  location?: WhatsAppLocationSpec;
   template?: TemplateSendSpec;
   flowCta?: WhatsAppFlowCtaSpec;
   pageAccessToken?: string;
@@ -180,6 +219,7 @@ async function sendViaWhatsApp(args: {
   buttons?: InteractiveButton[];
   interactiveList?: WhatsAppInteractiveListSpec;
   imageUrl?: string;
+  location?: WhatsAppLocationSpec;
   template?: TemplateSendSpec;
   flowCta?: WhatsAppFlowCtaSpec;
   whatsappPhoneNumberId?: string;
@@ -204,8 +244,8 @@ async function sendViaWhatsApp(args: {
       cta_text: String(args.flowCta.ctaText ?? "").trim() || "Agendar cita",
       body_text: String(args.flowCta.bodyText ?? "").trim() ||
         "Tocá aquí para elegir servicio, fecha y hora.",
-      header_text: "Agendá tu cita",
-      mode: "published",
+      header_text: args.flowCta.headerText,
+      mode: args.flowCta.flowMode ?? "published",
       flow_action: args.flowCta.flowAction ?? "navigate",
       flow_action_payload: args.flowCta.flowActionPayload ??
         { screen: "SERVICE" },
@@ -316,6 +356,8 @@ async function sendViaWhatsApp(args: {
         action: { buttons },
       },
     };
+  } else if (args.location) {
+    body = buildWhatsAppLocationMessage({ to: args.recipientId, location: args.location });
   } else if (String(args.imageUrl ?? "").trim()) {
     body = {
       messaging_product: "whatsapp",

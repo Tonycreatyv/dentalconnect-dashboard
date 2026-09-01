@@ -30,7 +30,7 @@ export default function ReferralQrEntry() {
     const timer = window.setTimeout(() => window.location.assign(whatsappUrl), 80);
     return () => window.clearTimeout(timer);
   }, [whatsappUrl]);
-  if (loading) return <main className="coupon-public"><section className="coupon-card"><p className="coupon-eyebrow">LG Community Network</p><h1>Abriendo WhatsApp…</h1></section></main>;
-  if (!resolution?.available || !whatsappUrl) return <main className="coupon-public"><section className="coupon-card" role="status"><p className="coupon-eyebrow">LG Community Network</p><h1>Este código no está disponible</h1><p className="coupon-notice">Puede haber vencido o estar pausado. Pide un enlace actualizado a la organización.</p></section></main>;
-  return <main className="coupon-public"><section className="coupon-card"><p className="coupon-eyebrow">{resolution.title || "LG Community Network"}</p><h1>Abriendo WhatsApp…</h1><p className="coupon-notice">Si WhatsApp no se abre automáticamente, continúa con el botón.</p><a className="coupon-primary" href={whatsappUrl}>Abrir WhatsApp</a></section></main>;
+  if (loading) return <main className="coupon-public"><section className="coupon-card"><p className="coupon-eyebrow">Conexxion · LG Community Network</p><h1>Abriendo WhatsApp…</h1></section></main>;
+  if (!resolution?.available || !whatsappUrl) return <main className="coupon-public"><section className="coupon-card" role="status"><p className="coupon-eyebrow">Conexxion · LG Community Network</p><h1>Este código no está disponible</h1><p className="coupon-notice">Puede haber vencido o estar pausado. Pide un enlace actualizado a la organización.</p></section></main>;
+  return <main className="coupon-public"><section className="coupon-card"><p className="coupon-eyebrow">Conexxion · {resolution.title || "LG Community Network"}</p><h1>Abriendo WhatsApp…</h1><p className="coupon-notice">Si WhatsApp no se abre automáticamente, continúa con el botón.</p><a className="coupon-primary" href={whatsappUrl}>Abrir WhatsApp</a></section></main>;
 }

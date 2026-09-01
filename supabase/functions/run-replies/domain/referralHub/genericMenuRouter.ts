@@ -9,10 +9,7 @@ import {
   type PantryPreludeMessage,
   shouldHandlePantryDemo,
 } from "./pantryDemoRouter.ts";
-import {
-  CouponPersistenceError,
-  issueOrGetCoupon,
-} from "./couponService.ts";
+import { CouponPersistenceError, issueOrGetCoupon } from "./couponService.ts";
 import {
   REFERRAL_HUB_CANONICAL_ORGANIZATION_ID,
   REFERRAL_HUB_COUPON_ASSETS,
@@ -21,18 +18,29 @@ import {
 import {
   extractReferralQrPublicCode,
   qrLeadAttribution,
-  resolveReferralQrEntry,
   type ResolvedReferralQrEntry,
+  resolveReferralQrEntry,
 } from "../../../_products/referral-hub/qrEntries.ts";
 import { LG_ACCIDENT_HANDOFF_FAILURE } from "./accidentHandoff.ts";
-import { interpretAccidentDate, interpretCity, type FieldInterpretation } from "./fieldInterpreter.ts";
-import { continueWhatsAppGrocery, groceryStateFromReferral, startWhatsAppGrocery } from "./whatsappGrocery.ts";
+import {
+  type FieldInterpretation,
+  interpretAccidentDate,
+  interpretCity,
+} from "./fieldInterpreter.ts";
+import {
+  continueWhatsAppGrocery,
+  groceryStateFromReferral,
+  startWhatsAppGrocery,
+} from "./whatsappGrocery.ts";
 
 type Json = Record<string, unknown>;
 
 type SupabaseLike = {
   from(table: string): any;
-  rpc?(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message?: string } | null }>;
+  rpc?(
+    name: string,
+    args: Record<string, unknown>,
+  ): PromiseLike<{ data: unknown; error: { message?: string } | null }>;
 };
 
 export type ReferralHubServiceType = "intake" | "static_action" | "transfer";
@@ -146,7 +154,7 @@ const TEMPORARY_STATIC_ACTION_TEXT: Record<string, string> = {
   luis_cupon_medico:
     "🏥 ¡Ya tenés tu cupón de 20% de descuento en servicios médicos! Un representante de Luis Gabriel te va a contactar pronto con los detalles para usarlo.",
   luis_cupon_super:
-    "🛒 ¡Ya tenés tu cupón de $20 para supermercado! Un representante de Luis Gabriel te va a contactar pronto con los detalles para usarlo.",
+    "🛒 ¡Ya tenés tu cupón de $10 para supermercado! Un representante de Luis Gabriel te va a contactar pronto con los detalles para usarlo.",
   luis_eventos:
     "📅 Pronto vamos a compartir el calendario completo de próximos eventos comunitarios. ¡Mantente atento a este WhatsApp!",
   luis_donacion:
@@ -174,7 +182,8 @@ const DEMO_STATIC_ACTION_PARTNERS: Record<string, ReferralHubPartner> = {
 
 const REFERRAL_HUB_INITIAL_PROMPT =
   "¡Hola! 👋 Soy el asistente de LG Community Network.\n\nPara comenzar, ¿cuál es tu nombre completo?";
-const LG_MENU_PROMPT = "¿En qué podemos ayudarte hoy?";
+const LG_MENU_PROMPT =
+  "¡Hola! 👋 Bienvenido a LG Community.\n\n¿Qué necesitas hoy?\n\nTenemos beneficios y servicios disponibles para ti.";
 
 const REFERRAL_HUB_GENERAL_CLOSING =
   "Gracias por ser parte de nuestra comunidad.\n¡Estamos de tu lado! 💚";
@@ -186,8 +195,13 @@ function safeStr(value: unknown, fallback = ""): string {
 }
 
 async function sha256(value: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest)).map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 function normalizeText(input: unknown): string {
@@ -203,9 +217,11 @@ function truncateWhatsAppTitle(input: string, max = 24): string {
   return input.trim().slice(0, max);
 }
 
-function getReferralState(leadState: Json | null | undefined): ReferralHubState {
-  const collected = ((leadState?.collected ?? {}) as Json);
-  const referral = ((collected.referral_hub ?? {}) as ReferralHubState);
+function getReferralState(
+  leadState: Json | null | undefined,
+): ReferralHubState {
+  const collected = (leadState?.collected ?? {}) as Json;
+  const referral = (collected.referral_hub ?? {}) as ReferralHubState;
   return referral;
 }
 
@@ -213,8 +229,8 @@ function mergeReferralState(
   leadState: Json | null | undefined,
   patch: ReferralHubState,
 ): Json {
-  const collected = ((leadState?.collected ?? {}) as Json);
-  const current = ((collected.referral_hub ?? {}) as ReferralHubState);
+  const collected = (leadState?.collected ?? {}) as Json;
+  const current = (collected.referral_hub ?? {}) as ReferralHubState;
   return {
     ...collected,
     referral_hub: {
@@ -229,7 +245,9 @@ function serviceLabel(config: ReferralHubServiceConfig): string {
 }
 
 function serviceTitle(config: ReferralHubServiceConfig): string {
-  return truncateWhatsAppTitle(`${safeStr(config.icono)} ${serviceLabel(config)}`.trim());
+  return truncateWhatsAppTitle(
+    `${safeStr(config.icono)} ${serviceLabel(config)}`.trim(),
+  );
 }
 
 function serviceActionId(serviceId: string): string {
@@ -244,7 +262,9 @@ function optInActionId(value: "yes" | "no"): string {
   return `referral_optin:${value}`;
 }
 
-function publicPartnerName(partner: ReferralHubPartner | null | undefined): string {
+function publicPartnerName(
+  partner: ReferralHubPartner | null | undefined,
+): string {
   return safeStr(partner?.nombre)
     .replace(/^\s*\[EJEMPLO\]\s*/i, "")
     .trim();
@@ -256,7 +276,8 @@ function makeRedemptionCode(serviceId: string): string {
     .replace(/[^a-z0-9]/gi, "")
     .slice(0, 6)
     .toUpperCase() || "LUIS";
-  const randomPart = crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase();
+  const randomPart = crypto.randomUUID().replace(/-/g, "").slice(0, 6)
+    .toUpperCase();
   return `LG-${servicePart}-${randomPart}`;
 }
 
@@ -270,7 +291,7 @@ function staticActionMessage(args: {
     return `🏥 ¡Ya tenés tu cupón de 20% de descuento!\n📍 Válido en: ${partnerName}\n🎟️ Tu código: ${redemptionCode}\nMostrá este mensaje al llegar.`;
   }
   if (config.id === "luis_cupon_super") {
-    return `🛒 ¡Ya tenés tu cupón de $20!\n📍 Válido en: ${partnerName}\n🎟️ Tu código: ${redemptionCode}\nMostrá este mensaje al llegar.`;
+    return `🛒 ¡Ya tenés tu cupón de $10!\n📍 Válido en: ${partnerName}\n🎟️ Tu código: ${redemptionCode}\nMostrá este mensaje al llegar.`;
   }
   if (config.id === "luis_eventos") {
     return `📅 Anotado. Te vamos a avisar de los próximos eventos de ${partnerName}. 🎟️ Tu código de acceso: ${redemptionCode}`;
@@ -298,14 +319,21 @@ export function buildReferralHubMenuList(
   };
 }
 
-function buildOptionButtons(field: string, options: string[]): InteractiveButton[] {
+function buildOptionButtons(
+  field: string,
+  options: string[],
+): InteractiveButton[] {
   return options.slice(0, 3).map((option, index) => ({
     id: optionActionId(field, index),
     title: truncateWhatsAppTitle(option, 20),
   }));
 }
 
-function buildOptionList(field: string, question: string, options: string[]): WhatsAppInteractiveListSpec {
+function buildOptionList(
+  field: string,
+  question: string,
+  options: string[],
+): WhatsAppInteractiveListSpec {
   return {
     body: question,
     buttonText: "Ver opciones",
@@ -343,7 +371,11 @@ function questionForObjective(objective: ReferralHubObjective): {
   if (objective.tipo === "opciones" && options.length > 3) {
     return {
       reply: objective.pregunta,
-      interactiveList: buildOptionList(objective.campo, objective.pregunta, options),
+      interactiveList: buildOptionList(
+        objective.campo,
+        objective.pregunta,
+        options,
+      ),
     };
   }
   if (objective.tipo === "opciones") {
@@ -355,15 +387,24 @@ function questionForObjective(objective: ReferralHubObjective): {
   return { reply: objective.pregunta };
 }
 
-function extractServiceId(inboundText: string, payloadAction?: string | null): string | null {
+function extractServiceId(
+  inboundText: string,
+  payloadAction?: string | null,
+): string | null {
   const action = safeStr(payloadAction, safeStr(inboundText)).trim();
   const match = action.match(/^referral_service:(.+)$/);
   return match?.[1] ?? null;
 }
 
-function extractOptInValue(inboundText: string, payloadAction?: string | null): "yes" | "no" | null {
-  const action = safeStr(payloadAction, safeStr(inboundText)).trim().toLowerCase();
-  if (action === optInActionId("yes") || /^(si|sí|yes)$/i.test(action)) return "yes";
+function extractOptInValue(
+  inboundText: string,
+  payloadAction?: string | null,
+): "yes" | "no" | null {
+  const action = safeStr(payloadAction, safeStr(inboundText)).trim()
+    .toLowerCase();
+  if (action === optInActionId("yes") || /^(si|sí|yes)$/i.test(action)) {
+    return "yes";
+  }
   if (action === optInActionId("no") || /^no$/i.test(action)) return "no";
   return null;
 }
@@ -375,7 +416,9 @@ function resolveOptionAnswer(args: {
 }): string | null {
   const options = objectiveOptions(args.objective);
   const action = safeStr(args.payloadAction, safeStr(args.inboundText)).trim();
-  const actionMatch = action.match(new RegExp(`^referral_field:${args.objective.campo}:(\\d+)$`));
+  const actionMatch = action.match(
+    new RegExp(`^referral_field:${args.objective.campo}:(\\d+)$`),
+  );
   if (actionMatch) {
     const index = Number(actionMatch[1]);
     return options[index] ?? null;
@@ -398,7 +441,8 @@ function findServiceByFreeText(
   return configs.find((config) => {
     const label = normalizeText(serviceLabel(config));
     const name = normalizeText(config.nombre);
-    return label === normalized || name === normalized || label.includes(normalized) || normalized.includes(label);
+    return label === normalized || name === normalized ||
+      label.includes(normalized) || normalized.includes(label);
   }) ?? null;
 }
 
@@ -410,45 +454,52 @@ async function classifyMenuWithGroq(args: {
   if (!apiKey) return null;
   const model = safeStr(Deno.env.get("GROQ_MODEL"), "llama-3.3-70b-versatile");
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
+    const response = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                "Clasifica el mensaje del usuario a una opción de menú. Devuelve SOLO JSON con service_id y confidence. Si no estás seguro, confidence bajo. No inventes opciones.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                message: args.inboundText,
+                options: args.configs.map((config) => ({
+                  id: config.id,
+                  label: serviceLabel(config),
+                  nombre: config.nombre,
+                  tipo: config.tipo,
+                })),
+              }),
+            },
+          ],
+        }),
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "Clasifica el mensaje del usuario a una opción de menú. Devuelve SOLO JSON con service_id y confidence. Si no estás seguro, confidence bajo. No inventes opciones.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              message: args.inboundText,
-              options: args.configs.map((config) => ({
-                id: config.id,
-                label: serviceLabel(config),
-                nombre: config.nombre,
-                tipo: config.tipo,
-              })),
-            }),
-          },
-        ],
-      }),
-    });
+    );
     if (!response.ok) return null;
     const json = await response.json();
     const content = safeStr(json?.choices?.[0]?.message?.content);
     const parsed = JSON.parse(content);
     const serviceId = safeStr(parsed?.service_id).trim();
     const confidence = Number(parsed?.confidence ?? 0);
-    if (!serviceId || !Number.isFinite(confidence) || confidence < 0.72) return null;
-    return args.configs.some((config) => config.id === serviceId) ? serviceId : null;
+    if (!serviceId || !Number.isFinite(confidence) || confidence < 0.72) {
+      return null;
+    }
+    return args.configs.some((config) => config.id === serviceId)
+      ? serviceId
+      : null;
   } catch {
     return null;
   }
@@ -458,12 +509,13 @@ async function loadServiceConfigs(
   supabase: SupabaseLike,
   organizationId: string,
 ): Promise<ReferralHubServiceConfig[]> {
-  const queryConfigs = (selectClause: string) => supabase
-    .from("service_configs")
-    .select(selectClause)
-    .eq("organization_id", organizationId)
-    .eq("activo", true)
-    .order("menu_orden", { ascending: true });
+  const queryConfigs = (selectClause: string) =>
+    supabase
+      .from("service_configs")
+      .select(selectClause)
+      .eq("organization_id", organizationId)
+      .eq("activo", true)
+      .order("menu_orden", { ascending: true });
 
   let { data, error } = await queryConfigs(
     "id, organization_id, nombre, icono, tipo, menu_orden, menu_label, intake_objectives, accion_estatica, partner_id",
@@ -477,39 +529,62 @@ async function loadServiceConfigs(
     error = fallback.error;
   }
 
-  if (error) throw new Error(`referral_hub_configs_load_failed:${error.message}`);
+  if (error) {
+    throw new Error(`referral_hub_configs_load_failed:${error.message}`);
+  }
   const configs = ((data ?? []) as ReferralHubServiceConfig[])
     .filter((config) => safeStr(config.id).trim())
     .sort((a, b) => Number(a.menu_orden ?? 999) - Number(b.menu_orden ?? 999))
     .map((config) => ({
       ...config,
       partner: config.partner ?? DEMO_STATIC_ACTION_PARTNERS[config.id] ?? null,
-      partner_id: safeStr(config.partner_id).trim() || DEMO_STATIC_ACTION_PARTNERS[config.id]?.id || null,
+      partner_id: safeStr(config.partner_id).trim() ||
+        DEMO_STATIC_ACTION_PARTNERS[config.id]?.id || null,
     }));
 
-  const partnerIds = [...new Set(configs.map((config) => safeStr(config.partner_id).trim()).filter(Boolean))];
+  const partnerIds = [
+    ...new Set(
+      configs.map((config) => safeStr(config.partner_id).trim()).filter(
+        Boolean,
+      ),
+    ),
+  ];
   if (partnerIds.length === 0) return configs;
 
   const { data: partnersData, error: partnersError } = await supabase
     .from("partners")
     .select("id, nombre")
     .in("id", partnerIds);
-  if (partnersError) throw new Error(`referral_hub_partners_load_failed:${partnersError.message}`);
+  if (partnersError) {
+    throw new Error(
+      `referral_hub_partners_load_failed:${partnersError.message}`,
+    );
+  }
 
   const partnersById = new Map(
-    ((partnersData ?? []) as ReferralHubPartner[]).map((partner) => [partner.id, partner]),
+    ((partnersData ?? []) as ReferralHubPartner[]).map((
+      partner,
+    ) => [partner.id, partner]),
   );
   return configs.map((config) => ({
     ...config,
-    partner: partnersById.get(safeStr(config.partner_id)) ?? config.partner ?? null,
+    partner: partnersById.get(safeStr(config.partner_id)) ?? config.partner ??
+      null,
   }));
 }
 
-function buildSummary(config: ReferralHubServiceConfig, data: Record<string, unknown>): string {
-  const objectives = Array.isArray(config.intake_objectives) ? config.intake_objectives : [];
+function buildSummary(
+  config: ReferralHubServiceConfig,
+  data: Record<string, unknown>,
+): string {
+  const objectives = Array.isArray(config.intake_objectives)
+    ? config.intake_objectives
+    : [];
   const lines = objectives
     .filter((objective) => safeStr(objective.campo).trim())
-    .map((objective) => `${objective.campo}: ${safeStr(data[objective.campo], "No informado")}`);
+    .map((objective) =>
+      `${objective.campo}: ${safeStr(data[objective.campo], "No informado")}`
+    );
   return [`Servicio: ${serviceLabel(config)}`, ...lines].join("\n");
 }
 
@@ -538,7 +613,10 @@ function communityOptInButtons(): InteractiveButton[] {
   ];
 }
 
-function menuResult(leadState: Json | null, configs: ReferralHubServiceConfig[]): ReferralHubTurnResult {
+function menuResult(
+  leadState: Json | null,
+  configs: ReferralHubServiceConfig[],
+): ReferralHubTurnResult {
   return {
     reply: "¿En qué podemos ayudarte?",
     interactiveList: buildReferralHubMenuList(configs),
@@ -559,20 +637,24 @@ function staticActionResult(
   config: ReferralHubServiceConfig,
   channelUserId?: string | null,
 ): ReferralHubTurnResult {
-  const partner = config.partner ?? DEMO_STATIC_ACTION_PARTNERS[config.id] ?? null;
+  const partner = config.partner ?? DEMO_STATIC_ACTION_PARTNERS[config.id] ??
+    null;
   const partnerName = publicPartnerName(partner);
   const existingReferralState = getReferralState(leadState);
   const existingData = existingReferralState.service_id === config.id
     ? (existingReferralState.extracted_data ?? {})
     : {};
-  const redemptionCode = safeStr(existingData.codigo_canje).trim() || makeRedemptionCode(config.id);
+  const redemptionCode = safeStr(existingData.codigo_canje).trim() ||
+    makeRedemptionCode(config.id);
   const partnerText = partnerName
     ? staticActionMessage({ config, partnerName, redemptionCode })
     : "";
   const text = partnerText ||
     safeStr((config.accion_estatica as Json | null)?.texto).trim() ||
     TEMPORARY_STATIC_ACTION_TEXT[config.id] ||
-    `TODO: Luis Gabriel todavía no pasó el contenido final para "${serviceLabel(config)}".`;
+    `TODO: Luis Gabriel todavía no pasó el contenido final para "${
+      serviceLabel(config)
+    }".`;
   const knownName = safeStr(
     leadState?.full_name,
     safeStr(leadState?.first_name, ""),
@@ -583,7 +665,9 @@ function staticActionResult(
     accion: "static_action",
     codigo_canje: redemptionCode,
     ...(partnerName ? { partner_nombre: partnerName } : {}),
-    ...(config.partner_id || partner?.id ? { partner_id: config.partner_id ?? partner?.id } : {}),
+    ...(config.partner_id || partner?.id
+      ? { partner_id: config.partner_id ?? partner?.id }
+      : {}),
     ...(knownName ? { nombre: knownName } : {}),
     ...(knownPhone ? { telefono: knownPhone } : {}),
   };
@@ -605,14 +689,19 @@ function staticActionResult(
       service_id: config.id,
       extracted_data: extractedData,
       recomendacion: `static_action:${config.id}`,
-      ...(config.partner_id || partner?.id ? { partner_recomendado: config.partner_id ?? partner?.id } : {}),
+      ...(config.partner_id || partner?.id
+        ? { partner_recomendado: config.partner_id ?? partner?.id }
+        : {}),
       status: "qualified",
     },
     debugNote: "referral_hub:static_action",
   };
 }
 
-function transferResult(leadState: Json | null, config: ReferralHubServiceConfig): ReferralHubTurnResult {
+function transferResult(
+  leadState: Json | null,
+  config: ReferralHubServiceConfig,
+): ReferralHubTurnResult {
   const takeoverState = activateHumanTakeoverState({
     state: leadState,
     source: "human_replied_from_dashboard",
@@ -620,7 +709,8 @@ function transferResult(leadState: Json | null, config: ReferralHubServiceConfig
     pauseMinutes: 240,
   });
   return {
-    reply: "Listo. Te vamos a pasar con un representante de Luis Gabriel para que te atienda directamente.",
+    reply:
+      "Listo. Te vamos a pasar con un representante de Luis Gabriel para que te atienda directamente.",
     statePatch: {
       ...takeoverState,
       stage: "HANDOFF",
@@ -655,7 +745,9 @@ function startIntakeResult(
   leadState: Json | null,
   config: ReferralHubServiceConfig,
 ): ReferralHubTurnResult {
-  const objectives = Array.isArray(config.intake_objectives) ? config.intake_objectives : [];
+  const objectives = Array.isArray(config.intake_objectives)
+    ? config.intake_objectives
+    : [];
   const data: Record<string, unknown> = {};
   const nextObjective = nextMissingObjective(objectives, data);
   if (!nextObjective) {
@@ -695,7 +787,9 @@ function completedIntakeResult(
   const resumen = buildSummary(config, data);
   const leadName = safeStr(data.nombre, "Sin nombre").trim() || "Sin nombre";
   return {
-    reply: `${confirmationForService(config)}\n\n¿Deseas recibir información sobre eventos, promociones y recursos para nuestra comunidad?`,
+    reply: `${
+      confirmationForService(config)
+    }\n\n¿Deseas recibir información sobre eventos, promociones y recursos para nuestra comunidad?`,
     interactiveButtons: communityOptInButtons(),
     statePatch: {
       stage: "QUALIFIED",
@@ -734,11 +828,16 @@ function continueIntakeResult(args: {
   inboundText: string;
   payloadAction?: string | null;
 }): ReferralHubTurnResult {
-  const objectives = Array.isArray(args.config.intake_objectives) ? args.config.intake_objectives : [];
+  const objectives = Array.isArray(args.config.intake_objectives)
+    ? args.config.intake_objectives
+    : [];
   const referralState = getReferralState(args.leadState);
   const data = { ...(referralState.extracted_data ?? {}) };
-  const current = objectives.find((objective) => objective.campo === referralState.current_field) ??
-    nextMissingObjective(objectives, data);
+  const current =
+    objectives.find((objective) =>
+      objective.campo === referralState.current_field
+    ) ??
+      nextMissingObjective(objectives, data);
   if (!current) return completedIntakeResult(args.leadState, args.config, data);
 
   const answer = current.tipo === "opciones"
@@ -778,7 +877,9 @@ function continueIntakeResult(args: {
 
   data[current.campo] = answer;
   const nextObjective = nextMissingObjective(objectives, data);
-  if (!nextObjective) return completedIntakeResult(args.leadState, args.config, data);
+  if (!nextObjective) {
+    return completedIntakeResult(args.leadState, args.config, data);
+  }
 
   const nextQuestion = questionForObjective(nextObjective);
   return {
@@ -836,21 +937,43 @@ function optInResult(args: {
   };
 }
 
-type CanonicalMenuConfig = Pick<ReferralHubServiceConfig, "id" | "nombre" | "menu_label" | "menu_orden" | "activo">;
+type CanonicalMenuConfig = Pick<
+  ReferralHubServiceConfig,
+  "id" | "nombre" | "menu_label" | "menu_orden" | "activo"
+>;
 
 const LG_MENU_DESCRIPTIONS: Record<string, string> = {
   [BUILT_IN_SERVICE_IDS.accident]: "Ayuda inmediata",
   [BUILT_IN_SERVICE_IDS.immigration]: "Orientación con un profesional",
   [BUILT_IN_SERVICE_IDS.medicalCoupon]: "20% de descuento",
-  [BUILT_IN_SERVICE_IDS.supermarketCoupon]: "Cupón de $20",
+  [BUILT_IN_SERVICE_IDS.supermarketCoupon]: "Cupón de $10",
   [BUILT_IN_SERVICE_IDS.dentalCoupon]: "Consulta, limpieza y rayos X",
   [BUILT_IN_SERVICE_IDS.events]: "Próximos eventos",
   [BUILT_IN_SERVICE_IDS.grocery]: "Canastas con delivery",
   [BUILT_IN_SERVICE_IDS.advisor]: "Atención personal",
 };
 
+const LG_PRIMARY_SERVICE_IDS = [
+  BUILT_IN_SERVICE_IDS.medicalCoupon,
+  BUILT_IN_SERVICE_IDS.dentalCoupon,
+  BUILT_IN_SERVICE_IDS.accident,
+  BUILT_IN_SERVICE_IDS.grocery,
+];
+
+const LG_PRIMARY_SERVICE_LABELS: Record<string, string> = {
+  [BUILT_IN_SERVICE_IDS.medicalCoupon]: "Cupón médico",
+  [BUILT_IN_SERVICE_IDS.dentalCoupon]: "Cupón dental",
+  [BUILT_IN_SERVICE_IDS.accident]: "Accidentes",
+  [BUILT_IN_SERVICE_IDS.grocery]: "Supermercado",
+};
+
 function canonicalServiceLabel(config: CanonicalMenuConfig) {
-  return truncateWhatsAppTitle(safeStr(config.menu_label).trim() || safeStr(config.nombre).trim() || serviceLabelFromId(config.id));
+  return truncateWhatsAppTitle(
+    LG_PRIMARY_SERVICE_LABELS[config.id] ||
+      safeStr(config.menu_label).trim() ||
+      safeStr(config.nombre).trim() ||
+      serviceLabelFromId(config.id),
+  );
 }
 
 function canonicalMenuRows(configs: CanonicalMenuConfig[]) {
@@ -863,17 +986,63 @@ function canonicalMenuRows(configs: CanonicalMenuConfig[]) {
 
 function sortCanonicalMenuConfigs(configs: CanonicalMenuConfig[]) {
   return [...configs].sort((left, right) => {
-    const leftOrder = Number.isFinite(Number(left.menu_orden)) ? Number(left.menu_orden) : Number.MAX_SAFE_INTEGER;
-    const rightOrder = Number.isFinite(Number(right.menu_orden)) ? Number(right.menu_orden) : Number.MAX_SAFE_INTEGER;
-    return leftOrder - rightOrder || canonicalServiceLabel(left).localeCompare(canonicalServiceLabel(right));
+    const leftPriority = LG_PRIMARY_SERVICE_IDS.indexOf(
+      left.id as typeof LG_PRIMARY_SERVICE_IDS[number],
+    );
+    const rightPriority = LG_PRIMARY_SERVICE_IDS.indexOf(
+      right.id as typeof LG_PRIMARY_SERVICE_IDS[number],
+    );
+    if (leftPriority !== -1 || rightPriority !== -1) {
+      return (leftPriority === -1 ? Number.MAX_SAFE_INTEGER : leftPriority) -
+        (rightPriority === -1 ? Number.MAX_SAFE_INTEGER : rightPriority);
+    }
+    const leftOrder = Number.isFinite(Number(left.menu_orden))
+      ? Number(left.menu_orden)
+      : Number.MAX_SAFE_INTEGER;
+    const rightOrder = Number.isFinite(Number(right.menu_orden))
+      ? Number(right.menu_orden)
+      : Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder ||
+      canonicalServiceLabel(left).localeCompare(canonicalServiceLabel(right));
   });
 }
 
-function buildLgMenuList(configs?: CanonicalMenuConfig[]): WhatsAppInteractiveListSpec {
+function additionalMenuConfigs(configs: CanonicalMenuConfig[]) {
+  return configs.filter((config) =>
+    !LG_PRIMARY_SERVICE_IDS.includes(
+      config.id as typeof LG_PRIMARY_SERVICE_IDS[number],
+    ) && config.id !== BUILT_IN_SERVICE_IDS.advisor
+  );
+}
+
+function buildLgMenuList(
+  configs?: CanonicalMenuConfig[],
+): WhatsAppInteractiveListSpec {
   if (configs) {
-    const primary = canonicalMenuRows(configs.slice(0, 3));
-    if (configs.length > 3) primary.push({ id: "referral_menu:more", title: "Ver más servicios", description: "Más opciones disponibles" });
-    return { body: LG_MENU_PROMPT, buttonText: "Ver opciones", sections: [{ title: "Servicios", rows: primary }] };
+    const primary = canonicalMenuRows(
+      configs.filter((config) =>
+        LG_PRIMARY_SERVICE_IDS.includes(
+          config.id as typeof LG_PRIMARY_SERVICE_IDS[number],
+        )
+      ),
+    );
+    if (additionalMenuConfigs(configs).length > 0) {
+      primary.push({
+        id: "referral_menu:more",
+        title: "Ver más servicios",
+        description: "Más opciones disponibles",
+      });
+    }
+    primary.push({
+      id: "referral_handoff:advisor",
+      title: "Hablar con asesor",
+      description: "Atención personal",
+    });
+    return {
+      body: LG_MENU_PROMPT,
+      buttonText: "Ver servicios",
+      sections: [{ title: "Servicios", rows: primary }],
+    };
   }
   return {
     body: LG_MENU_PROMPT,
@@ -881,38 +1050,106 @@ function buildLgMenuList(configs?: CanonicalMenuConfig[]): WhatsAppInteractiveLi
     sections: [{
       title: "Servicios",
       rows: [
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.accident), title: "Accidentes", description: "Ayuda inmediata" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.immigration), title: "Inmigración", description: "Orientación con un profesional" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.medicalCoupon), title: "Cupón médico", description: "20% de descuento" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.supermarketCoupon), title: "Cupón supermercado", description: "Cupón de $20" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.dentalCoupon), title: "Cupón dental", description: "Consulta, limpieza y rayos X" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.events), title: "Eventos comunitarios", description: "Próximos eventos" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.grocery), title: "Compras supermercado", description: "Canastas con delivery" },
-        { id: serviceActionId(BUILT_IN_SERVICE_IDS.advisor), title: "Hablar con asesor", description: "Atención personal" },
+        {
+          id: serviceActionId(BUILT_IN_SERVICE_IDS.medicalCoupon),
+          title: "Cupón médico",
+          description: "20% de descuento",
+        },
+        {
+          id: serviceActionId(BUILT_IN_SERVICE_IDS.dentalCoupon),
+          title: "Cupón dental",
+          description: "Consulta, limpieza y rayos X",
+        },
+        {
+          id: serviceActionId(BUILT_IN_SERVICE_IDS.accident),
+          title: "Accidentes",
+          description: "Ayuda inmediata",
+        },
+        {
+          id: serviceActionId(BUILT_IN_SERVICE_IDS.grocery),
+          title: "Supermercado",
+          description: "Cupón y canastas con delivery",
+        },
+        {
+          id: serviceActionId(BUILT_IN_SERVICE_IDS.immigration),
+          title: "Inmigración",
+          description: "Orientación con un profesional",
+        },
+        {
+          id: serviceActionId(BUILT_IN_SERVICE_IDS.supermarketCoupon),
+          title: "Cupón supermercado",
+          description: "Cupón de $10",
+        },
+        {
+          id: serviceActionId(BUILT_IN_SERVICE_IDS.events),
+          title: "Eventos comunitarios",
+          description: "Próximos eventos",
+        },
+        {
+          id: "referral_handoff:advisor",
+          title: "Hablar con asesor",
+          description: "Atención personal",
+        },
       ],
     }],
   };
 }
 
-function buildLgMoreList(configs: CanonicalMenuConfig[]): WhatsAppInteractiveListSpec {
-  return { body: "Más servicios disponibles", buttonText: "Ver servicios", sections: [{ title: "Más servicios", rows: canonicalMenuRows(configs.slice(3)) }] };
+function buildLgMoreList(
+  configs: CanonicalMenuConfig[],
+): WhatsAppInteractiveListSpec {
+  return {
+    body: "Más servicios disponibles",
+    buttonText: "Ver servicios",
+    sections: [{
+      title: "Más servicios",
+      rows: canonicalMenuRows(additionalMenuConfigs(configs)),
+    }],
+  };
 }
 
-export function buildLgMessengerQuickReplies(configs?: CanonicalMenuConfig[], more = false): InteractiveButton[] {
+export function buildLgMessengerQuickReplies(
+  configs?: CanonicalMenuConfig[],
+  more = false,
+): InteractiveButton[] {
   if (configs) {
-    const services = more ? configs.slice(3) : configs.slice(0, 3);
-    const buttons = services.map((config) => ({ id: serviceActionId(config.id), title: canonicalServiceLabel(config) }));
-    return !more && configs.length > 3 ? [...buttons, { id: "referral_menu:more", title: "Ver más servicios" }] : buttons;
+    const services = more
+      ? additionalMenuConfigs(configs)
+      : configs.filter((config) =>
+        LG_PRIMARY_SERVICE_IDS.includes(
+          config.id as typeof LG_PRIMARY_SERVICE_IDS[number],
+        )
+      );
+    const buttons = services.map((config) => ({
+      id: serviceActionId(config.id),
+      title: canonicalServiceLabel(config),
+    }));
+    if (more) return buttons;
+    if (additionalMenuConfigs(configs).length > 0) {
+      buttons.push({ id: "referral_menu:more", title: "Ver más servicios" });
+    }
+    buttons.push({
+      id: "referral_handoff:advisor",
+      title: "Hablar con asesor",
+    });
+    return buttons;
   }
   return [
+    {
+      id: serviceActionId(BUILT_IN_SERVICE_IDS.medicalCoupon),
+      title: "Cupón médico",
+    },
+    {
+      id: serviceActionId(BUILT_IN_SERVICE_IDS.dentalCoupon),
+      title: "Cupón dental",
+    },
     { id: serviceActionId(BUILT_IN_SERVICE_IDS.accident), title: "Accidentes" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.immigration), title: "Inmigración" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.medicalCoupon), title: "Cupón médico" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.supermarketCoupon), title: "Cupón supermercado" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.dentalCoupon), title: "Cupón dental" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.events), title: "Eventos" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.grocery), title: "Compras supermercado" },
-    { id: serviceActionId(BUILT_IN_SERVICE_IDS.advisor), title: "Hablar con asesor" },
+    {
+      id: serviceActionId(BUILT_IN_SERVICE_IDS.grocery),
+      title: "Supermercado",
+    },
+    { id: "referral_menu:more", title: "Ver más servicios" },
+    { id: "referral_handoff:advisor", title: "Hablar con asesor" },
   ];
 }
 
@@ -935,7 +1172,10 @@ function firstName(value: string) {
 
 function cityConfirmationButtons(city: string): InteractiveButton[] {
   return [
-    { id: "referral_field_confirm:profile_city:yes", title: `Sí, ${city}`.slice(0, 20) },
+    {
+      id: "referral_field_confirm:profile_city:yes",
+      title: `Sí, ${city}`.slice(0, 20),
+    },
     { id: "referral_field_confirm:profile_city:no", title: "Es otra ciudad" },
   ];
 }
@@ -954,9 +1194,31 @@ function submissionConfirmationButtons(serviceId: string): InteractiveButton[] {
   ];
 }
 
-function shouldResetMenu(input: string): boolean {
+function shouldResetLuisMenu(input: string): boolean {
   const normalized = normalizeText(input);
-  return ["menu", "inicio", "volver al menu", "empezar de nuevo", "servicios"].includes(normalized);
+  return [
+    "demo",
+    "menu",
+    "menu principal",
+    "ver otros servicios",
+    "inicio",
+    "reiniciar",
+  ].includes(normalized);
+}
+
+function resetLuisMenuState(leadState: Json | null): Json {
+  const referralState = getReferralState(leadState);
+  return buildLgStatePatch(leadState, {
+    ...referralState,
+    service_id: null,
+    service_label: null,
+    current_field: null,
+    profile_edit_field: null,
+    pending_field_confirmation: null,
+    extracted_data: {},
+    food_option: null,
+    grocery: null,
+  });
 }
 
 function continuationActions(): InteractiveButton[] {
@@ -993,12 +1255,50 @@ function normalizedAction(input: string | null | undefined): string {
 }
 
 function isReturningEntry(input: string): boolean {
-  return /^(hola|hello|menu|menú|inicio|empezar|start)$/i.test(safeStr(input).trim());
+  return /^(hola|hello|menu|menú|inicio|empezar|start)$/i.test(
+    safeStr(input).trim(),
+  );
+}
+
+function isLuisDiscoveryEntry(input: string): boolean {
+  const normalized = normalizeText(input);
+  const flyerServiceDiscovery =
+    /^(hola[,.!\s]+)?(?:quiero\s+)?(?:conocer|ver)\s+(?:los?\s+)?servicios\b/
+      .test(normalized);
+  return isReturningEntry(input) || flyerServiceDiscovery || [
+    "buenas",
+    "buenos dias",
+    "buenas tardes",
+    "informacion",
+    "info",
+    "quiero informacion",
+    "que servicios tienen",
+    "que ofrecen",
+    "que hacen",
+    "necesito ayuda",
+    "me interesa",
+    "quiero ver los servicios",
+    "vi el flyer",
+    "vengo por el flyer",
+    "escanee el qr",
+    "qr",
+  ].includes(normalized);
+}
+
+function isLuisNamedGreeting(input: string): boolean {
+  return /^(hola|hello|buenas|buenos dias|buenas tardes)[,!\s.]+(luis|conexxion)\b/i
+    .test(normalizeText(input));
 }
 
 function isStopRequest(input: string): boolean {
   const normalized = normalizeText(input);
-  return ["stop", "salir", "cancelar mensajes", "no mas mensajes", "no más mensajes"].includes(normalized);
+  return [
+    "stop",
+    "salir",
+    "cancelar mensajes",
+    "no mas mensajes",
+    "no más mensajes",
+  ].includes(normalized);
 }
 
 function resolveServiceIdFromInput(input: string): string | null {
@@ -1008,7 +1308,9 @@ function resolveServiceIdFromInput(input: string): string | null {
     const serviceId = requestedServiceId === "luis_asesor"
       ? BUILT_IN_SERVICE_IDS.advisor
       : requestedServiceId;
-    return Object.values(BUILT_IN_SERVICE_IDS).includes(serviceId as any) ? serviceId : null;
+    return Object.values(BUILT_IN_SERVICE_IDS).includes(serviceId as any)
+      ? serviceId
+      : null;
   }
   if (raw.includes(":")) return null;
   const normalized = normalizeText(input);
@@ -1017,18 +1319,47 @@ function resolveServiceIdFromInput(input: string): string | null {
     const ids = Object.values(BUILT_IN_SERVICE_IDS);
     return ids[index] ?? null;
   }
-  if (normalized.includes("accidente")) return BUILT_IN_SERVICE_IDS.accident;
-  if (normalized.includes("inmigr") || normalized.includes("migratorio")) return BUILT_IN_SERVICE_IDS.immigration;
-  if (normalized.includes("medico") || normalized.includes("descuento medico") || normalized.includes("coupon medico") || normalized.includes("cupon medico")) return BUILT_IN_SERVICE_IDS.medicalCoupon;
-  if (normalized.includes("cupon") && (normalized.includes("supermerc") || normalized.includes("super"))) return BUILT_IN_SERVICE_IDS.supermarketCoupon;
-  if (normalized.includes("compra") && (normalized.includes("supermerc") || normalized.includes("comida"))) return BUILT_IN_SERVICE_IDS.grocery;
-  if (normalized.includes("dental") || normalized.includes("dentista") || normalized.includes("rayos x") || normalized.includes("rayosx")) return BUILT_IN_SERVICE_IDS.dentalCoupon;
-  if (normalized.includes("evento") || normalized.includes("agenda")) return BUILT_IN_SERVICE_IDS.events;
-  if (normalized.includes("asesor") || normalized.includes("humano") || normalized.includes("persona") || normalized.includes("hablar")) return BUILT_IN_SERVICE_IDS.advisor;
+  if (normalized.includes("accidente") || normalized.includes("choque")) {
+    return BUILT_IN_SERVICE_IDS.accident;
+  }
+  if (normalized.includes("inmigr") || normalized.includes("migratorio")) {
+    return BUILT_IN_SERVICE_IDS.immigration;
+  }
+  if (
+    normalized.includes("medico") || normalized.includes("descuento medico") ||
+    normalized.includes("coupon medico") || normalized.includes("cupon medico")
+  ) return BUILT_IN_SERVICE_IDS.medicalCoupon;
+  if (
+    normalized.includes("cupon") &&
+    (normalized.includes("supermerc") || normalized.includes("super"))
+  ) return BUILT_IN_SERVICE_IDS.supermarketCoupon;
+  if (normalized.includes("cupon")) {
+    return BUILT_IN_SERVICE_IDS.supermarketCoupon;
+  }
+  if (
+    normalized.includes("supermerc") || normalized === "super" ||
+    (normalized.includes("compra") && normalized.includes("comida"))
+  ) return BUILT_IN_SERVICE_IDS.grocery;
+  if (
+    normalized.includes("dental") || normalized.includes("dentista") ||
+    normalized.includes("muela") || normalized.includes("rayos x") ||
+    normalized.includes("rayosx")
+  ) return BUILT_IN_SERVICE_IDS.dentalCoupon;
+  if (normalized.includes("evento") || normalized.includes("agenda")) {
+    return BUILT_IN_SERVICE_IDS.events;
+  }
+  if (
+    normalized.includes("asesor") || normalized.includes("humano") ||
+    normalized.includes("persona") || normalized.includes("hablar") ||
+    normalized.includes("abogado")
+  ) return BUILT_IN_SERVICE_IDS.advisor;
   return null;
 }
 
-function buildLgStatePatch(leadState: Json | null, patch: ReferralHubState): Json {
+function buildLgStatePatch(
+  leadState: Json | null,
+  patch: ReferralHubState,
+): Json {
   return {
     stage: "DISCOVERY",
     orgType: "referral_hub",
@@ -1056,7 +1387,9 @@ function startLgProfileFlow(leadState: Json | null): ReferralHubTurnResult {
       extracted_data: { ...(referralState.extracted_data ?? {}) },
       profile_name: referralState.profile_name ?? null,
       profile_city: referralState.profile_city ?? null,
-      profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
+      profile_complete: Boolean(
+        referralState.profile_name && referralState.profile_city,
+      ),
       stop_requested: referralState.stop_requested ?? false,
       grocery: null,
     }),
@@ -1076,7 +1409,10 @@ async function updateProfileFromInput(
     ...referralState,
     profile_name: safeStr(referralState.profile_name).trim() || null,
     profile_city: safeStr(referralState.profile_city).trim() || null,
-    profile_complete: Boolean(safeStr(referralState.profile_name).trim() && safeStr(referralState.profile_city).trim()),
+    profile_complete: Boolean(
+      safeStr(referralState.profile_name).trim() &&
+        safeStr(referralState.profile_city).trim(),
+    ),
   };
   const trimmed = safeStr(inboundText).trim();
   if (!nextState.profile_name && trimmed) {
@@ -1092,86 +1428,168 @@ async function updateProfileFromInput(
       reply: profileComplete
         ? `Listo, ${firstName(trimmed)}. ${LG_MENU_PROMPT}`
         : `Mucho gusto, ${firstName(trimmed)}. ¿En qué ciudad vives?`,
-      interactiveList: profileComplete && channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
-      interactiveButtons: profileComplete && channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
+      interactiveList: profileComplete && channel === "whatsapp"
+        ? buildLgMenuList(menuConfigs)
+        : undefined,
+      interactiveButtons: profileComplete && channel === "messenger"
+        ? buildLgMessengerQuickReplies(menuConfigs)
+        : undefined,
       statePatch: buildLgStatePatch(leadState, updated),
       debugNote: "referral_hub:lg_profile_name",
     };
   }
   if (!nextState.profile_city && trimmed) {
-    const pending = nextState.pending_field_confirmation?.field === "profile_city"
-      ? nextState.pending_field_confirmation
-      : null;
+    const pending =
+      nextState.pending_field_confirmation?.field === "profile_city"
+        ? nextState.pending_field_confirmation
+        : null;
     const normalizedAction = normalizeText(payloadAction ?? "");
     const normalizedInbound = normalizeText(trimmed);
-    const confirmed = normalizedAction.endsWith(":yes") || /^(si|sí)(,|\s|$)/i.test(trimmed);
-    const rejected = normalizedAction.endsWith(":no") || /^(no|es otra ciudad)(,|\s|$)/i.test(trimmed);
+    const confirmed = normalizedAction.endsWith(":yes") ||
+      /^(si|sí)(,|\s|$)/i.test(trimmed);
+    const rejected = normalizedAction.endsWith(":no") ||
+      /^(no|es otra ciudad)(,|\s|$)/i.test(trimmed);
     if (pending && confirmed && pending.interpretation.normalizedValue) {
       const city = pending.interpretation.normalizedValue;
-      const updated = { ...nextState, profile_city: city, current_field: null, profile_complete: true, pending_field_confirmation: null };
+      const updated = {
+        ...nextState,
+        profile_city: city,
+        current_field: null,
+        profile_complete: true,
+        pending_field_confirmation: null,
+      };
       return {
-        reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
-        interactiveList: channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
-        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
+        reply: `Perfecto, ${
+          firstName(safeStr(updated.profile_name))
+        }. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
+        interactiveList: channel === "whatsapp"
+          ? buildLgMenuList(menuConfigs)
+          : undefined,
+        interactiveButtons: channel === "messenger"
+          ? buildLgMessengerQuickReplies(menuConfigs)
+          : undefined,
         statePatch: buildLgStatePatch(leadState, updated),
         debugNote: "referral_hub:lg_profile_city_confirmed",
       };
     }
     if (pending && rejected) {
-      const replacement = trimmed.replace(/^(no|es otra ciudad)\s*[,.:;-]?\s*/i, "").trim();
+      const replacement = trimmed.replace(
+        /^(no|es otra ciudad)\s*[,.:;-]?\s*/i,
+        "",
+      ).trim();
       if (!replacement || normalizedAction.endsWith(":no")) {
         return {
           reply: "Está bien. ¿En qué ciudad vives?",
-          statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: null }),
+          statePatch: buildLgStatePatch(leadState, {
+            ...nextState,
+            current_field: "profile_city",
+            pending_field_confirmation: null,
+          }),
           debugNote: "referral_hub:lg_profile_city_rejected",
         };
       }
       const replacementResult = await interpretCity(replacement);
-      if (!replacementResult.normalizedValue || replacementResult.confidence === "low") {
+      if (
+        !replacementResult.normalizedValue ||
+        replacementResult.confidence === "low"
+      ) {
         return {
-          reply: replacementResult.clarificationPrompt ?? "No pude identificar la ciudad. ¿Puedes escribirla nuevamente?",
-          statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: null }),
+          reply: replacementResult.clarificationPrompt ??
+            "No pude identificar la ciudad. ¿Puedes escribirla nuevamente?",
+          statePatch: buildLgStatePatch(leadState, {
+            ...nextState,
+            current_field: "profile_city",
+            pending_field_confirmation: null,
+          }),
           debugNote: "referral_hub:lg_profile_city_retry",
         };
       }
       if (replacementResult.needsConfirmation) {
         return {
-          reply: replacementResult.clarificationPrompt ?? `¿Te refieres a ${replacementResult.normalizedValue}?`,
-          interactiveButtons: cityConfirmationButtons(replacementResult.normalizedValue),
-          statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: { field: "profile_city", interpretation: replacementResult } }),
+          reply: replacementResult.clarificationPrompt ??
+            `¿Te refieres a ${replacementResult.normalizedValue}?`,
+          interactiveButtons: cityConfirmationButtons(
+            replacementResult.normalizedValue,
+          ),
+          statePatch: buildLgStatePatch(leadState, {
+            ...nextState,
+            current_field: "profile_city",
+            pending_field_confirmation: {
+              field: "profile_city",
+              interpretation: replacementResult,
+            },
+          }),
           debugNote: "referral_hub:lg_profile_city_candidate",
         };
       }
-      const updated = { ...nextState, profile_city: replacementResult.normalizedValue, current_field: null, profile_complete: true, pending_field_confirmation: null };
+      const updated = {
+        ...nextState,
+        profile_city: replacementResult.normalizedValue,
+        current_field: null,
+        profile_complete: true,
+        pending_field_confirmation: null,
+      };
       return {
-        reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
-        interactiveList: channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
-        interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
+        reply: `Perfecto, ${
+          firstName(safeStr(updated.profile_name))
+        }. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
+        interactiveList: channel === "whatsapp"
+          ? buildLgMenuList(menuConfigs)
+          : undefined,
+        interactiveButtons: channel === "messenger"
+          ? buildLgMessengerQuickReplies(menuConfigs)
+          : undefined,
         statePatch: buildLgStatePatch(leadState, updated),
         debugNote: "referral_hub:lg_profile_city_corrected",
       };
     }
     const interpretation = await interpretCity(trimmed);
-    if (!interpretation.normalizedValue || interpretation.confidence === "low") {
+    if (
+      !interpretation.normalizedValue || interpretation.confidence === "low"
+    ) {
       return {
-        reply: interpretation.clarificationPrompt ?? "No pude identificar la ciudad. ¿Puedes escribirla nuevamente?",
-        statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: null }),
+        reply: interpretation.clarificationPrompt ??
+          "No pude identificar la ciudad. ¿Puedes escribirla nuevamente?",
+        statePatch: buildLgStatePatch(leadState, {
+          ...nextState,
+          current_field: "profile_city",
+          pending_field_confirmation: null,
+        }),
         debugNote: "referral_hub:lg_profile_city_retry",
       };
     }
     if (interpretation.needsConfirmation) {
       return {
-        reply: interpretation.clarificationPrompt ?? `¿Te refieres a ${interpretation.normalizedValue}?`,
-        interactiveButtons: cityConfirmationButtons(interpretation.normalizedValue),
-        statePatch: buildLgStatePatch(leadState, { ...nextState, current_field: "profile_city", pending_field_confirmation: { field: "profile_city", interpretation } }),
+        reply: interpretation.clarificationPrompt ??
+          `¿Te refieres a ${interpretation.normalizedValue}?`,
+        interactiveButtons: cityConfirmationButtons(
+          interpretation.normalizedValue,
+        ),
+        statePatch: buildLgStatePatch(leadState, {
+          ...nextState,
+          current_field: "profile_city",
+          pending_field_confirmation: { field: "profile_city", interpretation },
+        }),
         debugNote: "referral_hub:lg_profile_city_candidate",
       };
     }
-    const updated = { ...nextState, profile_city: interpretation.normalizedValue, current_field: null, profile_complete: true, pending_field_confirmation: null };
+    const updated = {
+      ...nextState,
+      profile_city: interpretation.normalizedValue,
+      current_field: null,
+      profile_complete: true,
+      pending_field_confirmation: null,
+    };
     return {
-      reply: `Perfecto, ${firstName(safeStr(updated.profile_name))}. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
-      interactiveList: channel === "whatsapp" ? buildLgMenuList(menuConfigs) : undefined,
-      interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(menuConfigs) : undefined,
+      reply: `Perfecto, ${
+        firstName(safeStr(updated.profile_name))
+      }. ${LG_MENU_PROMPT}\n\n${LG_PRIVACY}`,
+      interactiveList: channel === "whatsapp"
+        ? buildLgMenuList(menuConfigs)
+        : undefined,
+      interactiveButtons: channel === "messenger"
+        ? buildLgMessengerQuickReplies(menuConfigs)
+        : undefined,
       statePatch: buildLgStatePatch(leadState, updated),
       debugNote: "referral_hub:lg_profile_city",
     };
@@ -1188,8 +1606,12 @@ function handleLgMenu(
   const referralState = getReferralState(leadState);
   return {
     reply,
-    interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(configs) : undefined,
-    interactiveList: channel === "whatsapp" ? buildLgMenuList(configs) : undefined,
+    interactiveButtons: channel === "messenger"
+      ? buildLgMessengerQuickReplies(configs)
+      : undefined,
+    interactiveList: channel === "whatsapp"
+      ? buildLgMenuList(configs)
+      : undefined,
     statePatch: buildLgStatePatch(leadState, {
       service_id: null,
       service_label: null,
@@ -1197,7 +1619,9 @@ function handleLgMenu(
       extracted_data: { ...(referralState.extracted_data ?? {}) },
       profile_name: referralState.profile_name ?? null,
       profile_city: referralState.profile_city ?? null,
-      profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
+      profile_complete: Boolean(
+        referralState.profile_name && referralState.profile_city,
+      ),
       stop_requested: referralState.stop_requested ?? false,
       grocery: null,
     }),
@@ -1213,17 +1637,30 @@ function handleLgMoreMenu(
   const referralState = getReferralState(leadState);
   if (configs.length === 0) {
     return {
-      reply: "Por el momento no hay servicios disponibles. Intenta nuevamente más tarde.",
+      reply:
+        "Por el momento no hay servicios disponibles. Intenta nuevamente más tarde.",
       interactiveButtons: continuationActions(),
-      statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: null, grocery: null }),
+      statePatch: buildLgStatePatch(leadState, {
+        ...referralState,
+        current_field: null,
+        grocery: null,
+      }),
       debugNote: "referral_hub:lg_menu_no_active_services",
     };
   }
   return {
     reply: "Más servicios disponibles",
-    interactiveButtons: channel === "messenger" ? buildLgMessengerQuickReplies(configs, true) : undefined,
-    interactiveList: channel === "whatsapp" ? buildLgMoreList(configs) : undefined,
-    statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: null, grocery: null }),
+    interactiveButtons: channel === "messenger"
+      ? buildLgMessengerQuickReplies(configs, true)
+      : undefined,
+    interactiveList: channel === "whatsapp"
+      ? buildLgMoreList(configs)
+      : undefined,
+    statePatch: buildLgStatePatch(leadState, {
+      ...referralState,
+      current_field: null,
+      grocery: null,
+    }),
     debugNote: "referral_hub:lg_menu_more",
   };
 }
@@ -1235,23 +1672,37 @@ async function loadCanonicalMenuConfigs(args: {
 }): Promise<CanonicalMenuConfig[] | null> {
   const supportedIds = new Set(Object.values(BUILT_IN_SERVICE_IDS));
   const normalize = (rows: ReferralHubServiceConfig[]) => {
-    const supported = rows.filter((config) => config.organization_id === args.organizationId && supportedIds.has(config.id as typeof BUILT_IN_SERVICE_IDS[keyof typeof BUILT_IN_SERVICE_IDS]));
-    return sortCanonicalMenuConfigs(supported.filter((config) => config.activo !== false));
+    const supported = rows.filter((config) =>
+      config.organization_id === args.organizationId &&
+      supportedIds.has(
+        config
+          .id as typeof BUILT_IN_SERVICE_IDS[keyof typeof BUILT_IN_SERVICE_IDS],
+      )
+    );
+    return sortCanonicalMenuConfigs(
+      supported.filter((config) => config.activo !== false),
+    );
   };
   if (args.serviceConfigs) return normalize(args.serviceConfigs);
   if (!args.supabase || typeof args.supabase.from !== "function") return null;
   try {
     const { data, error } = await args.supabase.from("service_configs")
-      .select("id,nombre,menu_label,menu_orden,activo")
+      .select("organization_id,id,nombre,menu_label,menu_orden,activo")
       .eq("organization_id", args.organizationId)
       .order("menu_orden", { ascending: true });
     if (error || !Array.isArray(data) || data.length === 0) {
-      console.warn("[Referral Hub] Canonical menu configuration unavailable", { organizationId: args.organizationId, reason: safeStr(error?.message) || "empty" });
+      console.warn("[Referral Hub] Canonical menu configuration unavailable", {
+        organizationId: args.organizationId,
+        reason: safeStr(error?.message) || "empty",
+      });
       return null;
     }
     return normalize(data as ReferralHubServiceConfig[]);
   } catch (error) {
-    console.warn("[Referral Hub] Canonical menu configuration unavailable", { organizationId: args.organizationId, reason: error instanceof Error ? error.message : "unknown" });
+    console.warn("[Referral Hub] Canonical menu configuration unavailable", {
+      organizationId: args.organizationId,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
     return null;
   }
 }
@@ -1270,15 +1721,20 @@ const TRANSIENT_SERVICE_FIELDS = new Set([
   "food_support_details",
 ]);
 
-function withoutTransientServiceFields(input: Record<string, unknown> | undefined) {
+function withoutTransientServiceFields(
+  input: Record<string, unknown> | undefined,
+) {
   return Object.fromEntries(
-    Object.entries(input ?? {}).filter(([key]) => !TRANSIENT_SERVICE_FIELDS.has(key)),
+    Object.entries(input ?? {}).filter(([key]) =>
+      !TRANSIENT_SERVICE_FIELDS.has(key)
+    ),
   );
 }
 
 function stopResult(leadState: Json | null): ReferralHubTurnResult {
   return {
-    reply: "Entendido. No seguiremos enviando mensajes promocionales ni de seguimiento. Tu historial se conservará.",
+    reply:
+      "Entendido. No seguiremos enviando mensajes promocionales ni de seguimiento. Tu historial se conservará.",
     statePatch: buildLgStatePatch(leadState, {
       service_id: null,
       service_label: null,
@@ -1287,7 +1743,10 @@ function stopResult(leadState: Json | null): ReferralHubTurnResult {
       stop_requested: true,
       profile_name: getReferralState(leadState).profile_name ?? null,
       profile_city: getReferralState(leadState).profile_city ?? null,
-      profile_complete: Boolean(getReferralState(leadState).profile_name && getReferralState(leadState).profile_city),
+      profile_complete: Boolean(
+        getReferralState(leadState).profile_name &&
+          getReferralState(leadState).profile_city,
+      ),
       food_option: null,
     }),
     debugNote: "referral_hub:stop",
@@ -1318,7 +1777,8 @@ function groceryEntryResult(
 ): ReferralHubTurnResult {
   const referralState = getReferralState(leadState);
   return {
-    reply: "¡Hola! 👋 Llegaste al lugar correcto.\n\nPuedes recibir tu cupón de $20 para supermercado o ver nuestras canastas ya preparadas con delivery, con los precios y la cobertura disponibles. Si eliges una canasta, primero te pediremos el código postal.\n\n¿Qué quieres hacer hoy?",
+    reply:
+      "¡Hola! 👋 Llegaste al lugar correcto.\n\nPuedes recibir tu cupón de $10 para supermercado o ver nuestras canastas ya preparadas con delivery, con los precios y la cobertura disponibles. Si eliges una canasta, primero te pediremos el código postal.\n\n¿Qué quieres hacer hoy?",
     interactiveButtons: groceryEntryActions(),
     statePatch: buildLgStatePatch(leadState, {
       ...referralState,
@@ -1331,13 +1791,18 @@ function groceryEntryResult(
   };
 }
 
-function startDurableGroceryResult(leadState: Json | null): ReferralHubTurnResult {
+function startDurableGroceryResult(
+  leadState: Json | null,
+): ReferralHubTurnResult {
   const referralState = getReferralState(leadState);
   const qrEntry = referralState.extracted_data?.qr_entry;
   const sourceCampaign = qrEntry && typeof qrEntry === "object"
     ? safeStr((qrEntry as Json).campaign_key).trim()
     : "";
-  const turn = startWhatsAppGrocery({ customerName: referralState.profile_name, sourceCampaign });
+  const turn = startWhatsAppGrocery({
+    customerName: referralState.profile_name,
+    sourceCampaign,
+  });
   return {
     reply: turn.reply,
     interactiveList: turn.interactiveList,
@@ -1363,13 +1828,18 @@ async function activeCouponsResult(args: {
     return {
       reply: "No pudimos consultar tus cupones en este momento.",
       interactiveButtons: continuationActions(),
-      statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+      statePatch: buildLgStatePatch(
+        args.leadState,
+        getReferralState(args.leadState),
+      ),
       debugNote: "referral_hub:my_coupons_unavailable",
     };
   }
   const result = await args.supabase
     .from("referral_coupon_issuances")
-    .select("code,status,expires_at,referral_coupon_campaigns!inner(display_name)")
+    .select(
+      "code,status,expires_at,referral_coupon_campaigns!inner(display_name)",
+    )
     .eq("organization_id", args.organizationId)
     .eq("lead_id", safeStr(args.leadId))
     .eq("status", "active")
@@ -1378,26 +1848,36 @@ async function activeCouponsResult(args: {
     return {
       reply: "No pudimos consultar tus cupones en este momento.",
       interactiveButtons: continuationActions(),
-      statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+      statePatch: buildLgStatePatch(
+        args.leadState,
+        getReferralState(args.leadState),
+      ),
       debugNote: "referral_hub:my_coupons_failed",
     };
   }
   const rows = Array.isArray(result.data) ? result.data : [];
   const reply = rows.length === 0
     ? "Aún no tienes cupones activos."
-    : `Tus cupones activos:\n\n${rows.map((row: any) => {
-      const campaign = Array.isArray(row.referral_coupon_campaigns)
-        ? row.referral_coupon_campaigns[0]
-        : row.referral_coupon_campaigns;
-      const expiration = safeStr(row.expires_at).trim()
-        ? `\nVence: ${safeStr(row.expires_at).slice(0, 10)}`
-        : "";
-      return `${safeStr(campaign?.display_name, "Cupón")}\nCódigo: ${safeStr(row.code)}\nEstado: activo${expiration}`;
-    }).join("\n\n")}`;
+    : `Tus cupones activos:\n\n${
+      rows.map((row: any) => {
+        const campaign = Array.isArray(row.referral_coupon_campaigns)
+          ? row.referral_coupon_campaigns[0]
+          : row.referral_coupon_campaigns;
+        const expiration = safeStr(row.expires_at).trim()
+          ? `\nVence: ${safeStr(row.expires_at).slice(0, 10)}`
+          : "";
+        return `${safeStr(campaign?.display_name, "Cupón")}\nCódigo: ${
+          safeStr(row.code)
+        }\nEstado: activo${expiration}`;
+      }).join("\n\n")
+    }`;
   return {
     reply,
     interactiveButtons: continuationActions(),
-    statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+    statePatch: buildLgStatePatch(
+      args.leadState,
+      getReferralState(args.leadState),
+    ),
     debugNote: "referral_hub:my_coupons",
   };
 }
@@ -1414,7 +1894,10 @@ export function resolveLgCouponDeliveryEnabled(
   const value = lgFeatures.lg_coupon_delivery_enabled ??
     root.lg_coupon_delivery_enabled;
   if (value === false || value === 0) return false;
-  if (typeof value === "string" && ["false", "0", "off", "disabled"].includes(value.trim().toLowerCase())) {
+  if (
+    typeof value === "string" &&
+    ["false", "0", "off", "disabled"].includes(value.trim().toLowerCase())
+  ) {
     return false;
   }
   return true;
@@ -1426,7 +1909,8 @@ function failedCouponDeliveryResult(
   reason: CouponDeliveryError,
 ): ReferralHubTurnResult {
   return {
-    reply: "No pudimos preparar la imagen del cupón en este momento. Inténtalo nuevamente o selecciona ‘Hablar con asesor’.",
+    reply:
+      "No pudimos preparar la imagen del cupón en este momento. Inténtalo nuevamente o selecciona ‘Hablar con asesor’.",
     statePatch: buildLgStatePatch(leadState, {
       ...getReferralState(leadState),
       service_id: serviceId,
@@ -1462,7 +1946,8 @@ async function buildPersistentCouponReply(args: {
   campaignKey?: string;
 }): Promise<ReferralHubTurnResult> {
   const asset = args.couponAssets[args.serviceId];
-  const campaignKey = safeStr(args.campaignKey).trim() || asset?.campaign_key || "";
+  const campaignKey = safeStr(args.campaignKey).trim() || asset?.campaign_key ||
+    "";
   console.log(JSON.stringify({
     event: "referral_hub_coupon_delivery_decision",
     organization_id: args.organizationId,
@@ -1474,45 +1959,110 @@ async function buildPersistentCouponReply(args: {
     image_url_present: Boolean(safeStr(asset?.image_url).trim()),
   }));
   if (!args.couponDeliveryEnabled) {
-    return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_delivery_disabled");
+    return failedCouponDeliveryResult(
+      args.leadState,
+      args.serviceId,
+      "coupon_delivery_disabled",
+    );
   }
   if (!asset) {
-    return failedCouponDeliveryResult(args.leadState, args.serviceId, "asset_config_missing");
+    return failedCouponDeliveryResult(
+      args.leadState,
+      args.serviceId,
+      "asset_config_missing",
+    );
   }
   if (!asset.active) {
-    return failedCouponDeliveryResult(args.leadState, args.serviceId, "asset_config_inactive");
+    return failedCouponDeliveryResult(
+      args.leadState,
+      args.serviceId,
+      "asset_config_inactive",
+    );
   }
   if (!/^https:\/\//i.test(safeStr(asset.image_url).trim())) {
-    return failedCouponDeliveryResult(args.leadState, args.serviceId, "image_url_invalid");
+    return failedCouponDeliveryResult(
+      args.leadState,
+      args.serviceId,
+      "image_url_invalid",
+    );
   }
   if (!args.supabase?.rpc || !safeStr(args.leadId).trim()) {
-    return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_persistence_unavailable");
+    return failedCouponDeliveryResult(
+      args.leadState,
+      args.serviceId,
+      "coupon_persistence_unavailable",
+    );
   }
   try {
     const coupon = await issueOrGetCoupon({
-      supabase: args.supabase as Parameters<typeof issueOrGetCoupon>[0]["supabase"],
+      supabase: args.supabase as Parameters<
+        typeof issueOrGetCoupon
+      >[0]["supabase"],
       organizationId: args.organizationId,
       leadId: safeStr(args.leadId),
       campaignKey,
     });
     if (!safeStr(coupon.code)) {
-      return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_campaign_missing");
+      return failedCouponDeliveryResult(
+        args.leadState,
+        args.serviceId,
+        "coupon_campaign_missing",
+      );
     }
     if (args.channel === "whatsapp") {
-      const identity = await sha256(`${args.organizationId}:${safeStr(args.leadId)}`);
-      const tracking = await args.supabase.from("referral_coupon_delivery_events").upsert({ organization_id: args.organizationId, conversation_identity_hash: identity, service_id: args.serviceId, campaign_key: campaignKey, channel: "whatsapp", prepared_at: new Date().toISOString(), delivered_at: null, metadata: { coupon_id: coupon.id, status: "prepared" }, updated_at: new Date().toISOString() }, { onConflict: "organization_id,conversation_identity_hash,service_id,campaign_key,channel" });
-      if (tracking.error) return failedCouponDeliveryResult(args.leadState, args.serviceId, "coupon_issue_failed");
+      const identity = await sha256(
+        `${args.organizationId}:${safeStr(args.leadId)}`,
+      );
+      const tracking = await args.supabase.from(
+        "referral_coupon_delivery_events",
+      ).upsert({
+        organization_id: args.organizationId,
+        conversation_identity_hash: identity,
+        service_id: args.serviceId,
+        campaign_key: campaignKey,
+        channel: "whatsapp",
+        prepared_at: new Date().toISOString(),
+        delivered_at: null,
+        metadata: { coupon_id: coupon.id, status: "prepared" },
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict:
+          "organization_id,conversation_identity_hash,service_id,campaign_key,channel",
+      });
+      if (tracking.error) {
+        return failedCouponDeliveryResult(
+          args.leadState,
+          args.serviceId,
+          "coupon_issue_failed",
+        );
+      }
     }
     const referralState = getReferralState(args.leadState);
-    const groceryCouponUpsell = args.serviceId === BUILT_IN_SERVICE_IDS.supermarketCoupon &&
+    const groceryCouponUpsell =
+      args.serviceId === BUILT_IN_SERVICE_IDS.supermarketCoupon &&
       args.channel === "whatsapp";
     return {
       reply: groceryCouponUpsell
-        ? `Listo. Tu cupón ya está listo. 🎟️\n\nCódigo: ${coupon.code}\n${asset.instructions}\n\nYa que vas a comprar… ¿quieres ahorrarte también el viaje?\n\nTenemos canastas ya preparadas con productos seleccionados. Puedes ver qué incluye cada una, elegir la que más te convenga y coordinamos el delivery.`
-        : `Código: ${coupon.code}\n\n${asset.instructions}`,
+        ? "Ya que vas a comprar… ¿quieres ahorrarte también el viaje?"
+        : "¿Qué quieres hacer ahora?",
       outboundMessages: [
-        { type: "text", text: asset.intro_text },
-        { type: "image", url: asset.image_url, altText: "Imagen del cupón", reusable: true },
+        {
+          type: "text",
+          text: [
+            asset.intro_text,
+            asset.benefit_text,
+            `Código: ${coupon.code}`,
+            asset.instructions,
+          ]
+            .filter((part): part is string => Boolean(safeStr(part).trim()))
+            .join("\n\n"),
+        },
+        {
+          type: "image",
+          url: asset.image_url,
+          altText: "Imagen del cupón",
+          reusable: true,
+        },
       ],
       interactiveButtons: groceryCouponUpsell
         ? groceryCouponUpsellActions()
@@ -1531,7 +2081,8 @@ async function buildPersistentCouponReply(args: {
           coupon_code: coupon.code,
         },
       } as ReferralHubState),
-      debugNote: `referral_hub:persistent_coupon:${args.channel}:${args.serviceId}`,
+      debugNote:
+        `referral_hub:persistent_coupon:${args.channel}:${args.serviceId}`,
     };
   } catch (error) {
     if (error instanceof CouponPersistenceError) {
@@ -1569,7 +2120,9 @@ async function buildServiceReply(
 ): Promise<ReferralHubTurnResult> {
   if (
     context?.channel === "whatsapp" &&
-    ["luis_cupon_medico", "luis_cupon_super", "luis_cupon_dental"].includes(serviceId) &&
+    ["luis_cupon_medico", "luis_cupon_super", "luis_cupon_dental"].includes(
+      serviceId,
+    ) &&
     (!context.supabase?.rpc || !safeStr(context.leadId).trim())
   ) {
     return failedCouponDeliveryResult(
@@ -1581,7 +2134,9 @@ async function buildServiceReply(
   if (
     (context?.channel === "messenger" || context?.channel === "whatsapp") &&
     context.supabase?.rpc &&
-    ["luis_cupon_medico", "luis_cupon_super", "luis_cupon_dental"].includes(serviceId)
+    ["luis_cupon_medico", "luis_cupon_super", "luis_cupon_dental"].includes(
+      serviceId,
+    )
   ) {
     return await buildPersistentCouponReply({
       serviceId: serviceId as ReferralHubCouponAssetConfig["service_id"],
@@ -1590,19 +2145,30 @@ async function buildServiceReply(
       organizationId: safeStr(context.organizationId),
       leadId: context.leadId,
       couponAssets: context.couponAssets ?? REFERRAL_HUB_COUPON_ASSETS,
-      couponDeliveryEnabled: resolveLgCouponDeliveryEnabled(context.integrations),
+      couponDeliveryEnabled: resolveLgCouponDeliveryEnabled(
+        context.integrations,
+      ),
       channel: context.channel,
       campaignKey: context.campaignKey,
     });
   }
   const referralState = getReferralState(leadState);
-  const preservedData = withoutTransientServiceFields(referralState.extracted_data);
+  const preservedData = withoutTransientServiceFields(
+    referralState.extracted_data,
+  );
   const statePatchBase = {
     service_id: serviceId,
-    service_label: serviceLabel({ id: serviceId, organization_id: REFERRAL_HUB_CANONICAL_ORGANIZATION_ID, nombre: serviceLabelFromId(serviceId), tipo: "intake" }),
+    service_label: serviceLabel({
+      id: serviceId,
+      organization_id: REFERRAL_HUB_CANONICAL_ORGANIZATION_ID,
+      nombre: serviceLabelFromId(serviceId),
+      tipo: "intake",
+    }),
     profile_name: referralState.profile_name ?? null,
     profile_city: referralState.profile_city ?? null,
-    profile_complete: Boolean(referralState.profile_name && referralState.profile_city),
+    profile_complete: Boolean(
+      referralState.profile_name && referralState.profile_city,
+    ),
     stop_requested: referralState.stop_requested ?? false,
     food_option: referralState.food_option ?? null,
     grocery: null,
@@ -1611,7 +2177,8 @@ async function buildServiceReply(
   switch (serviceId) {
     case BUILT_IN_SERVICE_IDS.accident:
       return {
-        reply: "Lamento que estés pasando por esto. Vamos a recopilar algunos datos para conectarte con la persona adecuada.\n\n¿Cuándo ocurrió el accidente?",
+        reply:
+          "Lamento que estés pasando por esto. Vamos a recopilar algunos datos para conectarte con la persona adecuada.\n\n¿Cuándo ocurrió el accidente?",
         statePatch: buildLgStatePatch(leadState, {
           ...statePatchBase,
           current_field: "accident_date",
@@ -1621,7 +2188,8 @@ async function buildServiceReply(
       };
     case BUILT_IN_SERVICE_IDS.immigration:
       return {
-        reply: "Te conectaremos con un profesional de confianza que pueda orientarte.\n\nCuéntanos brevemente qué tipo de ayuda migratoria necesitas.",
+        reply:
+          "Te conectaremos con un profesional de confianza que pueda orientarte.\n\nCuéntanos brevemente qué tipo de ayuda migratoria necesitas.",
         statePatch: buildLgStatePatch(leadState, {
           ...statePatchBase,
           current_field: "immigration_case",
@@ -1631,7 +2199,8 @@ async function buildServiceReply(
       };
     case BUILT_IN_SERVICE_IDS.medicalCoupon:
       return {
-        reply: "Recibe un 20% de descuento en tu visita a una clínica participante.\n\nLG Community Network conecta a la comunidad con clínicas y beneficios participantes. No prestamos servicios médicos directamente.",
+        reply:
+          "Recibe un 20% de descuento en tu visita a una clínica participante.\n\nLG Community Network conecta a la comunidad con clínicas y beneficios participantes. No prestamos servicios médicos directamente.",
         statePatch: buildLgStatePatch(leadState, {
           ...statePatchBase,
           current_field: null,
@@ -1645,7 +2214,8 @@ async function buildServiceReply(
       return groceryEntryResult(leadState, serviceId);
     case BUILT_IN_SERVICE_IDS.dentalCoupon:
       return {
-        reply: "Cupón de clínica dental por $29 que incluye:\n• consulta\n• limpieza\n• rayos X.\n\nOferta sujeta a disponibilidad y a los términos de la clínica participante.",
+        reply:
+          "Cupón de clínica dental por $29 que incluye:\n• consulta\n• limpieza\n• rayos X.\n\nOferta sujeta a disponibilidad y a los términos de la clínica participante.",
         statePatch: buildLgStatePatch(leadState, {
           ...statePatchBase,
           current_field: null,
@@ -1655,29 +2225,43 @@ async function buildServiceReply(
       };
     case BUILT_IN_SERVICE_IDS.events:
       return {
-        reply: "Te compartiremos los próximos eventos comunitarios disponibles cerca de tu ciudad.\n\nPor ahora no tenemos eventos publicados para tu ciudad. Podemos avisarte cuando haya uno disponible.",
+        reply:
+          "Te compartiremos los próximos eventos comunitarios disponibles cerca de tu ciudad.\n\nPor ahora no tenemos eventos publicados para tu ciudad. Podemos avisarte cuando haya uno disponible.",
         interactiveButtons: [
           { id: "referral_event:follow_up", title: "Avisarme" },
           { id: "referral_menu:services", title: "Ver servicios" },
         ],
-        statePatch: completeLgServiceState(leadState, serviceId, "information_provided", {
-          ...statePatchBase,
-          extracted_data: { ...preservedData, service: "eventos" },
-        }),
+        statePatch: completeLgServiceState(
+          leadState,
+          serviceId,
+          "information_provided",
+          {
+            ...statePatchBase,
+            extracted_data: { ...preservedData, service: "eventos" },
+          },
+        ),
         debugNote: "referral_hub:service_events",
       };
     case BUILT_IN_SERVICE_IDS.advisor: {
       return {
         reply: LG_ACCIDENT_HANDOFF_FAILURE,
         interactiveButtons: continuationActions(),
-        statePatch: completeLgServiceState(leadState, BUILT_IN_SERVICE_IDS.advisor, "handoff_created", {
-          ...statePatchBase,
-          extracted_data: { ...preservedData, service: "asesor" },
-        }),
+        statePatch: completeLgServiceState(
+          leadState,
+          BUILT_IN_SERVICE_IDS.advisor,
+          "handoff_created",
+          {
+            ...statePatchBase,
+            extracted_data: { ...preservedData, service: "asesor" },
+          },
+        ),
         leadPatch: {
           handoff_to_human: true,
           service_id: BUILT_IN_SERVICE_IDS.advisor,
-          extracted_data: { ...(referralState.extracted_data ?? {}), service: "asesor" },
+          extracted_data: {
+            ...(referralState.extracted_data ?? {}),
+            service: "asesor",
+          },
           status: "contacted",
         },
         debugNote: "referral_hub:advisor_handoff_requested",
@@ -1721,18 +2305,25 @@ async function continueLgServiceFlow(
   const referralState = getReferralState(leadState);
   const currentField = safeStr(referralState.current_field).trim();
   const value = safeStr(inboundText).trim();
-  const extractedData = { ...(referralState.extracted_data ?? {}) } as Record<string, unknown>;
+  const extractedData = { ...(referralState.extracted_data ?? {}) } as Record<
+    string,
+    unknown
+  >;
 
   if (currentField === "confirm_submission") {
     const action = normalizedAction(payloadAction);
-    const confirmed = action === `referral_submit:${referralState.service_id}:yes` ||
+    const confirmed =
+      action === `referral_submit:${referralState.service_id}:yes` ||
       /^(si|sí|enviar|confirmar|enviar solicitud)$/i.test(value);
-    const rejected = action === `referral_submit:${referralState.service_id}:no` ||
+    const rejected =
+      action === `referral_submit:${referralState.service_id}:no` ||
       /^(no|cancelar)$/i.test(value);
     if (!confirmed && !rejected) {
       return {
         reply: "Confirma si deseas enviar esta solicitud.",
-        interactiveButtons: submissionConfirmationButtons(referralState.service_id ?? ""),
+        interactiveButtons: submissionConfirmationButtons(
+          referralState.service_id ?? "",
+        ),
         statePatch: buildLgStatePatch(leadState, referralState),
         debugNote: "referral_hub:submission_confirmation_retry",
       };
@@ -1748,10 +2339,15 @@ async function continueLgServiceFlow(
       return {
         reply: LG_ACCIDENT_HANDOFF_FAILURE,
         interactiveButtons: continuationActions(),
-        statePatch: completeLgServiceState(leadState, BUILT_IN_SERVICE_IDS.accident, "handoff_created", {
-          ...referralState,
-          extracted_data: extractedData,
-        }),
+        statePatch: completeLgServiceState(
+          leadState,
+          BUILT_IN_SERVICE_IDS.accident,
+          "handoff_created",
+          {
+            ...referralState,
+            extracted_data: extractedData,
+          },
+        ),
         debugNote: "referral_hub:accident_complete",
       };
     }
@@ -1759,10 +2355,15 @@ async function continueLgServiceFlow(
       return {
         reply: LG_ACCIDENT_HANDOFF_FAILURE,
         interactiveButtons: continuationActions(),
-        statePatch: completeLgServiceState(leadState, BUILT_IN_SERVICE_IDS.immigration, "request_recorded", {
-          ...referralState,
-          extracted_data: extractedData,
-        }),
+        statePatch: completeLgServiceState(
+          leadState,
+          BUILT_IN_SERVICE_IDS.immigration,
+          "request_recorded",
+          {
+            ...referralState,
+            extracted_data: extractedData,
+          },
+        ),
         debugNote: "referral_hub:immigration_complete",
       };
     }
@@ -1770,12 +2371,15 @@ async function continueLgServiceFlow(
 
   if (referralState.service_id === BUILT_IN_SERVICE_IDS.accident) {
     if (currentField === "accident_date") {
-      const pending = referralState.pending_field_confirmation?.field === "accident_date"
-        ? referralState.pending_field_confirmation
-        : null;
+      const pending =
+        referralState.pending_field_confirmation?.field === "accident_date"
+          ? referralState.pending_field_confirmation
+          : null;
       const normalizedAction = normalizeText(payloadAction ?? "");
-      const confirmed = normalizedAction.endsWith(":yes") || /^(si|sí)(,|\s|$)/i.test(value);
-      const rejected = normalizedAction.endsWith(":no") || /^(no|otra fecha)(,|\s|$)/i.test(value);
+      const confirmed = normalizedAction.endsWith(":yes") ||
+        /^(si|sí)(,|\s|$)/i.test(value);
+      const rejected = normalizedAction.endsWith(":no") ||
+        /^(no|otra fecha)(,|\s|$)/i.test(value);
       if (pending && confirmed && pending.interpretation.normalizedValue) {
         extractedData.accident_date = pending.interpretation.normalizedValue;
         return {
@@ -1804,16 +2408,30 @@ async function continueLgServiceFlow(
       const interpreted = interpretAccidentDate(value, timezone);
       if (!interpreted.normalizedValue || interpreted.confidence === "low") {
         return {
-          reply: interpreted.clarificationPrompt ?? "No pude identificar la fecha. ¿Puedes escribirla nuevamente?",
-          statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: "accident_date", extracted_data: extractedData }),
+          reply: interpreted.clarificationPrompt ??
+            "No pude identificar la fecha. ¿Puedes escribirla nuevamente?",
+          statePatch: buildLgStatePatch(leadState, {
+            ...referralState,
+            current_field: "accident_date",
+            extracted_data: extractedData,
+          }),
           debugNote: "referral_hub:accident_date_retry",
         };
       }
       if (interpreted.needsConfirmation) {
         return {
-          reply: interpreted.clarificationPrompt ?? `¿Te refieres a ${interpreted.normalizedValue}?`,
+          reply: interpreted.clarificationPrompt ??
+            `¿Te refieres a ${interpreted.normalizedValue}?`,
           interactiveButtons: dateConfirmationButtons(),
-          statePatch: buildLgStatePatch(leadState, { ...referralState, current_field: "accident_date", pending_field_confirmation: { field: "accident_date", interpretation: interpreted }, extracted_data: extractedData }),
+          statePatch: buildLgStatePatch(leadState, {
+            ...referralState,
+            current_field: "accident_date",
+            pending_field_confirmation: {
+              field: "accident_date",
+              interpretation: interpreted,
+            },
+            extracted_data: extractedData,
+          }),
           debugNote: "referral_hub:accident_date_confirm",
         };
       }
@@ -1836,7 +2454,10 @@ async function continueLgServiceFlow(
         interactiveButtons: [
           { id: "referral_field:accident_injuries:0", title: "Sí" },
           { id: "referral_field:accident_injuries:1", title: "No" },
-          { id: "referral_field:accident_injuries:2", title: "No estoy seguro" },
+          {
+            id: "referral_field:accident_injuries:2",
+            title: "No estoy seguro",
+          },
         ],
         statePatch: buildLgStatePatch(leadState, {
           ...referralState,
@@ -1846,10 +2467,14 @@ async function continueLgServiceFlow(
         debugNote: "referral_hub:accident_city",
       };
     }
-    if (currentField === "accident_injuries" || currentField === "police_report") {
+    if (
+      currentField === "accident_injuries" || currentField === "police_report"
+    ) {
       extractedData.accident_injuries = /no estoy seguro/i.test(value)
         ? "no_estoy_seguro"
-        : /^(si|sí|yes)$/i.test(value) ? "sí" : "no";
+        : /^(si|sí|yes)$/i.test(value)
+        ? "sí"
+        : "no";
       return {
         reply: "¿Cuál es tu nombre completo?",
         statePatch: buildLgStatePatch(leadState, {
@@ -1875,8 +2500,16 @@ async function continueLgServiceFlow(
     if (currentField === "contact_phone") {
       extractedData.contact_phone = value;
       return {
-        reply: `Revisa la información antes de enviarla:\n• Fecha: ${safeStr(extractedData.accident_date)}\n• Ciudad: ${safeStr(extractedData.accident_city)}\n• Lesionados: ${safeStr(extractedData.accident_injuries)}\n• Nombre: ${safeStr(extractedData.contact_name)}\n• Teléfono: ${safeStr(extractedData.contact_phone)}\n\nConfirma si deseas enviar esta solicitud.`,
-        interactiveButtons: submissionConfirmationButtons(BUILT_IN_SERVICE_IDS.accident),
+        reply: `Revisa la información antes de enviarla:\n• Fecha: ${
+          safeStr(extractedData.accident_date)
+        }\n• Ciudad: ${safeStr(extractedData.accident_city)}\n• Lesionados: ${
+          safeStr(extractedData.accident_injuries)
+        }\n• Nombre: ${safeStr(extractedData.contact_name)}\n• Teléfono: ${
+          safeStr(extractedData.contact_phone)
+        }\n\nConfirma si deseas enviar esta solicitud.`,
+        interactiveButtons: submissionConfirmationButtons(
+          BUILT_IN_SERVICE_IDS.accident,
+        ),
         statePatch: buildLgStatePatch(leadState, {
           ...referralState,
           current_field: "confirm_submission",
@@ -1890,8 +2523,11 @@ async function continueLgServiceFlow(
   if (referralState.service_id === BUILT_IN_SERVICE_IDS.immigration) {
     extractedData.immigration_case = value;
     return {
-      reply: `Revisa la información antes de enviarla:\n• Tipo de ayuda: ${value}\n\nConfirma si deseas enviar esta solicitud.`,
-      interactiveButtons: submissionConfirmationButtons(BUILT_IN_SERVICE_IDS.immigration),
+      reply:
+        `Revisa la información antes de enviarla:\n• Tipo de ayuda: ${value}\n\nConfirma si deseas enviar esta solicitud.`,
+      interactiveButtons: submissionConfirmationButtons(
+        BUILT_IN_SERVICE_IDS.immigration,
+      ),
       statePatch: buildLgStatePatch(leadState, {
         ...referralState,
         current_field: "confirm_submission",
@@ -1907,19 +2543,31 @@ async function continueLgServiceFlow(
   );
 }
 
-function stateWithQrAttribution(leadState: Json | null, entry: ResolvedReferralQrEntry): Json {
+function stateWithQrAttribution(
+  leadState: Json | null,
+  entry: ResolvedReferralQrEntry,
+): Json {
   const referralState = getReferralState(leadState);
   return buildLgStatePatch(leadState, {
     ...referralState,
-    extracted_data: { ...(referralState.extracted_data ?? {}), qr_entry: qrLeadAttribution(entry) },
+    extracted_data: {
+      ...(referralState.extracted_data ?? {}),
+      qr_entry: qrLeadAttribution(entry),
+    },
   });
 }
 
-function withQrAttribution(result: ReferralHubTurnResult, entry: ResolvedReferralQrEntry): ReferralHubTurnResult {
-  const leadPatch = result.leadPatch && typeof result.leadPatch === "object" ? result.leadPatch : {};
-  const extractedData = leadPatch.extracted_data && typeof leadPatch.extracted_data === "object"
-    ? leadPatch.extracted_data as Json
+function withQrAttribution(
+  result: ReferralHubTurnResult,
+  entry: ResolvedReferralQrEntry,
+): ReferralHubTurnResult {
+  const leadPatch = result.leadPatch && typeof result.leadPatch === "object"
+    ? result.leadPatch
     : {};
+  const extractedData =
+    leadPatch.extracted_data && typeof leadPatch.extracted_data === "object"
+      ? leadPatch.extracted_data as Json
+      : {};
   return {
     ...result,
     leadPatch: {
@@ -1966,18 +2614,28 @@ export async function handleReferralHubTurn(args: {
   serviceConfigs?: ReferralHubServiceConfig[];
   couponAssets?: Record<string, ReferralHubCouponAssetConfig>;
   integrations?: Record<string, unknown>;
+  allowTransientLuisMenuReset?: boolean;
 }): Promise<ReferralHubTurnResult> {
   const isLgTenant = safeStr(args.organizationId).trim() ===
     REFERRAL_HUB_CANONICAL_ORGANIZATION_ID;
 
-  if (shouldHandlePantryDemo({
-    leadState: args.leadState,
-    inboundText: args.inboundText,
-    payloadAction: args.payloadAction,
-  }) && !isLgTenant) {
-    const issuedCoupon = args.supabase?.rpc && args.leadId && isPantryCouponEntry(args)
-      ? await issueOrGetCoupon({ supabase: args.supabase as Parameters<typeof issueOrGetCoupon>[0]["supabase"], organizationId: args.organizationId, leadId: args.leadId })
-      : undefined;
+  if (
+    shouldHandlePantryDemo({
+      leadState: args.leadState,
+      inboundText: args.inboundText,
+      payloadAction: args.payloadAction,
+    }) && !isLgTenant
+  ) {
+    const issuedCoupon =
+      args.supabase?.rpc && args.leadId && isPantryCouponEntry(args)
+        ? await issueOrGetCoupon({
+          supabase: args.supabase as Parameters<
+            typeof issueOrGetCoupon
+          >[0]["supabase"],
+          organizationId: args.organizationId,
+          leadId: args.leadId,
+        })
+        : undefined;
     return handlePantryDemoTurn({
       leadState: args.leadState,
       inboundText: args.inboundText,
@@ -1994,10 +2652,15 @@ export async function handleReferralHubTurn(args: {
     const groceryIntent = action || normalizeText(args.inboundText);
     let canonicalMenuConfigs: CanonicalMenuConfig[] | null | undefined;
     const getCanonicalMenuConfigs = async () => {
-      if (canonicalMenuConfigs === undefined) canonicalMenuConfigs = await loadCanonicalMenuConfigs(args);
+      if (canonicalMenuConfigs === undefined) {
+        canonicalMenuConfigs = await loadCanonicalMenuConfigs(args);
+      }
       return canonicalMenuConfigs;
     };
-    const canonicalMenu = async (reply = LG_MENU_PROMPT, leadState = args.leadState) => {
+    const canonicalMenu = async (
+      reply = LG_MENU_PROMPT,
+      leadState = args.leadState,
+    ) => {
       const configs = await getCanonicalMenuConfigs();
       return configs?.length === 0
         ? handleLgMoreMenu(leadState, args.channel ?? "whatsapp", configs)
@@ -2029,20 +2692,34 @@ export async function handleReferralHubTurn(args: {
       }
     }
     if (
+      shouldResetLuisMenu(args.inboundText) ||
+      (args.allowTransientLuisMenuReset &&
+        isLuisNamedGreeting(args.inboundText))
+    ) {
+      return await canonicalMenu(
+        LG_MENU_PROMPT,
+        resetLuisMenuState(args.leadState),
+      );
+    }
+    if (
       action === "referral_grocery:entry" ||
       action === `referral_service:${BUILT_IN_SERVICE_IDS.grocery}`
     ) {
       return groceryEntryResult(args.leadState);
     }
     if (action === "referral_grocery:coupon") {
-      return await buildServiceReply(BUILT_IN_SERVICE_IDS.supermarketCoupon, args.leadState, {
-        channel: args.channel,
-        supabase: args.supabase,
-        organizationId: args.organizationId,
-        leadId: args.leadId,
-        couponAssets: args.couponAssets,
-        integrations: args.integrations,
-      });
+      return await buildServiceReply(
+        BUILT_IN_SERVICE_IDS.supermarketCoupon,
+        args.leadState,
+        {
+          channel: args.channel,
+          supabase: args.supabase,
+          organizationId: args.organizationId,
+          leadId: args.leadId,
+          couponAssets: args.couponAssets,
+          integrations: args.integrations,
+        },
+      );
     }
     if (
       action === "referral_grocery:baskets" ||
@@ -2054,7 +2731,10 @@ export async function handleReferralHubTurn(args: {
       return {
         reply: "Perfecto. Tu cupón queda listo para usar cuando vayas a pagar.",
         interactiveButtons: continuationActions(),
-        statePatch: buildLgStatePatch(args.leadState, getReferralState(args.leadState)),
+        statePatch: buildLgStatePatch(
+          args.leadState,
+          getReferralState(args.leadState),
+        ),
         debugNote: "referral_hub:grocery_coupon_only",
       };
     }
@@ -2079,25 +2759,37 @@ export async function handleReferralHubTurn(args: {
       };
     }
     if (action === "referral_menu:services") {
-      return await canonicalMenu();
+      return await canonicalMenu(
+        LG_MENU_PROMPT,
+        resetLuisMenuState(args.leadState),
+      );
     }
     if (action === "referral_menu:main") {
-      return await canonicalMenu("Claro. ¿En qué podemos ayudarte?");
+      return await canonicalMenu(
+        "Claro. ¿En qué podemos ayudarte?",
+        resetLuisMenuState(args.leadState),
+      );
     }
     if (action === "referral_menu:more") {
       const configs = await getCanonicalMenuConfigs();
-      return configs ? handleLgMoreMenu(args.leadState, args.channel ?? "whatsapp", configs) : await canonicalMenu();
+      return configs
+        ? handleLgMoreMenu(args.leadState, args.channel ?? "whatsapp", configs)
+        : await canonicalMenu();
     }
     if (action === "referral_menu:my_coupons") {
       return await activeCouponsResult(args);
     }
     if (action === "referral_handoff:advisor") {
-      return await buildServiceReply(BUILT_IN_SERVICE_IDS.advisor, args.leadState, {
-        channel: args.channel,
-        supabase: args.supabase,
-        organizationId: args.organizationId,
-        leadId: args.leadId,
-      });
+      return await buildServiceReply(
+        BUILT_IN_SERVICE_IDS.advisor,
+        args.leadState,
+        {
+          channel: args.channel,
+          supabase: args.supabase,
+          organizationId: args.organizationId,
+          leadId: args.leadId,
+        },
+      );
     }
     if (action === "referral_profile:change_name") {
       return {
@@ -2126,29 +2818,36 @@ export async function handleReferralHubTurn(args: {
       };
     }
     const groceryState = groceryStateFromReferral(referralState.grocery);
-    if (groceryState && groceryState.step !== "complete" && !safeStr(args.payloadAction).includes("referral_service:") && args.channel === "whatsapp" && args.supabase?.rpc && args.leadId && args.channelUserId) {
-      const turn = await continueWhatsAppGrocery({ supabase: args.supabase as SupabaseLike & { rpc: NonNullable<SupabaseLike["rpc"]> }, state: groceryState, inboundText: args.inboundText, payloadAction: args.payloadAction, leadId: args.leadId, channelUserId: args.channelUserId });
-      return { reply: turn.reply, interactiveList: turn.interactiveList, interactiveButtons: turn.interactiveButtons, statePatch: buildLgStatePatch(args.leadState, { ...referralState, service_id: BUILT_IN_SERVICE_IDS.grocery, service_label: "Compras supermercado", current_field: null, grocery: turn.grocery }), debugNote: turn.debugNote };
+    if (
+      groceryState && groceryState.step !== "complete" &&
+      !safeStr(args.payloadAction).includes("referral_service:") &&
+      args.channel === "whatsapp" && args.supabase?.rpc && args.leadId &&
+      args.channelUserId
+    ) {
+      const turn = await continueWhatsAppGrocery({
+        supabase: args.supabase as SupabaseLike & {
+          rpc: NonNullable<SupabaseLike["rpc"]>;
+        },
+        state: groceryState,
+        inboundText: args.inboundText,
+        payloadAction: args.payloadAction,
+        leadId: args.leadId,
+        channelUserId: args.channelUserId,
+      });
+      return {
+        reply: turn.reply,
+        interactiveList: turn.interactiveList,
+        interactiveButtons: turn.interactiveButtons,
+        statePatch: buildLgStatePatch(args.leadState, {
+          ...referralState,
+          service_id: BUILT_IN_SERVICE_IDS.grocery,
+          service_label: "Compras supermercado",
+          current_field: null,
+          grocery: turn.grocery,
+        }),
+        debugNote: turn.debugNote,
+      };
     }
-    if (!safeStr(referralState.profile_name).trim() || !safeStr(referralState.profile_city).trim()) {
-      if (safeStr(referralState.current_field).trim() === "profile_name") {
-        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction, (await getCanonicalMenuConfigs()) ?? undefined);
-      }
-      if (safeStr(referralState.current_field).trim() === "profile_city") {
-        return await updateProfileFromInput(args.leadState, args.inboundText, args.channel, args.payloadAction, (await getCanonicalMenuConfigs()) ?? undefined);
-      }
-      if (!safeStr(referralState.profile_name).trim() && !safeStr(referralState.profile_city).trim()) {
-        return startLgProfileFlow(args.leadState);
-      }
-      if (!safeStr(referralState.profile_city).trim()) {
-        return startLgProfileFlow(args.leadState);
-      }
-    }
-
-    if (shouldResetMenu(args.inboundText) && !isReturningEntry(args.inboundText)) {
-      return await canonicalMenu();
-    }
-
     const selectedPayloadServiceId = safeStr(args.payloadAction).trim()
       ? resolveServiceIdFromInput(args.payloadAction ?? "")
       : null;
@@ -2163,10 +2862,6 @@ export async function handleReferralHubTurn(args: {
       });
     }
 
-    if (safeStr(referralState.current_field).trim()) {
-      return continueLgServiceFlow(args.leadState, args.inboundText, args.timezone, args.payloadAction, (await getCanonicalMenuConfigs()) ?? undefined);
-    }
-
     const selectedTextServiceId = resolveServiceIdFromInput(args.inboundText);
     if (selectedTextServiceId) {
       return await buildServiceReply(selectedTextServiceId, args.leadState, {
@@ -2179,20 +2874,57 @@ export async function handleReferralHubTurn(args: {
       });
     }
 
-    if (isReturningEntry(args.inboundText)) {
-      return await canonicalMenu(
-        `Hola de nuevo, ${firstName(safeStr(referralState.profile_name))}. ¿En qué podemos ayudarte hoy?`,
+    if (
+      isLuisDiscoveryEntry(args.inboundText) ||
+      !safeStr(args.inboundText).trim()
+    ) {
+      return await canonicalMenu();
+    }
+
+    if (safeStr(referralState.current_field).trim()) {
+      return continueLgServiceFlow(
+        args.leadState,
+        args.inboundText,
+        args.timezone,
+        args.payloadAction,
+        (await getCanonicalMenuConfigs()) ?? undefined,
       );
     }
-    if (!safeStr(args.inboundText).trim()) {
-      return await canonicalMenu();
+
+    if (
+      !safeStr(referralState.profile_name).trim() ||
+      !safeStr(referralState.profile_city).trim()
+    ) {
+      if (
+        safeStr(referralState.current_field).trim() === "profile_name" ||
+        safeStr(referralState.current_field).trim() === "profile_city"
+      ) {
+        return await updateProfileFromInput(
+          args.leadState,
+          args.inboundText,
+          args.channel,
+          args.payloadAction,
+          (await getCanonicalMenuConfigs()) ?? undefined,
+        );
+      }
+      if (
+        !safeStr(referralState.profile_name).trim() &&
+        !safeStr(referralState.profile_city).trim()
+      ) {
+        return startLgProfileFlow(args.leadState);
+      }
+      if (!safeStr(referralState.profile_city).trim()) {
+        return startLgProfileFlow(args.leadState);
+      }
     }
 
     return await canonicalMenu();
   }
 
   const configs = args.serviceConfigs ??
-    (args.supabase ? await loadServiceConfigs(args.supabase, args.organizationId) : []);
+    (args.supabase
+      ? await loadServiceConfigs(args.supabase, args.organizationId)
+      : []);
   if (configs.length === 0) {
     return {
       reply: "Todavía no hay opciones configuradas para esta cuenta.",
@@ -2210,7 +2942,8 @@ export async function handleReferralHubTurn(args: {
     return optInResult({ leadState: args.leadState, value: optIn });
   }
 
-  const activeService = configs.find((config) => config.id === referralState.service_id) ?? null;
+  const activeService =
+    configs.find((config) => config.id === referralState.service_id) ?? null;
   if (activeService?.tipo === "intake" && referralState.current_field) {
     return continueIntakeResult({
       leadState: args.leadState,
@@ -2220,7 +2953,10 @@ export async function handleReferralHubTurn(args: {
     });
   }
 
-  let selectedServiceId = extractServiceId(args.inboundText, args.payloadAction);
+  let selectedServiceId = extractServiceId(
+    args.inboundText,
+    args.payloadAction,
+  );
   let selectedService = selectedServiceId
     ? configs.find((config) => config.id === selectedServiceId) ?? null
     : findServiceByFreeText(configs, args.inboundText);
@@ -2237,8 +2973,14 @@ export async function handleReferralHubTurn(args: {
 
   if (!selectedService) return menuResult(args.leadState, configs);
   if (selectedService.tipo === "static_action") {
-    return staticActionResult(args.leadState, selectedService, args.channelUserId);
+    return staticActionResult(
+      args.leadState,
+      selectedService,
+      args.channelUserId,
+    );
   }
-  if (selectedService.tipo === "transfer") return transferResult(args.leadState, selectedService);
+  if (selectedService.tipo === "transfer") {
+    return transferResult(args.leadState, selectedService);
+  }
   return startIntakeResult(args.leadState, selectedService);
 }
