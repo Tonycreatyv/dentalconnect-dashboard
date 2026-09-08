@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  classifyAccidentValidationFailure,
   classifyLuisFlowCompletion,
   parseLuisBenefitFlowCompletion,
   parseLuisLegalFlowCompletion,
@@ -64,6 +65,111 @@ Deno.test("AUTO_ACCIDENT completion still accepts an already-YYYY-MM-DD accident
     accident_date: "2026-03-05",
   });
   assertEquals(completion?.intake_type === "AUTO_ACCIDENT" ? completion.accident_date : null, "2026-03-05");
+});
+
+// P0 (2026-09, confirmed against a real production row): the currently
+// published Flow's real AUTO_ACCIDENT completion payload - captured via
+// reply_outbox.payload->'flow_response' key/type inspection ONLY, never
+// raw customer values - contains service_key, intake_type, full_name,
+// description, accident_date (10-char string, already YYYY-MM-DD -
+// the millisecond-epoch hypothesis in the test above was a reasonable
+// documented-behavior guess that turned out not to be what's actually
+// live), police_report, received_medical_attention, sharing_consent,
+// consent_version, consent_source - and critically NEVER participant_role
+// or its former alias participation. The real Flow also appears to submit
+// every legal intake type's fields together on a shared completion action
+// (dui_date/criminal_charge/court_date_status/currently_detained were
+// present alongside the accident fields on the same real row), so the
+// parser must also tolerate unrelated sibling-intake keys being present.
+const autoAccidentNfmReplyConfirmedRealShape = {
+  service_key: "ACCIDENT",
+  intake_type: "AUTO_ACCIDENT",
+  full_name: "Ana Cliente",
+  description: "Choque en la interseccion, sin heridos graves.",
+  accident_date: "2026-03-05",
+  received_medical_attention: "YES",
+  police_report: "YES",
+  sharing_consent: "AUTHORIZED",
+  consent_version: "luis_legal_sharing_v1",
+  consent_source: "whatsapp_flow",
+  // Sibling-intake fields the real Flow apparently includes on every
+  // completion regardless of which type was actually selected - must be
+  // harmlessly ignored, never cause a false rejection.
+  dui_date: "",
+  criminal_charge: "",
+  court_date_status: "",
+  currently_detained: "",
+  postal_code: "",
+  chemical_test: "",
+};
+
+Deno.test("AUTO_ACCIDENT completion validates the confirmed real production payload shape - no participant_role/participation field at all", () => {
+  assertEquals(classifyLuisFlowCompletion(autoAccidentNfmReplyConfirmedRealShape), "LEGAL");
+  const completion = parseLuisLegalFlowCompletion(autoAccidentNfmReplyConfirmedRealShape);
+  assert(completion !== null, "the confirmed real payload shape must not be rejected as invalid");
+  assertEquals(completion?.intake_type, "AUTO_ACCIDENT");
+  assertEquals(completion?.intake_type === "AUTO_ACCIDENT" ? completion.accident_date : null, "2026-03-05");
+  assertEquals(completion?.intake_type === "AUTO_ACCIDENT" ? completion.participant_role : "unset", null);
+});
+
+Deno.test("classifyAccidentValidationFailure reports null (no failure) for the confirmed real payload shape", () => {
+  assertEquals(classifyAccidentValidationFailure(autoAccidentNfmReplyConfirmedRealShape), null);
+});
+
+Deno.test("classifyAccidentValidationFailure never misclassifies an IMMIGRATION or DUI_CRIMINAL rejection as an accident failure", () => {
+  assertEquals(classifyAccidentValidationFailure(immigrationNfmReply), null);
+  assertEquals(
+    classifyAccidentValidationFailure({ intake_type: "DUI_CRIMINAL", full_name: "", description: "" }),
+    null,
+  );
+});
+
+Deno.test("classifyAccidentValidationFailure identifies each missing/invalid required field with the correct code", () => {
+  const base = autoAccidentNfmReplyConfirmedRealShape;
+  assertEquals(
+    classifyAccidentValidationFailure({ ...base, full_name: "" }),
+    "ACCIDENT_MISSING_FULL_NAME",
+  );
+  assertEquals(
+    classifyAccidentValidationFailure({ ...base, description: "" }),
+    "ACCIDENT_MISSING_DESCRIPTION",
+  );
+  assertEquals(
+    classifyAccidentValidationFailure({ ...base, accident_date: "not-a-date" }),
+    "ACCIDENT_INVALID_DATE",
+  );
+  assertEquals(
+    classifyAccidentValidationFailure({ ...base, received_medical_attention: "MAYBE" }),
+    "ACCIDENT_INVALID_MEDICAL_ATTENTION",
+  );
+  assertEquals(
+    classifyAccidentValidationFailure({ ...base, police_report: "MAYBE" }),
+    "ACCIDENT_INVALID_POLICE_REPORT",
+  );
+  assertEquals(
+    classifyAccidentValidationFailure({ ...base, sharing_consent: "MAYBE" }),
+    "ACCIDENT_INVALID_SHARING_CONSENT",
+  );
+});
+
+Deno.test("the buildLuisLegalFlowCompletionResult null-branch logs the accident diagnostic, matching the existing diagnoseLuisBenefitFlowCompletionFailure pattern", async () => {
+  const source = await Deno.readTextFile(new URL("../index.ts", import.meta.url));
+  const fnStart = source.indexOf("async function buildLuisLegalFlowCompletionResult");
+  const parseCall = source.indexOf("const completion = parseLuisLegalFlowCompletion(args.rawFlowResponse);", fnStart);
+  assert(parseCall > fnStart, "parseLuisLegalFlowCompletion call not found in buildLuisLegalFlowCompletionResult");
+  const nullBranchEnd = source.indexOf("return null;\n  }", parseCall) + "return null;\n  }".length;
+  const nullBranch = source.slice(parseCall, nullBranchEnd);
+  assertStringIncludes(nullBranch, "classifyAccidentValidationFailure(args.rawFlowResponse)");
+  assertStringIncludes(nullBranch, 'logEvent("luis_legal_flow_completion_rejected"');
+  // Only the leadId (an internal id, not a customer-supplied value), the
+  // intake type literal, and the structural failure code are logged - the
+  // logEvent call passes no other field from args.rawFlowResponse.
+  const logCallStart = nullBranch.indexOf('logEvent("luis_legal_flow_completion_rejected"');
+  const logCallEnd = nullBranch.indexOf("});", logCallStart);
+  const logCall = nullBranch.slice(logCallStart, logCallEnd);
+  assert(!logCall.includes("rawFlowResponse,"), "must never spread/pass the raw Flow response directly into the log call");
+  assert(!logCall.includes("full_name"));
+  assert(!logCall.includes("description"));
 });
 
 Deno.test("AUTO_ACCIDENT completion still rejects a genuinely invalid accident_date", () => {

@@ -116,6 +116,7 @@ import {
   LUIS_BENEFITS_MARKETING_COPY_VERSION,
   type LuisBenefitKey,
   type LuisLegalState,
+  classifyAccidentValidationFailure,
   classifyLuisFlowCompletion,
   diagnoseLuisBenefitFlowCompletionFailure,
   diagnoseLuisIntentRoute,
@@ -890,7 +891,25 @@ async function buildLuisLegalFlowCompletionResult(args: {
     return null;
   }
   const completion = parseLuisLegalFlowCompletion(args.rawFlowResponse);
-  if (!completion) return null;
+  if (!completion) {
+    // Sanitized diagnostic (2026-09 P0) - real AUTO_ACCIDENT completions
+    // were unconditionally rejected in production (missing
+    // participant_role, a field the published Flow never sends), same
+    // pattern as diagnoseLuisBenefitFlowCompletionFailure above. Only
+    // meaningful for AUTO_ACCIDENT-shaped payloads today; returns null for
+    // anything else, which logEvent below simply omits. Never logs the
+    // raw name/description/date/consent values, only structural presence
+    // and format category.
+    const accidentFailureCode = classifyAccidentValidationFailure(args.rawFlowResponse);
+    if (accidentFailureCode) {
+      logEvent("luis_legal_flow_completion_rejected", {
+        leadId: args.leadId,
+        intake_type: "AUTO_ACCIDENT",
+        failure_code: accidentFailureCode,
+      });
+    }
+    return null;
+  }
   const leadUpdate = await args.supabase.from("leads").update({
     full_name: completion.full_name,
     first_name: firstNameFromFlowName(completion.full_name),

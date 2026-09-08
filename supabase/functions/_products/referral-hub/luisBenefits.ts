@@ -42,7 +42,16 @@ export type LuisLegalFlowCompletion =
     intake_type: "AUTO_ACCIDENT";
     full_name: string;
     accident_date: string;
-    participant_role: "DRIVER" | "PASSENGER" | "OTHER";
+    // P0 (2026-09): the currently published Flow's ACCIDENT_DETAILS/
+    // LEGAL_CONSENT screens no longer send participant_role OR its former
+    // alias participation at all (confirmed via a real completion payload's
+    // key set — reply_outbox.payload->'flow_response' — neither key is
+    // present). Requiring it outright made every real AUTO_ACCIDENT
+    // completion fail validation unconditionally, before
+    // referral_service_requests/referral_assignments were ever reached.
+    // Nullable here, still parsed opportunistically below for forward
+    // compatibility if a future Flow version reintroduces it.
+    participant_role: "DRIVER" | "PASSENGER" | "OTHER" | null;
     received_medical_attention: "YES" | "NO";
     medical_provider: string | null;
     description: string;
@@ -867,6 +876,69 @@ function normalizeFlowDate(raw: string): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
 }
 
+export type AccidentValidationFailureCode =
+  | "ACCIDENT_MISSING_SERVICE_KEY"
+  | "ACCIDENT_MISSING_INTAKE_TYPE"
+  | "ACCIDENT_MISSING_FULL_NAME"
+  | "ACCIDENT_MISSING_DESCRIPTION"
+  | "ACCIDENT_INVALID_DATE"
+  | "ACCIDENT_INVALID_MEDICAL_ATTENTION"
+  | "ACCIDENT_INVALID_POLICE_REPORT"
+  | "ACCIDENT_MISSING_SHARING_CONSENT"
+  | "ACCIDENT_INVALID_SHARING_CONSENT"
+  | "ACCIDENT_CONSENT_VERSION_MISMATCH"
+  | "ACCIDENT_SCHEMA_MISMATCH"
+  | "ACCIDENT_UNKNOWN_VALIDATION_FAILURE";
+
+// P0 diagnostic (2026-09): safe, structure-only classification of why an
+// AUTO_ACCIDENT completion did or would fail validation - never inspects a
+// key's actual value, only its presence and format CATEGORY (e.g. does
+// accident_date parse as a real date, not what date). Callable on every
+// AUTO_ACCIDENT-shaped completion (success or failure) so a future Flow
+// schema drift is caught from safe logs instead of requiring another
+// reply_outbox forensic query. police_report/sharing_consent/
+// consent_version are checked here for visibility even though the parser
+// above does not currently gate on them (the real Flow's LEGAL_CONSENT
+// screen sends them, but AUTO_ACCIDENT's completion contract doesn't
+// persist them yet - out of scope for this fix, see parseLuisLegalFlow
+// Completion's AUTO_ACCIDENT branch).
+export function classifyAccidentValidationFailure(raw: unknown): AccidentValidationFailureCode | null {
+  const value = record(raw);
+  if (!value) return "ACCIDENT_SCHEMA_MISMATCH";
+  // Gate everything below to payloads that are accident-shaped or
+  // ambiguous (intake_type missing entirely). A payload that explicitly
+  // declares a different intake_type (IMMIGRATION/DUI_CRIMINAL/...) has
+  // its own validation path and must never be misclassified as an
+  // accident-specific failure just because it lacks accident-only fields.
+  const hasIntakeType = Object.prototype.hasOwnProperty.call(value, "intake_type");
+  const intakeType = hasIntakeType ? text(value.intake_type, 32) : "";
+  if (hasIntakeType && intakeType !== "AUTO_ACCIDENT") return null;
+  if (!Object.prototype.hasOwnProperty.call(value, "service_key")) return "ACCIDENT_MISSING_SERVICE_KEY";
+  if (!hasIntakeType) return "ACCIDENT_MISSING_INTAKE_TYPE";
+  if (!text(value.full_name, 120)) return "ACCIDENT_MISSING_FULL_NAME";
+  if (!text(value.description, 600)) return "ACCIDENT_MISSING_DESCRIPTION";
+  if (!normalizeFlowDate(text(value.accident_date, 32))) return "ACCIDENT_INVALID_DATE";
+  if (!oneOf(value.received_medical_attention, ["YES", "NO"] as const)) return "ACCIDENT_INVALID_MEDICAL_ATTENTION";
+  if (
+    Object.prototype.hasOwnProperty.call(value, "police_report") &&
+    !oneOf(value.police_report, ["YES", "NO"] as const)
+  ) {
+    return "ACCIDENT_INVALID_POLICE_REPORT";
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "sharing_consent")) {
+    if (!text(value.sharing_consent, 40)) return "ACCIDENT_MISSING_SHARING_CONSENT";
+    if (!oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const)) return "ACCIDENT_INVALID_SHARING_CONSENT";
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "consent_version") &&
+    typeof value.consent_version !== "string" &&
+    value.consent_version !== null && value.consent_version !== undefined
+  ) {
+    return "ACCIDENT_CONSENT_VERSION_MISMATCH";
+  }
+  return null;
+}
+
 export function parseLuisLegalFlowCompletion(
   raw: unknown,
 ): LuisLegalFlowCompletion | null {
@@ -897,8 +969,14 @@ export function parseLuisLegalFlowCompletion(
   }
   if (intakeType === "AUTO_ACCIDENT") {
     const accidentDate = normalizeFlowDate(text(value.accident_date, 32));
-    // Current draft payloads use `participation`; accept that approved contract
-    // while canonicalizing the stored intake to `participant_role`.
+    // P0 (2026-09): the currently published Flow's ACCIDENT_DETAILS/
+    // LEGAL_CONSENT screens never send participant_role or its former
+    // alias participation at all - confirmed against a real completion
+    // payload's key set (reply_outbox.payload->'flow_response'), neither
+    // key present. Requiring it outright made every real AUTO_ACCIDENT
+    // completion fail unconditionally. Still parsed opportunistically (a
+    // future Flow version may reintroduce it), but never gates validity -
+    // see the LuisLegalFlowCompletion doc comment.
     const participantRole = oneOf(
       value.participant_role ?? value.participation,
       ["DRIVER", "PASSENGER", "OTHER"] as const,
@@ -907,7 +985,7 @@ export function parseLuisLegalFlowCompletion(
     const medicalProvider = value.medical_provider === null || value.medical_provider === undefined
       ? null
       : text(value.medical_provider, 160) || null;
-    return accidentDate && participantRole && receivedMedicalAttention
+    return accidentDate && receivedMedicalAttention
       ? {
         intake_type: "AUTO_ACCIDENT",
         full_name: fullName,
