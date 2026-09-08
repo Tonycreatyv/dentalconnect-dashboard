@@ -53,6 +53,7 @@ function ProductRoutes() {
     <Route path="/" element={<RequireAuth><ReferralOrganizationProvider><BoltShell /></ReferralOrganizationProvider></RequireAuth>}>
       <Route index element={<InicioScreen />} />
       <Route path="servicios" element={<AdminServicesScreen />} />
+      <Route path="beneficios" element={<CouponRequestsScreen />} />
       <Route path="partners" element={<AdminPartnersScreen />} />
       <Route path="clientes" element={<ClientesScreen />} />
       <Route path="clientes/:leadId" element={<ContactDetailScreen />} />
@@ -117,7 +118,9 @@ function ProductRoutes() {
       <Route path="attention" element={<Navigate to="/work" replace />} />
       <Route path="opportunities" element={<Navigate to="/work?tab=seguimiento" replace />} />
       <Route path="assignments" element={<Navigate to="/work?tab=seguimiento" replace />} />
-      <Route path="partners" element={<Navigate to="/campanas?view=negocios" replace />} />
+      {/* "partners" now has a real workspace (registered above) — this
+          legacy redirect shim is intentionally removed so it can never
+          shadow AdminPartnersScreen. */}
       <Route path="partner-contacts" element={<Navigate to="/campanas?view=negocios" replace />} />
       <Route path="supermarkets" element={<Navigate to="/campanas?view=negocios" replace />} />
     </Route>

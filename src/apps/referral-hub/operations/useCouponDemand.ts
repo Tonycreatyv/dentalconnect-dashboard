@@ -18,7 +18,7 @@ type RawClaimRow = {
   requested_at: string;
   lead_id: string;
   leads: { full_name: string | null; channel_user_id: string | null } | null;
-  referral_coupon_campaigns: { campaign_key: string; display_name: string | null } | null;
+  referral_coupon_campaigns: { campaign_key: string; display_name: string | null; business_id: string | null } | null;
   referral_benefit_campaign_locations: { location_key: string; display_name: string | null } | null;
 };
 
@@ -40,7 +40,7 @@ export function useCouponDemand(period: PeriodId, customRange?: { start: string;
     const result = await supabase
       .from("referral_benefit_claims")
       .select(
-        "id,claim_code,status,postal_code,requested_at,lead_id,leads(full_name,channel_user_id),referral_coupon_campaigns(campaign_key,display_name),referral_benefit_campaign_locations(location_key,display_name)",
+        "id,claim_code,status,postal_code,requested_at,lead_id,leads(full_name,channel_user_id),referral_coupon_campaigns(campaign_key,display_name,business_id),referral_benefit_campaign_locations(location_key,display_name)",
       )
       .eq("organization_id", resolvedOrgId)
       .gte("requested_at", range.start.toISOString())
@@ -52,10 +52,17 @@ export function useCouponDemand(period: PeriodId, customRange?: { start: string;
       setLoading(false);
       return;
     }
-    const rows: CouponClaimRow[] = ((result.data ?? []) as unknown as RawClaimRow[]).map((row) => {
+    const claimRows = (result.data ?? []) as unknown as RawClaimRow[];
+    const businessIds = [...new Set(claimRows.map((row) => row.referral_coupon_campaigns?.business_id).filter((id): id is string => Boolean(id)))];
+    const businessResult = businessIds.length
+      ? await supabase.from("referral_partners").select("id,name").in("id", businessIds)
+      : { data: [] as Array<{ id: string; name: string }> };
+    const businessNameById = new Map(((businessResult.data ?? []) as Array<{ id: string; name: string }>).map((b) => [b.id, b.name]));
+    const rows: CouponClaimRow[] = claimRows.map((row) => {
       const campaignKey = row.referral_coupon_campaigns?.campaign_key ?? "desconocido";
       const isSupermarket = campaignKey === SUPERMARKET_CAMPAIGN_KEY;
       const locationLabel = row.referral_benefit_campaign_locations?.display_name;
+      const businessId = row.referral_coupon_campaigns?.business_id;
       return {
         id: row.id,
         claim_code: row.claim_code,
@@ -69,6 +76,7 @@ export function useCouponDemand(period: PeriodId, customRange?: { start: string;
         campaign_label: row.referral_coupon_campaigns?.display_name || "Beneficio",
         location_key: isSupermarket ? (row.referral_benefit_campaign_locations?.location_key || SIN_LOCALIDAD_KEY) : "",
         location_label: isSupermarket ? (locationLabel || "Sin localidad") : "",
+        business_name: businessId ? businessNameById.get(businessId) ?? null : null,
       };
     });
     setRawClaims(rows);

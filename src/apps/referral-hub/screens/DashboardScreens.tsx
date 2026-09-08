@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, MapPin, MessageCircle, Search, Tag, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, MapPin, MessageCircle, Search, Tag, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
@@ -6,19 +6,20 @@ import Avatar from "../ui/Avatar";
 import PageHeader from "../ui/PageHeader";
 import FilterTabs from "../ui/FilterTabs";
 import SegmentedControl from "../ui/SegmentedControl";
+import DropdownFilter from "../ui/DropdownFilter";
 import EmptyState from "../ui/EmptyState";
 import { SkeletonRows } from "../ui/Skeleton";
 import StatCard from "../ui/StatCard";
 import StatusBadge, { type StatusTone } from "../ui/StatusBadge";
-import TrendChart from "../ui/TrendChart";
 import { PERIOD_LABELS, PERIOD_TABS, type PeriodId } from "../operations/period";
 import { CAMPAIGN_KEY_BY_SERVICE, SERVICE_BY_CAMPAIGN_KEY } from "../operations/luisCatalog";
 import { filterCouponClaims, SIN_LOCALIDAD_KEY, useCouponDemand } from "../operations/useCouponDemand";
 import { useServiceFollowUps } from "../operations/useServiceFollowUps";
-import { useQrCampaigns } from "../operations/useQrCampaigns";
+import { useServiceRequestsList, useCanonicalServiceDestinations } from "../operations/useServiceRouting";
 import { LEAD_STAGE_LABELS, useLeadsPipeline, type LeadStage } from "../operations/useLeadsPipeline";
 import { useClientes } from "../operations/useClientes";
 import { legalTopicLabel, useContactDetail } from "../operations/useContactDetail";
+import { LEGAL_INTAKE_SERVICE_ID } from "../operations/legalIntake";
 import { relativeAge } from "../../../referral/status";
 import { immigrationInboxTotals, immigrationReadinessLabel, immigrationReadinessTone, immigrationTopicLabel } from "../operations/immigrationInbox";
 import { useImmigrationInbox } from "../operations/useImmigrationInbox";
@@ -64,13 +65,20 @@ export function InicioScreen() {
   const [period, setPeriod] = useState<PeriodId>("today");
   const demand = useCouponDemand(period);
   const followUps = useServiceFollowUps();
-  const qr = useQrCampaigns();
+  const services = useServiceRequestsList(period);
+  // "Necesitan atención" folds new requests, follow-ups, and unassigned
+  // requests into one operational list — exactly items 1/2/3 of the brief
+  // ("new service requests, follow-ups, unassigned requests"). A request is
+  // "operational exception" material the moment it's anything but a closed
+  // Aprobado/No calificó outcome, so that's the single cut used here.
+  const needsAttention = useMemo(
+    () => services.rows.filter((row) => row.statusLabel === "Nuevo" || row.statusLabel === "Seguimiento"),
+    [services.rows],
+  );
   const claims = useMemo(() => demand.filterClaims(demand.rawClaims, "", ""), [demand]);
   const totalRequests = claims.length;
   const uniqueClients = useMemo(() => new Set(claims.map((c) => c.lead_id)).size, [claims]);
   const ranking = useMemo(() => demand.locationRanking(claims), [claims, demand]);
-  const topLocation = ranking.find((row) => row.key !== SIN_LOCALIDAD_KEY) ?? null;
-  const trendPoints = useMemo(() => demand.trend(claims), [claims, demand]);
   const serviceRanking = useMemo(() => {
     const groups = new Map<string, { label: string; requests: number; serviceId: string }>();
     for (const claim of claims) {
@@ -96,9 +104,8 @@ export function InicioScreen() {
     }));
     return [...fromClaims, ...fromFollowUps].sort((a, b) => +new Date(b.at) - +new Date(a.at)).slice(0, 5);
   }, [claims, followUps.requests]);
-  const topCampaigns = useMemo(() => qr.campaigns.filter((c) => c.active).sort((a, b) => b.requestsCount - a.requestsCount).slice(0, 6), [qr.campaigns]);
-  const loading = demand.loading || followUps.loading;
-  const failure = demand.error || followUps.error;
+  const loading = demand.loading || followUps.loading || services.loading;
+  const failure = demand.error || followUps.error || services.error;
 
   return (
     <div className="hub-page">
@@ -113,12 +120,11 @@ export function InicioScreen() {
       ) : (
         <>
           <div className="hub-stat-grid">
-            <StatCard label="Cupones pedidos" value={totalRequests} to={`/negocios/solicitudes?period=${period}`} />
             <StatCard label="Clientes" value={uniqueClients} to="/clientes" />
-            <StatCard label="Por contactar" value={followUps.requests.length} to="/clientes?stage=por_contactar" />
-            <StatCard label="Localidad principal" value={topLocation?.label ?? "Sin datos"} sub={topLocation ? `${topLocation.requests} ${topLocation.requests === 1 ? "pedido" : "pedidos"}` : "Sin pedidos en este período"} to={topLocation ? `/negocios/solicitudes?period=${period}&location=${topLocation.key}` : "/negocios"} />
+            <StatCard label="Cupones" value={totalRequests} to={`/beneficios?period=${period}`} />
+            <StatCard label="Servicios" value={services.rows.length} to={`/servicios?period=${period}`} />
+            <StatCard label="Necesitan atención" value={needsAttention.length} to={`/servicios?period=${period}`} />
           </div>
-          <TrendChart points={trendPoints} />
           {serviceRanking.length > 0 ? (
             <section className="hub-section">
               <div className="hub-section-head"><h2>Solicitudes por servicio</h2></div>
@@ -133,15 +139,16 @@ export function InicioScreen() {
             </section>
           ) : null}
           <section className="hub-section">
-            <div className="hub-section-head"><h2>Por contactar</h2><Link className="hub-section-link" to="/clientes?stage=por_contactar">Ver todos</Link></div>
-            {followUps.requests.length === 0 ? (
-              <EmptyState icon={CheckCircle2} title="Sin pendientes" description="No hay casos de inmigración o accidente esperando contacto." />
+            <div className="hub-section-head"><h2>Necesitan atención</h2><Link className="hub-section-link" to="/servicios">Ver todos</Link></div>
+            {needsAttention.length === 0 ? (
+              <EmptyState icon={CheckCircle2} title="Sin pendientes" description="No hay servicios nuevos o en seguimiento esperando atención." />
             ) : (
               <div className="hub-list">
-                {followUps.requests.slice(0, 5).map((item) => (
-                  <Link key={item.id} className="hub-list-row" to={`/clientes/${item.lead_id}`}>
-                    <Avatar name={item.lead_name} seed={item.lead_id} />
-                    <div><strong>{item.lead_name}</strong><small>{item.service_label} · {relativeAge(item.created_at)}</small></div>
+                {needsAttention.slice(0, 5).map((row) => (
+                  <Link key={row.id} className="hub-list-row" to={`/clientes/${row.clienteId}`}>
+                    <Avatar name={row.clienteName} seed={row.clienteId} />
+                    <div><strong>{row.clienteName}</strong><small>{row.servicioLabel} · {row.partnerName ?? "Sin partner activo"} · {relativeAge(row.receivedAt)}</small></div>
+                    <StatusBadge tone={row.statusLabel === "Nuevo" ? "neutral" : "warning"} label={row.statusLabel} />
                   </Link>
                 ))}
               </div>
@@ -175,25 +182,6 @@ export function InicioScreen() {
               </div>
             </section>
           ) : null}
-          {topCampaigns.length > 0 ? (
-            <section className="hub-section">
-              <div className="hub-section-head"><h2>Tus campañas</h2><Link className="hub-section-link" to="/campanas">Ver todas</Link></div>
-              <div className="hub-carousel">
-                {topCampaigns.map((campaign) => (
-                  <Link key={campaign.id} className="hub-carousel-card" to={`/campanas/campana/${campaign.id}`}>
-                    <div className="hub-carousel-card-head">
-                      <span className="hub-carousel-card-icon"><Tag size={18} /></span>
-                      <div><strong>{campaign.businessLabel || "Campaña"}</strong><small>Activa</small></div>
-                    </div>
-                    <div className="hub-carousel-card-foot">
-                      <div><span className="hub-carousel-card-value">{campaign.requestsCount}</span><small>SOLICITUDES</small></div>
-                      <span className="hub-carousel-card-arrow"><ArrowRight size={16} /></span>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </>
       )}
     </div>
@@ -203,15 +191,19 @@ export function InicioScreen() {
 const REQUEST_STATUS_LABEL: Record<string, string> = { REQUESTED: "Solicitado", ISSUED: "Enviado", REDEEMED: "Usado" };
 const REQUEST_STATUS_TONE: Record<string, StatusTone> = { REQUESTED: "warning", ISSUED: "success", REDEEMED: "neutral" };
 
-// Real drill-down for Inicio's "Cupones pedidos" card and Negocios/Servicios
-// rows — never routes to the unrelated generic Campañas screen. Every row
-// here comes from the same useCouponDemand claims the Inicio metrics are
-// computed from, so the count and the list can never disagree.
+// Beneficios workspace: coupon/benefit demand only — never professional
+// referrals. Every row here comes from the same useCouponDemand claims
+// Inicio's metrics are computed from, so counts and list can never disagree.
+// Reached both from the primary "Beneficios" nav item and from legacy
+// Negocios/Inicio drill-down links (?service=&location=&period=), which
+// keep working unchanged alongside the new Negocio/Localidad/Período
+// dropdown filters.
 export function CouponRequestsScreen() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const periodParam = (params.get("period") as PeriodId) || "today";
   const serviceFilter = params.get("service") || "";
   const locationFilter = params.get("location") || "";
+  const businessFilter = params.get("business") || "";
   const demand = useCouponDemand(periodParam);
   // Resolve the service filter to the exact campaign_key it maps to (the
   // same canonical mapping realDataSource.ts uses to compute the business
@@ -220,18 +212,33 @@ export function CouponRequestsScreen() {
   // silently drift from the card's real grouping as campaign keys grow.
   const campaignKeyFilter = serviceFilter ? CAMPAIGN_KEY_BY_SERVICE[serviceFilter as keyof typeof CAMPAIGN_KEY_BY_SERVICE] ?? "" : "";
   const claims = useMemo(
-    () => filterCouponClaims(demand.rawClaims, locationFilter, campaignKeyFilter),
-    [demand.rawClaims, locationFilter, campaignKeyFilter],
+    () => filterCouponClaims(demand.rawClaims, locationFilter, campaignKeyFilter, businessFilter),
+    [demand.rawClaims, locationFilter, campaignKeyFilter, businessFilter],
   );
+  const businessOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const claim of demand.rawClaims) if (claim.business_name) seen.add(claim.business_name);
+    return [...seen].sort().map((name) => ({ value: name, label: name }));
+  }, [demand.rawClaims]);
+  const locationOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const claim of demand.rawClaims) if (claim.location_key && claim.location_key !== SIN_LOCALIDAD_KEY) seen.set(claim.location_key, claim.location_label || claim.location_key);
+    return [...seen.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [demand.rawClaims]);
+  const setParam = (key: string, value: string) => setParams((current) => { const next = new URLSearchParams(current); if (value) next.set(key, value); else next.delete(key); return next; });
   return (
     <div className="hub-page">
-      <Link className="hub-back" to="/"><ArrowLeft />Volver</Link>
       <PageHeader
-        eyebrow="Negocios"
-        title="Cupones pedidos"
+        eyebrow="Beneficios"
+        title="Beneficios"
         subtitle={PERIOD_LABELS[periodParam]}
         meta={<span className="hub-page-count">{claims.length} {claims.length === 1 ? "pedido" : "pedidos"}</span>}
       />
+      <div className="hub-filter-row">
+        <DropdownFilter label="Negocio" value={businessFilter} onChange={(value) => setParam("business", value)} options={businessOptions} />
+        <DropdownFilter label="Localidad" value={locationFilter} onChange={(value) => setParam("location", value)} options={locationOptions} />
+        <DropdownFilter label="Período" value={periodParam} onChange={(value) => setParam("period", value)} allLabel="Hoy" options={PERIOD_TABS.filter((tab) => tab.id !== "today" && tab.id !== "custom").map((tab) => ({ value: tab.id, label: tab.label }))} />
+      </div>
       {demand.loading ? (
         <SkeletonRows count={5} />
       ) : demand.error ? (
@@ -241,12 +248,12 @@ export function CouponRequestsScreen() {
       ) : (
         <div className="hub-list">
           {claims.map((claim) => (
-            <Link key={claim.id} className="hub-list-row" to={`/clientes/${claim.lead_id}`} state={{ from: `/negocios/solicitudes?${params.toString()}` }}>
+            <Link key={claim.id} className="hub-list-row" to={`/clientes/${claim.lead_id}`} state={{ from: `/beneficios?${params.toString()}` }}>
               <Avatar name={claim.lead_name} seed={claim.lead_id} />
               <div>
                 <strong>{claim.lead_name}</strong>
                 <small>
-                  {claim.campaign_label} · ZIP {claim.postal_code}
+                  {claim.campaign_label}{claim.business_name ? ` · ${claim.business_name}` : ""} · ZIP {claim.postal_code}
                   {claim.location_label ? ` · ${claim.location_label}` : claim.location_key === SIN_LOCALIDAD_KEY ? " · Ubicación pendiente" : ""}
                   {" · "}{formatDateTime(claim.requested_at)}
                 </small>
@@ -404,6 +411,7 @@ export function ContactDetailScreen() {
   const detail = useContactDetail(leadId);
   const pipeline = useLeadsPipeline();
   const immigrationInbox = useImmigrationInbox();
+  const canonicalDestinations = useCanonicalServiceDestinations();
   const backTo = (location.state as { from?: string } | null)?.from || "/clientes";
 
   if (detail.loading) return <div className="hub-page"><Link className="hub-back" to={backTo}><ArrowLeft />Volver</Link><EmptyState icon={Users} title="Cargando contacto…" /></div>;
@@ -417,6 +425,20 @@ export function ContactDetailScreen() {
   // requirement extended to the detail screen).
   const pipelineLead = pipeline.leads.find((l) => l.id === lead.id);
   const immigrationRequests = immigrationInbox.requests.filter((request) => request.leadId === lead.id);
+  // Canonical destination for the "Negocio / aliado" fact below — never a
+  // hardcoded "Sin asignar". Priority: (1) this lead's own per-request
+  // assignment for the matching service, the most specific truth; (2) the
+  // immigration inbox's own resolved assignment, for IMMIGRATION intake;
+  // (3) the active static routing rule for that service_id (e.g.
+  // Accidente de auto → Clínica Pastor), the same canonical source
+  // AdminPartnersScreen uses. Only "Sin aliado disponible" if none apply.
+  const legalIntakeServiceId = detail.legalIntake ? LEGAL_INTAKE_SERVICE_ID[detail.legalIntake.intakeType] : null;
+  const legalIntakeDestination = legalIntakeServiceId
+    ? detail.serviceRequests.find((request) => request.service_id === legalIntakeServiceId)?.businessName
+      ?? (detail.legalIntake?.intakeType === "IMMIGRATION" ? immigrationRequests[0]?.assignment?.partnerName : null)
+      ?? canonicalDestinations.destinationByService.get(legalIntakeServiceId)
+      ?? null
+    : null;
 
   return (
     <div className="hub-page">
@@ -481,7 +503,7 @@ export function ContactDetailScreen() {
               {legalTopicLabel(detail.legalIntake) ? <div><dt>Tipo de ayuda</dt><dd>{legalTopicLabel(detail.legalIntake)}</dd></div> : null}
               {detail.legalIntake.postalCode ? <div><dt>ZIP</dt><dd>{detail.legalIntake.postalCode}</dd></div> : null}
               <div><dt>Enviado</dt><dd>{formatDateTime(detail.legalIntake.completedAt)}</dd></div>
-              <div><dt>Negocio / aliado</dt><dd>Sin asignar</dd></div>
+              <div><dt>Negocio / aliado</dt><dd>{legalIntakeDestination ? `Asignado a: ${legalIntakeDestination}` : "Sin aliado disponible"}</dd></div>
             </dl>
             <div><strong>Qué contó el cliente</strong><br /><small style={{ whiteSpace: "pre-wrap" }}>{detail.legalIntake.description}</small></div>
           </div>

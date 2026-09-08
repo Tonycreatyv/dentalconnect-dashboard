@@ -21,6 +21,7 @@ function claim(overrides: Partial<CouponClaimRow>): CouponClaimRow {
     campaign_label: "20% de descuento en servicios médicos",
     location_key: "",
     location_label: "",
+    business_name: null,
     ...overrides,
   };
 }
@@ -83,4 +84,10 @@ Deno.test("no filter at all returns every claim, unfiltered", () => {
 Deno.test("combining a campaign filter with a location filter that belongs to a different campaign returns nothing (no accidental OR semantics)", () => {
   const result = filterCouponClaims(allClaims, "el_sol_30071", "luis_benefit_medical_20");
   assertEquals(result, []);
+});
+
+Deno.test("Beneficios workspace Negocio filter: filtering by an exact business_name returns only that business's claims", () => {
+  const withBusiness = allClaims.map((c) => (c.id === "s1" ? { ...c, business_name: "El Sol Super Market" } : c));
+  const result = filterCouponClaims(withBusiness, "", "", "El Sol Super Market");
+  assertEquals(result.map((c) => c.id), ["s1"]);
 });

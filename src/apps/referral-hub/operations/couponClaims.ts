@@ -20,14 +20,16 @@ export type CouponClaimRow = {
   campaign_label: string;
   location_key: string;
   location_label: string;
+  business_name: string | null;
 };
 
 // An empty string means "no filter on that dimension", matching how URL
 // search params behave when the param is absent.
-export function filterCouponClaims(claims: CouponClaimRow[], locationKey: string, campaignKey: string): CouponClaimRow[] {
+export function filterCouponClaims(claims: CouponClaimRow[], locationKey: string, campaignKey: string, businessName = ""): CouponClaimRow[] {
   return claims.filter((claim) => {
     if (campaignKey && claim.campaign_key !== campaignKey) return false;
     if (locationKey && claim.location_key !== locationKey) return false;
+    if (businessName && claim.business_name !== businessName) return false;
     return true;
   });
 }

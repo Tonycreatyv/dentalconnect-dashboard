@@ -1,21 +1,24 @@
-import { Building2, Handshake, Home, Menu, MessageCircle, Settings, Stethoscope, Users, X } from "lucide-react";
+import { Handshake, Home, Menu, MessageCircle, Settings, Stethoscope, Ticket, Users, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
 import AccountMenu from "./AccountMenu";
 import ConexxionWordmark from "./ConexxionWordmark";
 
-// Points at the new business-centered /negocios tree (see
-// src/apps/referral-hub/negocios/). The old /campanas* tree stays fully
-// live and reachable by direct URL — nothing was deleted or redirected —
-// it's simply no longer linked from primary nav.
+// Six clear operational workspaces: Inicio (overview), Servicios
+// (professional/referral requests), Beneficios (coupon/benefit demand),
+// Partners (routing + partner users), Clientes (unified profile), Mensajes.
+// Negocios/Campañas (the older business-catalog tree) stays fully live and
+// reachable by direct URL — nothing was deleted — it's simply no longer a
+// primary destination now that Servicios/Beneficios/Partners exist as their
+// own clean workspaces instead of tabs inside one mixed "Negocios" hub.
 const primaryNav = [
   { to: "/", label: "Inicio", icon: Home, end: true },
   { to: "/servicios", label: "Servicios", icon: Stethoscope, end: false },
+  { to: "/beneficios", label: "Beneficios", icon: Ticket, end: false },
   { to: "/partners", label: "Partners", icon: Handshake, end: false },
-  { to: "/negocios", label: "Negocios", icon: Building2, end: false },
-  { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
   { to: "/clientes", label: "Clientes", icon: Users, end: false },
+  { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
 ] as const;
 
 // Rendered in the desktop sidebar and the mobile slide-out menu (the same

@@ -1002,6 +1002,11 @@ a.hub-list-row:hover,button.hub-list-row:hover{border-color:var(--hub-accent)}
 .hub-search svg{width:16px;color:var(--hub-muted);flex:none}
 .hub-search input{flex:1;min-width:0;border:0;background:transparent;font-size:.82rem;color:var(--hub-text);outline:none}
 
+.hub-filter-row{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.85rem}
+.hub-dropdown-filter{display:flex;flex-direction:column;gap:.2rem;min-width:140px;flex:1}
+.hub-dropdown-filter-label{color:var(--hub-muted);font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.02em}
+.hub-dropdown-filter select{min-height:44px;padding:0 .7rem;border:1px solid var(--hub-border);border-radius:10px;background:var(--hub-surface);color:var(--hub-text);font-size:.82rem}
+
 .hub-facts{border-block:1px solid var(--hub-border)}
 .hub-facts>div{display:flex;justify-content:space-between;gap:1rem;padding:.75rem 0;border-bottom:1px solid var(--hub-border)}
 .hub-facts>div:last-child{border-bottom:0}
