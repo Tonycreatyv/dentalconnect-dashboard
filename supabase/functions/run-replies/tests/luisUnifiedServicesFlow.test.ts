@@ -51,7 +51,7 @@ function completePayload(id: string) {
   return footer["on-click-action"].payload;
 }
 
-Deno.test("unified Luis services Flow is static and branches from the approved five-service menu", () => {
+Deno.test("unified Luis services Flow is static and adds Mercadito as a completion-only top-level option", () => {
   assertEquals(flow.version, "7.3");
   assertEquals(flow.screens.map((entry) => entry.id), [
     "SERVICE_SELECT",
@@ -77,15 +77,19 @@ Deno.test("unified Luis services Flow is static and branches from the approved f
   assertEquals(menu.type, "NavigationList");
   assertEquals(menu["list-items"].map((item: any) => item.id), [
     "BENEFITS",
+    "MERCADITO",
     "IMMIGRATION",
     "AUTO_ACCIDENT",
     "DUI_CRIMINAL",
     "HANDOFF",
   ]);
-  for (const item of menu["list-items"]) {
+  for (const item of menu["list-items"].filter((item: any) => item.id !== "MERCADITO")) {
     assertEquals(item["on-click-action"].name, "navigate");
     assertEquals(item["on-click-action"].payload, {});
   }
+  const mercadito = menu["list-items"].find((item: any) => item.id === "MERCADITO");
+  assertEquals(mercadito["main-content"].title, "🛒 Mercadito Online");
+  assertEquals(mercadito["on-click-action"], { name: "complete", payload: { service_key: "MERCADITO" } });
   assertEquals(source.includes("data_exchange"), false);
   assertEquals(source.includes("data_api_version"), false);
   assertEquals(source.includes("endpoint_uri"), false);
@@ -192,6 +196,10 @@ Deno.test("unified Flow preserves benefits and legal flat completion contracts w
     "description",
   ]);
   assertEquals(completePayload("HANDOFF_CONFIRM"), { service_key: "HANDOFF" });
+  assertEquals(
+    screen("SERVICE_SELECT").layout.children[0]["list-items"].find((item: any) => item.id === "MERCADITO")["on-click-action"].payload,
+    { service_key: "MERCADITO" },
+  );
   assertEquals(completePayload("BENEFIT_DETAILS").service_key, "BENEFITS");
   assertEquals(
     completePayload("IMMIGRATION_CONSENT").intake_type,

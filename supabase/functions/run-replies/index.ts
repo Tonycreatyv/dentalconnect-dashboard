@@ -105,6 +105,7 @@ import {
   buildWhatsAppFlowCtaMessage,
   type InteractiveButton,
   sendViaMetaAdapter,
+  type WhatsAppCtaUrlSpec,
   type WhatsAppFlowCtaSpec,
   type WhatsAppInteractiveListSpec,
 } from "../_shared/metaMessageAdapter.ts";
@@ -202,6 +203,7 @@ interface GenerateReplyResult {
   debugNote: string;
   bookingSuccessAuthorized?: boolean;
   flowCta?: WhatsAppFlowCtaSpec;
+  ctaUrl?: WhatsAppCtaUrlSpec;
   interactiveButtons?: InteractiveButton[];
   interactiveList?: WhatsAppInteractiveListSpec;
   outboundPrelude?: Array<{ text?: string; imageUrl?: string }>;
@@ -958,6 +960,18 @@ function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "LEGAL" | "UNKNOWN")
     reply: "No pudimos procesar el formulario. Por favor abre el formulario nuevamente e inténtalo otra vez.",
     statePatch: {},
     debugNote: "referral_hub:unknown_flow_completion_contract",
+  };
+}
+
+// Mercadito owns shopping and checkout. This result creates no order, claim,
+// service request, referral assignment, or partner routing record. The normal
+// message/outbox bookkeeping of the existing WhatsApp transport remains intact.
+function luisMercaditoFlowCompletionResult(): GenerateReplyResult {
+  return {
+    reply: "Compras listas para vos 👇",
+    statePatch: { stage: "DISCOVERY", lastIntent: "luis_mercadito", nextExpected: null },
+    ctaUrl: { displayText: "Ver Mercadito", url: "https://compras.creatyv.io" },
+    debugNote: "referral_hub:luis_mercadito_flow_external_cta",
   };
 }
 
@@ -19347,6 +19361,10 @@ async function processSingleJob(
           debugNote: "referral_hub:luis_unified_flow_handoff_requested",
         })
         : invalidLuisFlowCompletionResult("UNKNOWN");
+    } else if (completionKind === "MERCADITO") {
+      earlyGeneratedOverride = effectiveOrganizationId === "luis-gabriel-referral-hub"
+        ? luisMercaditoFlowCompletionResult()
+        : invalidLuisFlowCompletionResult("UNKNOWN");
     } else {
       earlyGeneratedOverride = invalidLuisFlowCompletionResult("UNKNOWN");
     }
@@ -19776,6 +19794,7 @@ async function processSingleJob(
     buttons: interactiveButtons.length > 0 ? interactiveButtons : undefined,
     interactiveList: channel === "whatsapp" ? generatedList : undefined,
     flowCta: flowCtaPayload,
+    ctaUrl: channel === "whatsapp" ? generated.ctaUrl : undefined,
     pageAccessToken,
     whatsappAccessToken,
     whatsappPhoneNumberId,

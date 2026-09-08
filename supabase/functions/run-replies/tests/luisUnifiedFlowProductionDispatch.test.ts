@@ -22,7 +22,8 @@ function sliceFunction(name: string) {
   assert(start >= 0, `missing function ${name}`);
   const end = workerSource.indexOf("\nfunction ", start + 1);
   const endAsync = workerSource.indexOf("\nasync function ", start + 1);
-  const candidates = [end, endAsync].filter((n) => n >= 0);
+  const endExportAsync = workerSource.indexOf("\nexport async function ", start + 1);
+  const candidates = [end, endAsync, endExportAsync].filter((n) => n >= 0);
   return workerSource.slice(start, Math.min(...candidates));
 }
 
@@ -333,6 +334,23 @@ Deno.test("HANDOFF completion classifies distinctly and dispatches through the e
   // handoff implementation was introduced for the unified Flow.
   const handoffFn = sliceFunction("luisHumanHandoffResult");
   assertStringIncludes(handoffFn, "recordHumanHandoffEvent(");
+});
+
+Deno.test("MERCADITO completion produces only the exact external CTA", () => {
+  assertEquals(classifyLuisFlowCompletion({ service_key: "MERCADITO" }), "MERCADITO");
+  assertEquals(classifyLuisFlowCompletion({ service_key: "MERCADITO", benefit_key: "SUPERMARKET" }), "BENEFITS");
+  const branch = workerSource.indexOf('} else if (completionKind === "MERCADITO")');
+  assert(branch >= 0);
+  const branchBody = workerSource.slice(branch, branch + 350);
+  assertStringIncludes(branchBody, "luisMercaditoFlowCompletionResult()");
+  const resultFn = sliceFunction("luisMercaditoFlowCompletionResult");
+  assertStringIncludes(resultFn, 'reply: "Compras listas para vos 👇"');
+  assertStringIncludes(resultFn, 'displayText: "Ver Mercadito"');
+  assertStringIncludes(resultFn, 'url: "https://compras.creatyv.io"');
+  assertEquals(resultFn.includes("supabase"), false);
+  assertEquals(resultFn.includes("referral_service_requests"), false);
+  assertEquals(resultFn.includes("referral_benefit_claims"), false);
+  assertEquals(resultFn.includes("referral_assignments"), false);
 });
 
 // --- Real-world regression: a bare greeting must reopen the menu even over

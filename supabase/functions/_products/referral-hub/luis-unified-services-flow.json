@@ -28,6 +28,7 @@
             "description": "Te saluda Luis Gabriel. Qué gusto tenerte por aquí. Contanos qué necesitás y te ayudamos a encontrar la opción correcta.",
             "list-items": [
               { "id": "BENEFITS", "main-content": { "title": "🎁 Beneficios y cupones", "description": "Ahorros disponibles" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "BENEFIT_SELECT" }, "payload": {} } },
+              { "id": "MERCADITO", "main-content": { "title": "🛒 Mercadito Online", "description": "Compras para tu hogar" }, "on-click-action": { "name": "complete", "payload": { "service_key": "MERCADITO" } } },
               { "id": "IMMIGRATION", "main-content": { "title": "🛂 Inmigración", "description": "Orientación inicial" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "IMMIGRATION_TOPIC" }, "payload": {} } },
               { "id": "AUTO_ACCIDENT", "main-content": { "title": "🚗 Accidente de auto", "description": "Contanos lo básico" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "ACCIDENT_BASICS" }, "payload": {} } },
               { "id": "DUI_CRIMINAL", "main-content": { "title": "⚖️ DUI / Defensa criminal", "description": "Orientación inicial" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "CRIMINAL_TOPIC" }, "payload": {} } },

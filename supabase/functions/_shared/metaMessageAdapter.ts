@@ -57,6 +57,11 @@ export type WhatsAppFlowCtaSpec = {
   headerText?: string;
 };
 
+export type WhatsAppCtaUrlSpec = {
+  displayText: string;
+  url: string;
+};
+
 export function buildWhatsAppFlowCtaMessage(args: {
   to: string;
   flow_id: string;
@@ -146,6 +151,7 @@ export async function sendViaMetaAdapter(args: {
   location?: WhatsAppLocationSpec;
   template?: TemplateSendSpec;
   flowCta?: WhatsAppFlowCtaSpec;
+  ctaUrl?: WhatsAppCtaUrlSpec;
   pageAccessToken?: string;
   whatsappPhoneNumberId?: string;
   whatsappAccessToken?: string;
@@ -222,6 +228,7 @@ async function sendViaWhatsApp(args: {
   location?: WhatsAppLocationSpec;
   template?: TemplateSendSpec;
   flowCta?: WhatsAppFlowCtaSpec;
+  ctaUrl?: WhatsAppCtaUrlSpec;
   whatsappPhoneNumberId?: string;
   whatsappAccessToken?: string;
 }): Promise<MetaSendResult> {
@@ -267,6 +274,23 @@ async function sendViaWhatsApp(args: {
       interactive_type: String(interactive?.type ?? ""),
       flow_cta: String(parameters.flow_cta ?? ""),
     }));
+  } else if (args.ctaUrl?.url) {
+    body = {
+      messaging_product: "whatsapp",
+      to: args.recipientId,
+      type: "interactive",
+      interactive: {
+        type: "cta_url",
+        body: { text: String(args.text ?? "").trim() || "Abrí el enlace para continuar." },
+        action: {
+          name: "cta_url",
+          parameters: {
+            display_text: String(args.ctaUrl.displayText ?? "Abrir").trim().slice(0, 20) || "Abrir",
+            url: String(args.ctaUrl.url).trim(),
+          },
+        },
+      },
+    };
   } else if (args.template?.name) {
     body = {
       messaging_product: "whatsapp",
