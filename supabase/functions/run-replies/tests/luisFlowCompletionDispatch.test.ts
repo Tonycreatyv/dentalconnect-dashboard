@@ -32,6 +32,57 @@ Deno.test("Immigration completion is legal-only and never enters the benefit con
   assertEquals(completion?.intake_type === "IMMIGRATION" ? completion.sharing_consent : null, "AUTHORIZED");
 });
 
+// P0 (2026-09): ACCIDENT_BASICS' DatePicker submits accident_date as a
+// Unix-millisecond-epoch string (Meta's documented DatePicker contract),
+// never YYYY-MM-DD directly - the parser previously required YYYY-MM-DD
+// outright, so every real AUTO_ACCIDENT submission from the published Flow
+// failed with the generic "No pudimos validar tu solicitud..." reply,
+// regardless of how the customer reached the Flow (fresh open or reopened
+// via "Ver servicios"). This reproduces the exact Flow response shape.
+const autoAccidentNfmReplyRealFormat = {
+  intake_type: "AUTO_ACCIDENT",
+  full_name: "Ana Cliente",
+  // 2026-03-05T00:00:00.000Z as Meta's DatePicker actually sends it.
+  accident_date: "1772668800000",
+  participation: "DRIVER",
+  received_medical_attention: "YES",
+  medical_provider: "",
+  description: "Choque en la interseccion, sin heridos graves.",
+};
+
+Deno.test("AUTO_ACCIDENT completion validates the real Meta DatePicker format (Unix-millisecond-epoch string), not just YYYY-MM-DD", () => {
+  assertEquals(classifyLuisFlowCompletion(autoAccidentNfmReplyRealFormat), "LEGAL");
+  const completion = parseLuisLegalFlowCompletion(autoAccidentNfmReplyRealFormat);
+  assert(completion !== null, "a real Meta DatePicker payload must not be rejected as invalid");
+  assertEquals(completion?.intake_type, "AUTO_ACCIDENT");
+  assertEquals(completion?.intake_type === "AUTO_ACCIDENT" ? completion.accident_date : null, "2026-03-05");
+});
+
+Deno.test("AUTO_ACCIDENT completion still accepts an already-YYYY-MM-DD accident_date unchanged", () => {
+  const completion = parseLuisLegalFlowCompletion({
+    ...autoAccidentNfmReplyRealFormat,
+    accident_date: "2026-03-05",
+  });
+  assertEquals(completion?.intake_type === "AUTO_ACCIDENT" ? completion.accident_date : null, "2026-03-05");
+});
+
+Deno.test("AUTO_ACCIDENT completion still rejects a genuinely invalid accident_date", () => {
+  // Note: "2026-13-45" is deliberately not in this list - it matches the
+  // YYYY-MM-DD *format* the parser has always accepted at face value
+  // (no calendar-validity check, before or after this fix), so it passes
+  // through unchanged. This preserves exactly the parser's pre-existing
+  // behavior for that input shape rather than introducing new validation
+  // scope; only the new numeric-epoch path is validated for real epoch
+  // sanity here.
+  for (const badDate of ["not-a-date", "", "0", "-5", "13/45/2026"]) {
+    const completion = parseLuisLegalFlowCompletion({
+      ...autoAccidentNfmReplyRealFormat,
+      accident_date: badDate,
+    });
+    assertEquals(completion, null, `accident_date "${badDate}" must still be rejected as invalid`);
+  }
+});
+
 Deno.test("Benefits completion remains on the claim contract", () => {
   assertEquals(classifyLuisFlowCompletion(benefitsNfmReply), "BENEFITS");
   assertEquals(parseLuisBenefitFlowCompletion(benefitsNfmReply)?.benefit_key, "SUPERMARKET");

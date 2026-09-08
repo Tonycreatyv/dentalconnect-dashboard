@@ -841,6 +841,32 @@ function oneOf<T extends string>(value: unknown, choices: readonly T[]) {
   return choices.includes(candidate) ? candidate : null;
 }
 
+// P0 (2026-09): ACCIDENT_BASICS' DatePicker component submits its value as
+// a Unix timestamp in milliseconds, as a string (Meta's documented Flow
+// JSON DatePicker contract - https://developers.facebook.com/docs/whatsapp/
+// flows/reference/components#datepicker) - never the YYYY-MM-DD this parser
+// previously required outright, so every real AUTO_ACCIDENT submission from
+// the published Flow failed validation with "No pudimos validar tu
+// solicitud...", regardless of how the customer reached the Flow. Accepts
+// both: an already-YYYY-MM-DD value passes through unchanged (covers any
+// future Flow version or test payload that sends the calendar-formatted
+// value directly), and a numeric-millisecond string is converted using UTC
+// components - WhatsApp Flow DatePicker values represent midnight UTC of
+// the selected calendar day, so a UTC extraction reconstructs the exact
+// date the customer picked regardless of server-local timezone. Anything
+// else (non-numeric, NaN, out-of-range) returns null - a genuinely invalid
+// date, same as before.
+function normalizeFlowDate(raw: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (!/^\d+$/.test(raw)) return null;
+  const epochMillis = Number(raw);
+  if (!Number.isFinite(epochMillis) || epochMillis <= 0) return null;
+  const date = new Date(epochMillis);
+  if (Number.isNaN(date.getTime())) return null;
+  const iso = date.toISOString().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
+}
+
 export function parseLuisLegalFlowCompletion(
   raw: unknown,
 ): LuisLegalFlowCompletion | null {
@@ -870,7 +896,7 @@ export function parseLuisLegalFlowCompletion(
       : null;
   }
   if (intakeType === "AUTO_ACCIDENT") {
-    const accidentDate = text(value.accident_date, 32);
+    const accidentDate = normalizeFlowDate(text(value.accident_date, 32));
     // Current draft payloads use `participation`; accept that approved contract
     // while canonicalizing the stored intake to `participant_role`.
     const participantRole = oneOf(
@@ -881,7 +907,7 @@ export function parseLuisLegalFlowCompletion(
     const medicalProvider = value.medical_provider === null || value.medical_provider === undefined
       ? null
       : text(value.medical_provider, 160) || null;
-    return /^\d{4}-\d{2}-\d{2}$/.test(accidentDate) && participantRole && receivedMedicalAttention
+    return accidentDate && participantRole && receivedMedicalAttention
       ? {
         intake_type: "AUTO_ACCIDENT",
         full_name: fullName,
