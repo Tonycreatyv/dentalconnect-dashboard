@@ -55,7 +55,7 @@ Deno.test("Luis router opens benefits directly for the flyer phrase and menu act
   assertEquals(routeLuisConversation({
     inboundText: "",
     payloadAction: "luis_benefits:another",
-  }), { kind: "benefits" });
+  }), { kind: "post_benefit_reopen_benefits" });
   assertEquals(routeLuisConversation({
     inboundText: "",
     payloadAction: "luis_main:menu",
@@ -512,4 +512,95 @@ Deno.test("[nearest-supermarket diagnostic] existing coupon/claim/Flow/location-
   // contract with the caller.
   assertStringIncludes(fn, "return match;");
   assertStringIncludes(fn, "return null;");
+});
+
+// --- P0 hotfix: "Ver beneficios" after benefit delivery ---
+// The post-benefit-delivery menu offers three buttons
+// (luis_benefits:another/:services/:finalize). Only :another lacked a
+// correct route - it fell through to the generic {kind:"benefits"} path,
+// which for a customer with no requestedBenefitKey targets
+// LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN ("BENEFITS_ENTRY"), a screen name
+// that only ever existed as a draft proposal and was never added to the
+// published Flow - WhatsApp rejects the trigger and the button appears to
+// do nothing. :services and :finalize already had correct routes; those
+// assertions here are regression coverage, not new fixes.
+
+Deno.test("Luis router sends luis_benefits:another to its own reopen-benefits kind, not the generic {kind:'benefits'} path", () => {
+  assertEquals(
+    routeLuisConversation({ inboundText: "", payloadAction: "luis_benefits:another" }),
+    { kind: "post_benefit_reopen_benefits" },
+  );
+  // Underscore or colon separators both normalize the same way - confirms
+  // this isn't accidentally matching on a specific separator character.
+  assertEquals(
+    routeLuisConversation({ inboundText: "", payloadAction: "luis benefits another" }),
+    { kind: "post_benefit_reopen_benefits" },
+  );
+});
+
+Deno.test("luis_main:benefits (the main-menu 'Beneficios y cupones' entry) still opens {kind:'benefits'}, untouched by the luis_benefits:another change", () => {
+  assertEquals(
+    routeLuisConversation({ inboundText: "", payloadAction: "luis_main:benefits" }),
+    { kind: "benefits" },
+  );
+});
+
+Deno.test("luis_benefits:services and luis_benefits:finalize were already explicitly recognized before this hotfix - regression coverage, not a new fix", () => {
+  assertEquals(
+    routeLuisConversation({ inboundText: "", payloadAction: "luis_benefits:services" }),
+    { kind: "post_benefit_services" },
+  );
+  assertEquals(
+    routeLuisConversation({ inboundText: "", payloadAction: "luis_benefits:finalize" }),
+    { kind: "post_benefit_finalize" },
+  );
+});
+
+// Meta's Graph API rejects a Flow-trigger targeting BENEFIT_SELECT directly
+// (error 131009: "Specified screen BENEFIT_SELECT is not allowed as first
+// screen of this flow. Allowed screen name is: SERVICE_SELECT."):
+// BENEFIT_SELECT's only inbound edge in this Flow's routing_model is FROM
+// SERVICE_SELECT, so it isn't a valid external entry screen - no
+// run-replies code can change that without a Flow change (out of scope for
+// this hotfix).
+Deno.test("post_benefit_reopen_benefits opens SERVICE_SELECT (the only screen Meta accepts as a Flow-trigger's first screen) via the same mechanism as post_benefit_services", () => {
+  const start = workerSource.indexOf('if (route.kind === "post_benefit_reopen_benefits")');
+  const end = workerSource.indexOf('if (route.kind === "post_benefit_menu")', start);
+  const block = workerSource.slice(start, end);
+  assert(start > -1 && end > start, "post_benefit_reopen_benefits block not found before post_benefit_menu");
+  assertStringIncludes(block, "luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting)");
+  assertStringIncludes(block, "luisMainMenuResult(args.leadState, contextualGreeting)");
+  // No explicit screen argument - relies on luisUnifiedFlowCta's own
+  // default (LUIS_UNIFIED_FLOW_ENTRY_SCREEN = SERVICE_SELECT), same as
+  // post_benefit_services just below it.
+  assertEquals(/luisUnifiedFlowEntryResult\([^)]*,\s*["']/.test(block), false);
+  // Must never again call luisBenefitsFlowCta directly (that produces the
+  // confirmed-rejected BENEFIT_SELECT payload), and must never reference
+  // the still-draft, still-not-live BENEFITS_ENTRY screen.
+  assertEquals(block.includes("luisBenefitsFlowCta"), false);
+  assertEquals(block.includes("BENEFIT_SELECT"), false);
+  assertEquals(block.includes("BENEFITS_ENTRY"), false);
+});
+
+Deno.test("post_benefit_reopen_benefits has its own contextual greeting distinguishing it from post_benefit_services, even though both open the same screen", () => {
+  const start = workerSource.indexOf('if (route.kind === "post_benefit_reopen_benefits")');
+  const end = workerSource.indexOf('if (route.kind === "post_benefit_menu")', start);
+  const block = workerSource.slice(start, end);
+  assertStringIncludes(block, 'Elegí "Beneficios y cupones" para ver tus opciones.');
+});
+
+Deno.test("post_benefit_services still opens the real SERVICE_SELECT entry (luisUnifiedFlowEntryResult's default), unchanged by this hotfix", () => {
+  const servicesStart = workerSource.indexOf('if (route.kind === "post_benefit_services")');
+  const servicesEnd = workerSource.indexOf('if (route.kind === "post_benefit_finalize")', servicesStart);
+  const servicesBlock = workerSource.slice(servicesStart, servicesEnd);
+  assertStringIncludes(servicesBlock, "luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting)");
+  assertEquals(/luisUnifiedFlowEntryResult\([^)]*,\s*["']/.test(servicesBlock), false);
+});
+
+Deno.test("existing benefit completion (claim issuance) is untouched by this hotfix", () => {
+  // This hotfix only adds a new pre-Flow-completion button route; it does
+  // not touch the completion handler at all, so its exact call shape must
+  // still be present unchanged.
+  assertStringIncludes(workerSource, "async function buildLuisBenefitsFlowCompletionResult(args: {");
+  assertStringIncludes(workerSource, "p_campaign_key: benefit.campaignKey,");
 });

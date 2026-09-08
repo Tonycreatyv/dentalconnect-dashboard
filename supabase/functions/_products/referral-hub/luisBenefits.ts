@@ -64,6 +64,20 @@ export type LuisConversationRoute =
   // "Claro 👌 ..." reentry copy that reads oddly outside an explicit
   // menu-return.
   | { kind: "main_menu"; trigger: "greeting" | "explicit" }
+  // "Ver beneficios" on the post-benefit-delivery menu (button id
+  // luis_benefits:another). Deliberately its own kind, checked ahead of the
+  // pre-existing "luis benefits another" match (which routed to the generic
+  // {kind:"benefits"} path and, through luisBenefitsFlowEntryResult's
+  // no-requestedBenefitKey fallback, targeted LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN
+  // ("BENEFITS_ENTRY") — a screen that was never added to the published
+  // Flow, so WhatsApp rejects it and the button silently does nothing).
+  // This kind's own handler opens SERVICE_SELECT via luisUnifiedFlowEntryResult
+  // with no custom screen argument — the same known-good mechanism as
+  // post_benefit_services — never BENEFIT_SELECT: Meta's Graph API rejects a
+  // Flow-trigger targeting BENEFIT_SELECT directly (error 131009 — it only
+  // has an inbound edge from SERVICE_SELECT in this Flow's routing_model, so
+  // it isn't a valid external entry screen).
+  | { kind: "post_benefit_reopen_benefits" }
   | { kind: "post_benefit_menu" }
   | { kind: "post_benefit_services" }
   | { kind: "post_benefit_finalize" }
@@ -521,6 +535,12 @@ export function routeLuisConversation(args: {
 
   // Priority 1: explicit WhatsApp payload/action - unchanged, highest
   // precedence, never touched by the interpreter.
+  // Production hotfix: luis_benefits:another normalizes to "luis benefits
+  // another" — checked here, ahead of everything else, so it can never fall
+  // through to the pre-existing "luis benefits another" match below (which
+  // routes to {kind:"benefits"} and could reach an invalid screen — see the
+  // post_benefit_reopen_benefits doc comment above).
+  if (action === "luis benefits another") return { kind: "post_benefit_reopen_benefits" };
   if (action === "luis benefits main menu") return { kind: "post_benefit_menu" };
   if (action === "luis benefits services") return { kind: "post_benefit_services" };
   if (action === "luis benefits finalize") return { kind: "post_benefit_finalize" };
@@ -541,7 +561,12 @@ export function routeLuisConversation(args: {
   ) {
     return { kind: "main_menu", trigger: "explicit" };
   }
-  if (action === "luis benefits another" || action === "luis main benefits") {
+  // "luis benefits another" removed from this OR — it's now matched
+  // earlier, unreachable here by construction (see post_benefit_reopen_
+  // benefits above). "luis main benefits" (a distinct trigger — the
+  // luis_main:benefits main-menu button, not the post-benefit-delivery
+  // "Ver beneficios") is unchanged.
+  if (action === "luis main benefits") {
     return { kind: "benefits" };
   }
   // Taps on the benefits_clarify buttons ("Supermercado"/"Médico"/"Ver

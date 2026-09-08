@@ -126,12 +126,20 @@ Deno.test("[production regression] a specific-benefit natural-language request (
   assertEquals(result!.reply.includes("Estamos preparando"), false);
 });
 
-Deno.test("[production regression] no benefits-related CTA (specific benefit or 'Ver otros'/'Ver beneficios') ever falls back to the general SERVICE_SELECT welcome screen", async () => {
+// P0 hotfix: "luis benefits another" (post-coupon "Ver beneficios") is
+// deliberately excluded from this list now — it has its own
+// post_benefit_reopen_benefits kind and is REQUIRED to fall back to
+// SERVICE_SELECT (Meta's Graph API rejects BENEFIT_SELECT/BENEFITS_ENTRY
+// as a Flow-trigger's first screen — error 131009). See
+// luisConversationRouter.test.ts's post_benefit_reopen_benefits tests for
+// that coverage. The benefit-selection CTAs below are unaffected: they
+// still resolve a specific benefit (or "Ver otros") and must still use a
+// direct-entry/legacy-Flow screen, never this generic fallback.
+Deno.test("[production regression] no benefit-selection CTA (specific benefit or 'Ver otros') ever falls back to the general SERVICE_SELECT welcome screen", async () => {
   const actions = [
     "luis_benefits_clarify:supermarket",
     "luis_benefits_clarify:medical",
     "luis_benefits_clarify:other",
-    "luis benefits another",
     "luis main benefits",
   ];
   for (const payloadAction of actions) {

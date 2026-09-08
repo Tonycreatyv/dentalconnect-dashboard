@@ -1131,6 +1131,24 @@ export async function buildLuisConversationResult(args: {
       debugNote: "referral_hub:luis_benefits_clarify",
     };
   }
+  // Hotfix: "Ver beneficios" after a coupon delivery must reopen the same
+  // way "Ver servicios" does (post_benefit_services below) — via
+  // luisUnifiedFlowEntryResult with no custom screen argument, so it opens
+  // SERVICE_SELECT (the only screen WhatsApp accepts as a Flow-trigger's
+  // first screen). Previously "luis benefits another" fell through to the
+  // generic {kind:"benefits"} route, which for a customer with no specific
+  // requestedBenefitKey targets LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN
+  // ("BENEFITS_ENTRY") — a screen name that only exists in code as a draft
+  // proposal and was never added to the published Flow, so WhatsApp
+  // rejected the trigger and the button appeared to do nothing. Only the
+  // contextual greeting differs from post_benefit_services, so the
+  // customer knows to tap "Beneficios y cupones" once more inside the menu.
+  if (route.kind === "post_benefit_reopen_benefits") {
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    const contextualGreeting = `Perfecto${firstName ? `, ${firstName}` : ""}. Elegí "Beneficios y cupones" para ver tus opciones.`;
+    return luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting) ??
+      luisMainMenuResult(args.leadState, contextualGreeting);
+  }
   if (route.kind === "post_benefit_menu") {
     const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
     const contextualGreeting = `Perfecto${firstName ? `, ${firstName}` : ""}. ¿En qué más te podemos ayudar?`;
