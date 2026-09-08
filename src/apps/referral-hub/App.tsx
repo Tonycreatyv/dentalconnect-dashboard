@@ -17,6 +17,7 @@ import { ReferralOrganizationProvider, useReferralOrganization } from "./organiz
 import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
 import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen, InicioScreen } from "./screens/DashboardScreens";
+import { AdminPartnersScreen, AdminServicesScreen } from "./screens/PastorOperationsScreens";
 import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
@@ -51,6 +52,8 @@ function ProductRoutes() {
     </Route>
     <Route path="/" element={<RequireAuth><ReferralOrganizationProvider><BoltShell /></ReferralOrganizationProvider></RequireAuth>}>
       <Route index element={<InicioScreen />} />
+      <Route path="servicios" element={<AdminServicesScreen />} />
+      <Route path="partners" element={<AdminPartnersScreen />} />
       <Route path="clientes" element={<ClientesScreen />} />
       <Route path="clientes/:leadId" element={<ContactDetailScreen />} />
       <Route path="messages" element={<MessagesWorkspace />} />

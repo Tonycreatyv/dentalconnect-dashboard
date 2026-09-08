@@ -1255,3 +1255,5 @@ a.hub-list-row:hover,button.hub-list-row:hover{border-color:var(--hub-accent)}
 .hub-location-card strong{display:block;font-size:.78rem;color:var(--hub-text)}
 .hub-location-card small{color:var(--hub-muted);font-size:.68rem}
 .hub-location-editor{margin-top:.8rem;padding-top:.8rem;border-top:1px solid var(--hub-border);display:grid;gap:.6rem}
+/* Admin operational cards: compact status facts that wrap on narrow screens. */
+.hub-operation-card{align-items:flex-start!important;gap:1rem}.hub-operation-statuses{display:flex;flex-wrap:wrap;gap:.45rem;justify-content:flex-end}.hub-partner-detail{display:grid;gap:1rem}.hub-partner-users{display:grid;gap:.7rem;border-top:1px solid var(--hub-border);padding-top:1rem}.hub-partner-users h3{margin:0;font-size:.9rem}@media(max-width:640px){.hub-operation-card{flex-direction:column}.hub-operation-statuses{justify-content:flex-start}}

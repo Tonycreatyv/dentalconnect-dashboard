@@ -1,4 +1,4 @@
-import { Building2, Home, Menu, MessageCircle, Settings, Users, X } from "lucide-react";
+import { Building2, Handshake, Home, Menu, MessageCircle, Settings, Stethoscope, Users, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
@@ -11,6 +11,8 @@ import ConexxionWordmark from "./ConexxionWordmark";
 // it's simply no longer linked from primary nav.
 const primaryNav = [
   { to: "/", label: "Inicio", icon: Home, end: true },
+  { to: "/servicios", label: "Servicios", icon: Stethoscope, end: false },
+  { to: "/partners", label: "Partners", icon: Handshake, end: false },
   { to: "/negocios", label: "Negocios", icon: Building2, end: false },
   { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
   { to: "/clientes", label: "Clientes", icon: Users, end: false },
