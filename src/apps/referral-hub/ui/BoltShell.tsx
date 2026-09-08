@@ -1,11 +1,11 @@
-import { Handshake, Home, Menu, MessageCircle, Settings, Stethoscope, Ticket, Users, X } from "lucide-react";
+import { Handshake, Home, Menu, MessageCircle, Settings, ShoppingBasket, Stethoscope, Ticket, Users, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
 import AccountMenu from "./AccountMenu";
 import ConexxionWordmark from "./ConexxionWordmark";
 
-// Six clear operational workspaces: Inicio (overview), Servicios
+// Seven clear operational workspaces: Inicio (overview), Servicios
 // (professional/referral requests), Beneficios (coupon/benefit demand),
 // Partners (routing + partner users), Clientes (unified profile), Mensajes.
 // Negocios/Campañas (the older business-catalog tree) stays fully live and
@@ -16,6 +16,7 @@ const primaryNav = [
   { to: "/", label: "Inicio", icon: Home, end: true },
   { to: "/servicios", label: "Servicios", icon: Stethoscope, end: false },
   { to: "/beneficios", label: "Beneficios", icon: Ticket, end: false },
+  { to: "/mercadito", label: "Mercadito", icon: ShoppingBasket, end: false },
   { to: "/partners", label: "Partners", icon: Handshake, end: false },
   { to: "/clientes", label: "Clientes", icon: Users, end: false },
   { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },

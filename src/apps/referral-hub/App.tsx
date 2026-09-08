@@ -18,6 +18,7 @@ import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./scr
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
 import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen, InicioScreen } from "./screens/DashboardScreens";
 import { AdminPartnersScreen, AdminServicesScreen } from "./screens/PastorOperationsScreens";
+import MercaditoOrdersScreen from "./screens/MercaditoOrdersScreen";
 import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
@@ -54,6 +55,7 @@ function ProductRoutes() {
       <Route index element={<InicioScreen />} />
       <Route path="servicios" element={<AdminServicesScreen />} />
       <Route path="beneficios" element={<CouponRequestsScreen />} />
+      <Route path="mercadito" element={<MercaditoOrdersScreen />} />
       <Route path="partners" element={<AdminPartnersScreen />} />
       <Route path="clientes" element={<ClientesScreen />} />
       <Route path="clientes/:leadId" element={<ContactDetailScreen />} />

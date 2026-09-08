@@ -1110,6 +1110,7 @@ a.hub-opp-card:hover{border-color:var(--hub-accent)}
 .hub-table-cell-muted{color:var(--hub-muted)}
 .hub-table-cell-time{color:var(--hub-muted);font-size:.75rem}
 .hub-table-detail{color:var(--hub-muted)}
+@media(min-width:768px){.hub-orders-table .hub-table-head,.hub-orders-table .hub-table-row{grid-template-columns:.8fr 1.1fr 1.3fr 1.45fr .55fr .7fr .85fr 1fr;gap:.7rem}.hub-orders-table .hub-table-cell{overflow-wrap:anywhere}.hub-orders-table time{display:block}}
 
 .hub-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.3rem .6rem;border-radius:999px;font-size:.7rem;font-weight:700;flex:none}
 .hub-badge i{width:6px;height:6px;border-radius:50%;background:currentColor}
