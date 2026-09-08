@@ -22,6 +22,11 @@ const primaryNav = [
   { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
 ] as const;
 
+// The fixed mobile bar is deliberately limited to four destinations. The
+// complete primary navigation remains available in the mobile slide-out
+// menu, while this prevents a second fixed row from covering page content.
+const mobilePrimaryNav = primaryNav.filter(({ to }) => ["/", "/servicios", "/beneficios", "/mercadito"].includes(to));
+
 // Rendered in the desktop sidebar and the mobile slide-out menu (the same
 // <aside> markup, just toggled via the hamburger on mobile) — not the
 // bottom tab bar, which stays reserved for the 4 highest-frequency
@@ -60,6 +65,6 @@ export default function BoltShell() {
       </header>
       <div className={isFlush ? "bolt-rh-content is-flush" : "bolt-rh-content"}><Outlet /></div>
     </div>
-    <nav className={isChatOpen ? "bolt-rh-bottom is-hidden" : "bolt-rh-bottom"} aria-label="Navegación móvil">{primaryNav.map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end}><Icon /><span>{label}</span></NavLink>)}</nav>
+    <nav className={isChatOpen ? "bolt-rh-bottom is-hidden" : "bolt-rh-bottom"} aria-label="Navegación móvil">{mobilePrimaryNav.map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end}><Icon /><span>{label}</span></NavLink>)}</nav>
   </div>;
 }
