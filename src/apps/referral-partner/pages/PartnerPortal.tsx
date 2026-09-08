@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "../../../lib/supabaseClient";
 
-const SERVICE_LABELS: Record<string, string> = { luis_accidente: "Accidente de auto", luis_inmigracion: "Inmigración", luis_compra_super: "Compras de supermercado", luis_eventos: "Eventos comunitarios", luis_representante: "Hablar con asesor" };
+const SERVICE_LABELS: Record<string, string> = { luis_accidente: "Accidente de auto", luis_dui: "DUI", luis_criminal: "Defensa criminal", luis_inmigracion: "Inmigración", luis_compra_super: "Compras de supermercado", luis_eventos: "Eventos comunitarios", luis_representante: "Hablar con asesor" };
 const STATUS_LABELS: Record<string, string> = { assigned: "Asignada", accepted: "Aceptada", rejected: "Rechazada", expired: "Vencida", reassigned: "Reasignada", cancelled: "Cancelada", new: "Nueva", contacted: "Contactado", appointment_scheduled: "Cita programada", in_progress: "En progreso", converted: "Convertida", not_converted: "No convertida", closed: "Cerrada" };
 const label = (value: unknown, labels: Record<string, string>) => labels[String(value ?? "")] ?? "Estado no disponible";
 
