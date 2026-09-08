@@ -53,8 +53,21 @@ export type LuisLegalFlowCompletion =
     // compatibility if a future Flow version reintroduces it.
     participant_role: "DRIVER" | "PASSENGER" | "OTHER" | null;
     received_medical_attention: "YES" | "NO";
+    // P0 (2026-09): confirmed present on the real completion payload
+    // (reply_outbox.payload->'flow_response' key inspection) but never
+    // previously parsed — informational/persisted only, never gates
+    // completion validity.
+    police_report: "YES" | "NO" | null;
     medical_provider: string | null;
     description: string;
+    // P0 (2026-09): confirmed present on the real completion payload —
+    // the published Flow's LEGAL_CONSENT screen collects sharing_consent
+    // for AUTO_ACCIDENT too, not just IMMIGRATION. Required to restore the
+    // approved "¡Gracias! ✅..." response and to gate partner assignment
+    // (see captureLegalFlowRequest — assignment only on AUTHORIZED).
+    sharing_consent: "AUTHORIZED" | "DECLINED" | "PENDING";
+    consent_version: string | null;
+    consent_source: string | null;
   }
   | {
     intake_type: "DUI_CRIMINAL";
@@ -982,9 +995,14 @@ export function parseLuisLegalFlowCompletion(
       ["DRIVER", "PASSENGER", "OTHER"] as const,
     );
     const receivedMedicalAttention = oneOf(value.received_medical_attention, ["YES", "NO"] as const);
+    const policeReport = oneOf(value.police_report, ["YES", "NO"] as const);
     const medicalProvider = value.medical_provider === null || value.medical_provider === undefined
       ? null
       : text(value.medical_provider, 160) || null;
+    const submittedConsent = oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const);
+    const sharingConsent = submittedConsent ?? "PENDING";
+    const consentVersion = submittedConsent ? text(value.consent_version, 80) || null : null;
+    const consentSource = submittedConsent ? text(value.consent_source, 40) || null : null;
     return accidentDate && receivedMedicalAttention
       ? {
         intake_type: "AUTO_ACCIDENT",
@@ -992,8 +1010,12 @@ export function parseLuisLegalFlowCompletion(
         accident_date: accidentDate,
         participant_role: participantRole,
         received_medical_attention: receivedMedicalAttention,
+        police_report: policeReport,
         medical_provider: medicalProvider,
         description,
+        sharing_consent: sharingConsent,
+        consent_version: consentVersion,
+        consent_source: consentSource,
       }
       : null;
   }

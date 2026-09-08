@@ -77,6 +77,7 @@ import {
   orchestrateCompletedServiceRequest,
 } from "./domain/referralHub/serviceRequestOrchestrator.ts";
 import { captureImmigrationFlowRequest } from "./domain/referralHub/immigrationFlowRequest.ts";
+import { captureLegalFlowRequest } from "./domain/referralHub/legalFlowRequest.ts";
 import {
   clearMetaTestDemoTakeoverState,
   metaTestDemoResetAction,
@@ -938,6 +939,23 @@ async function buildLuisLegalFlowCompletionResult(args: {
         consent_source: completion.consent_source,
       },
     });
+  } else if (completion.intake_type === "AUTO_ACCIDENT") {
+    // P0 (2026-09): restores the missing referral_service_requests /
+    // referral_assignments wiring for AUTO_ACCIDENT — mirrors the
+    // IMMIGRATION branch above. DUI_CRIMINAL is untouched (no
+    // sharing_consent on that completion type, no canonical request today).
+    await captureLegalFlowRequest({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      channelUserId: args.channelUserId,
+      deliveryKey: args.deliveryKey,
+      completedAt: legalIntake.completed_at,
+      sharingConsent: completion.sharing_consent,
+      consentVersion: completion.consent_version,
+      consentSource: completion.consent_source,
+      fields: completion,
+    });
   }
   // Preserve the existing staff-side follow-up event, but do not use
   // luisHumanHandoffResult: a completion is not a request for live human
@@ -949,10 +967,15 @@ async function buildLuisLegalFlowCompletionResult(args: {
     channel: args.channel,
     messagePreview: `Solicitud legal Flow: ${completion.intake_type}`,
   });
+  // Generalized from an IMMIGRATION-only gate so AUTO_ACCIDENT completions
+  // (which now also carry sharing_consent) reach the same approved
+  // messages. DUI_CRIMINAL has no sharing_consent field, so it always
+  // falls through to the generic third branch, unchanged.
+  const sharingConsent = "sharing_consent" in completion ? completion.sharing_consent : undefined;
   return {
-    reply: completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "DECLINED"
+    reply: sharingConsent === "DECLINED"
       ? "Gracias. Guardamos tu solicitud, pero no compartiremos tu información con un aliado. Si deseas continuar más adelante, puedes volver a escribirnos."
-      : completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "AUTHORIZED"
+      : sharingConsent === "AUTHORIZED"
       ? "¡Gracias! ✅\n\nRecibimos tu información.\n\nEn breve, alguien de nuestro equipo se comunicará contigo."
       : "Gracias. Recibimos tu solicitud y un integrante del equipo te dará seguimiento por este mismo WhatsApp.",
     statePatch: luisLegalPatch(args.leadState, legalIntake),

@@ -238,7 +238,63 @@ Deno.test("only a valid Immigration Flow completion invokes the internal-review 
   assertStringIncludes(completion, 'if (completion.intake_type === "IMMIGRATION")');
   assertStringIncludes(completion, "await captureImmigrationFlowRequest({");
   assertStringIncludes(completion, "sharing_consent: completion.sharing_consent");
-  assertStringIncludes(completion, 'completion.sharing_consent === "DECLINED"');
   assertStringIncludes(completion, "statePatch: luisLegalPatch(args.leadState, legalIntake)");
   assert(!completion.includes("orchestrateCompletedServiceRequest({"));
+});
+
+// P0 (2026-09): AUTO_ACCIDENT was previously the only LEGAL completion type
+// with zero request/assignment wiring and zero access to the approved
+// "¡Gracias! ✅..." reply - both were hard-gated to intake_type ===
+// "IMMIGRATION". This proves the restored wiring without touching real
+// Supabase state: buildLuisLegalFlowCompletionResult is only reachable with
+// a live client, so these assertions target the exact source shape rather
+// than re-implementing an integration harness, matching the pattern the two
+// tests above already use for the Immigration branch.
+Deno.test("a valid AUTO_ACCIDENT completion invokes the same capture bridge Immigration uses, scoped to captureLegalFlowRequest", async () => {
+  const source = await Deno.readTextFile(new URL("../index.ts", import.meta.url));
+  const start = source.indexOf("async function buildLuisLegalFlowCompletionResult");
+  const end = source.indexOf("function invalidLuisFlowCompletionResult", start);
+  const completion = source.slice(start, end);
+
+  assert(start >= 0 && end > start);
+  assertStringIncludes(completion, 'else if (completion.intake_type === "AUTO_ACCIDENT")');
+  assertStringIncludes(completion, "await captureLegalFlowRequest({");
+  assertStringIncludes(completion, "sharingConsent: completion.sharing_consent");
+  assertStringIncludes(completion, "consentVersion: completion.consent_version");
+  assertStringIncludes(completion, "consentSource: completion.consent_source");
+  assert(!completion.includes("orchestrateCompletedServiceRequest({"));
+});
+
+Deno.test("the approved AUTHORIZED/DECLINED replies are generalized off sharing_consent, not gated to a single intake_type", async () => {
+  const source = await Deno.readTextFile(new URL("../index.ts", import.meta.url));
+  const start = source.indexOf("async function buildLuisLegalFlowCompletionResult");
+  const end = source.indexOf("function invalidLuisFlowCompletionResult", start);
+  const completion = source.slice(start, end);
+
+  assert(start >= 0 && end > start);
+  assertStringIncludes(
+    completion,
+    'const sharingConsent = "sharing_consent" in completion ? completion.sharing_consent : undefined;',
+  );
+  assertStringIncludes(completion, 'reply: sharingConsent === "DECLINED"');
+  assertStringIncludes(completion, 'sharingConsent === "AUTHORIZED"');
+  assertStringIncludes(completion, "¡Gracias! ✅\\n\\nRecibimos tu información.\\n\\nEn breve, alguien de nuestro equipo se comunicará contigo.");
+  // The literal exact approved message, byte for byte.
+  const exactApprovedMessage = "¡Gracias! ✅\n\nRecibimos tu información.\n\nEn breve, alguien de nuestro equipo se comunicará contigo.";
+  assertStringIncludes(completion, JSON.stringify(exactApprovedMessage).slice(1, -1));
+});
+
+Deno.test("AUTO_ACCIDENT capture happens before the unconditional human-handoff event, and DUI_CRIMINAL still invokes neither capture bridge", async () => {
+  const source = await Deno.readTextFile(new URL("../index.ts", import.meta.url));
+  const start = source.indexOf("async function buildLuisLegalFlowCompletionResult");
+  const end = source.indexOf("function invalidLuisFlowCompletionResult", start);
+  const completion = source.slice(start, end);
+
+  const accidentBranch = completion.indexOf('else if (completion.intake_type === "AUTO_ACCIDENT")');
+  const handoffCall = completion.indexOf("await recordHumanHandoffEvent({", accidentBranch);
+  assert(accidentBranch > 0 && handoffCall > accidentBranch);
+
+  for (const intakeType of ["IMMIGRATION", "AUTO_ACCIDENT", "DUI_CRIMINAL"]) {
+    assertEquals(classifyLuisFlowCompletion({ intake_type: intakeType }), "LEGAL");
+  }
 });
