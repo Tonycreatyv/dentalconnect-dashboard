@@ -927,6 +927,16 @@ export function classifyLuisFlowCompletion(raw: unknown): LuisFlowCompletionKind
   return "UNKNOWN";
 }
 
+export function parseLuisFurnitureFlowCompletion(raw: unknown): LuisFurnitureFlowCompletion | null {
+  const value = record(raw);
+  if (!value || text(value.service_key, 32) !== "FURNITURE") return null;
+  const fullName = text(value.full_name, 120);
+  const postalCode = postalCodeText(value.postal_code);
+  return fullName && /^\d{5}$/.test(postalCode)
+    ? { service_key: "FURNITURE", full_name: fullName, postal_code: postalCode }
+    : null;
+}
+
 function optionalPostalCode(value: unknown) {
   // Immigration's optional Flow ZIP is now explicitly a text input. Keep
   // historical numeric payloads compatible, but normalize every accepted
