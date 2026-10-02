@@ -354,8 +354,8 @@ export function OportunidadesScreen() {
     <div className="hub-page hub-page--wide">
       <PageHeader
         eyebrow="Operación"
-        title="Oportunidades"
-        subtitle="Casos enviados a aliados y su estado actual."
+        title="Operación"
+        subtitle="Casos activos, responsables, seguimiento y cierres."
         meta={<span className="hub-page-count">{filtered.length} {filtered.length === 1 ? "caso" : "casos"}</span>}
         actions={<button type="button" className="hub-secondary" onClick={() => void opportunities.load()}>Actualizar</button>}
       />
@@ -395,7 +395,7 @@ export function OportunidadesScreen() {
           {filtered.map((request) => {
             const presentation = legalOpportunityPresentation(request.serviceId, request.intake, request.topic);
             return (
-            <Link key={request.id} className="hub-opp-card" to={`/clientes/${request.leadId}`} state={{ from: "/oportunidades" }}>
+            <Link key={request.id} className="hub-opp-card" to={`/operacion/${request.id}`} state={{ from: "/operacion" }}>
               <div className="hub-opp-card-main">
                 <Avatar name={request.leadName} seed={request.leadId} />
                 <div>
