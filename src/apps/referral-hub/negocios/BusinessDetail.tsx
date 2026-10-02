@@ -73,7 +73,7 @@ export default function BusinessDetail() {
         <div className="hub-hero-image-empty"><Building2 size={22} /><span>Sin imagen todavía</span></div>
       )}
       {lightboxOpen && heroImage ? <ImageLightbox src={heroImage} alt={business.name} onClose={() => setLightboxOpen(false)} /> : null}
-      <button type="button" className="hub-secondary" onClick={() => setEditing(true)}><Pencil size={15} />Editar negocio</button>
+      {dataSource.capabilities.canEditBusiness && business.id.startsWith("partner:") ? <button type="button" className="hub-secondary" onClick={() => setEditing(true)}><Pencil size={15} />Editar negocio</button> : null}
       <dl className="hub-facts">
         <div><dt>Categoría</dt><dd>{SERVICE_LABELS[business.categoryServiceId as LuisServiceId] || business.categoryLabel}</dd></div>
         <div><dt>Contacto</dt><dd>{business.contactName || "Pendiente"}</dd></div>
@@ -136,15 +136,10 @@ export default function BusinessDetail() {
           )}
         </section>
       ) : null}
-      {editing ? (
+      {editing && dataSource.capabilities.canEditBusiness && business.id.startsWith("partner:") ? (
         <BusinessEditDrawer
           business={business}
-          // canEditBusiness is only true for a business backed by a real
-          // referral_partners row (id "partner:...") — the hardcoded
-          // merchant/location businesses have no row to persist to yet,
-          // so they stay honestly local-only even though the capability
-          // flag itself is true (see realDataSource.ts).
-          canPersist={dataSource.capabilities.canEditBusiness && business.id.startsWith("partner:")}
+          canPersist={true}
           onClose={() => setEditing(false)}
           onSave={async (patch) => { await dataSource.updateBusiness(business.id, patch); setEditing(false); load(); }}
         />
