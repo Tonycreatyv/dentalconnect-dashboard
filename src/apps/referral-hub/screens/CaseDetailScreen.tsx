@@ -9,6 +9,7 @@ import StatusBadge, { type StatusTone } from "../ui/StatusBadge";
 import { SkeletonRows } from "../ui/Skeleton";
 import { legalOpportunityPresentation } from "../operations/legalOpportunities";
 import { assignAdminCase, updateAdminCase } from "../operations/adminCaseActions";
+import { eligiblePartnerIds, type PartnerServiceRule } from "../operations/eligiblePartners";
 
 type CaseRequest = {
   id: string;
@@ -16,6 +17,9 @@ type CaseRequest = {
   service_id: string;
   status: string;
   postal_code: string | null;
+  city: string | null;
+  language: string | null;
+  specialty: string | null;
   intake: Record<string, unknown> | null;
   consent: Record<string, unknown> | null;
   created_at: string;
@@ -45,6 +49,14 @@ type CaseAssignment = {
 
 type CasePartner = { id: string; name: string };
 type PartnerOption = { id: string; name: string };
+type PartnerRuleRow = {
+  partner_id: string;
+  cities: string[] | null;
+  postal_codes: string[] | null;
+  languages: string[] | null;
+  specialties: string[] | null;
+};
+type PartnerContactRow = { partner_id: string; service_ids: string[] | null };
 type CaseEvent = { id: string; aggregate_id: string; event_type: string; occurred_at: string; metadata: Record<string, unknown> | null };
 type CaseState = { request: CaseRequest; lead: CaseLead | null; assignment: CaseAssignment | null; partner: CasePartner | null; events: CaseEvent[] };
 
@@ -103,7 +115,7 @@ export default function CaseDetailScreen() {
 
     const requestRes = await supabase
       .from("referral_service_requests")
-      .select("id,lead_id,service_id,status,postal_code,intake,consent,created_at,updated_at")
+      .select("id,lead_id,service_id,status,postal_code,city,language,specialty,intake,consent,created_at,updated_at")
       .eq("id", requestId)
       .eq("organization_id", resolvedOrgId)
       .maybeSingle();
@@ -116,7 +128,7 @@ export default function CaseDetailScreen() {
     }
 
     const request = requestRes.data as unknown as CaseRequest;
-    const [leadRes, assignmentsRes, partnersRes] = await Promise.all([
+    const [leadRes, assignmentsRes, rulesRes] = await Promise.all([
       supabase.from("leads")
         .select("id,full_name,first_name,last_name,phone,channel_user_id")
         .eq("id", request.lead_id).eq("organization_id", resolvedOrgId).maybeSingle(),
@@ -124,11 +136,11 @@ export default function CaseDetailScreen() {
         .select("id,partner_id,status,work_status,assigned_at,updated_at,follow_up_reason,next_followup_at,follow_up_attempt_count")
         .eq("request_id", request.id).eq("organization_id", resolvedOrgId)
         .order("attempt_number", { ascending: false }),
-      supabase.from("referral_partners")
-        .select("id,name")
+      supabase.from("referral_partner_service_rules")
+        .select("partner_id,cities,postal_codes,languages,specialties")
         .eq("organization_id", resolvedOrgId)
-        .eq("active", true)
-        .order("name"),
+        .eq("service_id", request.service_id)
+        .eq("active", true),
     ]);
 
     const assignments = (assignmentsRes.data ?? []) as unknown as CaseAssignment[];
@@ -138,16 +150,74 @@ export default function CaseDetailScreen() {
           .eq("id", assignment.partner_id).eq("organization_id", resolvedOrgId).maybeSingle()
       : { data: null };
 
-    const assignmentIds = assignments.map((row) => row.id);
-    const eventsRes = assignmentIds.length
-      ? await supabase.from("referral_operational_events")
-          .select("id,aggregate_id,event_type,occurred_at,metadata")
+    const rules = ((rulesRes.data ?? []) as PartnerRuleRow[]).map((rule): PartnerServiceRule => ({
+      partnerId: rule.partner_id,
+      cities: rule.cities ?? [],
+      postalCodes: rule.postal_codes ?? [],
+      languages: rule.languages ?? [],
+      specialties: rule.specialties ?? [],
+    }));
+
+    const candidatePartnerIds = [...new Set(rules.map((rule) => rule.partnerId))];
+    const contactsRes = candidatePartnerIds.length
+      ? await supabase.from("referral_partner_contacts")
+          .select("partner_id,service_ids")
           .eq("organization_id", resolvedOrgId)
-          .eq("aggregate_type", "assignment")
-          .in("aggregate_id", assignmentIds)
-          .order("occurred_at", { ascending: false })
-          .limit(100)
-      : { data: [] as CaseEvent[] };
+          .eq("active", true)
+          .in("partner_id", candidatePartnerIds)
+      : { data: [] as PartnerContactRow[] };
+
+    const activeContactPartnerIds = new Set(
+      ((contactsRes.data ?? []) as PartnerContactRow[])
+        .filter((contact) => (contact.service_ids ?? []).length === 0 || (contact.service_ids ?? []).includes(request.service_id))
+        .map((contact) => contact.partner_id),
+    );
+
+    const eligibleIds = eligiblePartnerIds({
+      city: request.city,
+      postalCode: request.postal_code,
+      language: request.language,
+      specialty: request.specialty,
+    }, rules, activeContactPartnerIds);
+
+    const visiblePartnerIds = [...new Set([
+      ...eligibleIds,
+      ...(assignment?.partner_id ? [assignment.partner_id] : []),
+    ])];
+
+    const partnersRes = visiblePartnerIds.length
+      ? await supabase.from("referral_partners")
+          .select("id,name")
+          .eq("organization_id", resolvedOrgId)
+          .eq("active", true)
+          .in("id", visiblePartnerIds)
+          .order("name")
+      : { data: [] as PartnerOption[] };
+
+    const assignmentIds = assignments.map((row) => row.id);
+    const [requestEventsRes, assignmentEventsRes] = await Promise.all([
+      supabase.from("referral_operational_events")
+        .select("id,aggregate_id,event_type,occurred_at,metadata")
+        .eq("organization_id", resolvedOrgId)
+        .eq("aggregate_type", "request")
+        .eq("aggregate_id", request.id)
+        .order("occurred_at", { ascending: false })
+        .limit(50),
+      assignmentIds.length
+        ? supabase.from("referral_operational_events")
+            .select("id,aggregate_id,event_type,occurred_at,metadata")
+            .eq("organization_id", resolvedOrgId)
+            .eq("aggregate_type", "assignment")
+            .in("aggregate_id", assignmentIds)
+            .order("occurred_at", { ascending: false })
+            .limit(100)
+        : Promise.resolve({ data: [] as CaseEvent[] }),
+    ]);
+
+    const events = [
+      ...((requestEventsRes.data ?? []) as unknown as CaseEvent[]),
+      ...((assignmentEventsRes.data ?? []) as unknown as CaseEvent[]),
+    ].sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
 
     setPartners((partnersRes.data ?? []) as unknown as PartnerOption[]);
     setSelectedPartnerId(assignment?.partner_id ?? "");
@@ -156,7 +226,7 @@ export default function CaseDetailScreen() {
       lead: (leadRes.data as unknown as CaseLead | null) ?? null,
       assignment,
       partner: (partnerRes.data as unknown as CasePartner | null) ?? null,
-      events: (eventsRes.data ?? []) as unknown as CaseEvent[],
+      events,
     });
     setLoading(false);
   }, [requestId, resolvedOrgId]);
