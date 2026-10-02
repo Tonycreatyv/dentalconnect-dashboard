@@ -82,16 +82,6 @@ function queueStatusTone(status: PartnerQueueStatus, overdue: boolean): string {
   return overdue ? "overdue" : status;
 }
 
-function reportPartnerOutcomeFailure(error: { status?: number; code?: string; message?: string; details?: string | null; hint?: string | null }) {
-  // Temporary, token-free browser diagnostic for the live 403 investigation.
-  console.warn("Partner outcome RPC rejected", {
-    status: error.status ?? null,
-    code: error.code ?? null,
-    message: error.message ?? null,
-    details: error.details ?? null,
-    hint: error.hint ?? null,
-  });
-}
 
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -496,7 +486,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
         p_appointment_at: null,
       });
       if (result.error) {
-        reportPartnerOutcomeFailure(result.error);
         setBusy(false);
         setFeedback({ tone: "error", text: "No se pudo registrar la acción. Intenta de nuevo." });
         return;
@@ -574,7 +563,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
         p_next_followup_at: isFinalStep ? nextFollowupAt : null,
       });
       if (result.error) {
-        reportPartnerOutcomeFailure(result.error);
         setBusy(false);
         setFeedback({ tone: "error", text: "No se pudo registrar el seguimiento. Intenta de nuevo." });
         return;
