@@ -51,13 +51,13 @@ Deno.test("resolved partnerId is threaded into both PartnerList and PartnerDetai
   assertStringIncludes(dashboardSource, "function PartnerDetail({ partnerId }: { partnerId: string })");
 });
 
-Deno.test("the Partner mutation path (partner_update_immigration_assignment) is untouched by this release", () => {
-  assertStringIncludes(dashboardSource, 'supabase.rpc("partner_update_immigration_assignment"');
+Deno.test("the Partner mutation path (partner_update_referral_assignment) uses the canonical generic assignment wrapper", () => {
+  assertStringIncludes(dashboardSource, 'supabase.rpc("partner_update_referral_assignment"');
   assertStringIncludes(dashboardSource, 'p_action: "correct_result"');
   assertStringIncludes(dashboardSource, 'p_correction_reason: correctionReason');
   // Exactly the pre-existing three call sites — no fourth call was added and
   // none were removed.
-  const rpcCallCount = dashboardSource.split('supabase.rpc("partner_update_immigration_assignment"').length - 1;
+  const rpcCallCount = dashboardSource.split('supabase.rpc("partner_update_referral_assignment"').length - 1;
   assertEquals(rpcCallCount, 3);
 });
 
