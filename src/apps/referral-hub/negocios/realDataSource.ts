@@ -218,14 +218,6 @@ const REAL_CAPABILITIES: NegociosCapabilities = {
   canEditLocationImages: true,
 };
 
-// Session-only local overlay (never sent to Supabase, cleared on reload) so
-// the editing UI is genuinely usable end-to-end without claiming server
-// persistence that doesn't exist yet.
-const localBusinessEdits = new Map<string, Partial<Business>>();
-const localOnlyBusinesses: Business[] = [];
-const localCouponEdits = new Map<string, Partial<Coupon>>();
-const localLocationEdits = new Map<string, Partial<SupermarketLocation>>();
-
 function toSupermarketLocation(row: LocationRow): SupermarketLocation {
   return {
     id: row.id,
@@ -234,7 +226,6 @@ function toSupermarketLocation(row: LocationRow): SupermarketLocation {
     officialMediaUrl: row.official_media_url || "",
     postalCode: row.postal_code,
     addressText: row.address_text,
-    ...(localLocationEdits.get(row.id) ?? {}),
   };
 }
 
@@ -299,14 +290,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
       businesses.push(partnerRowToBusiness(partner));
     }
 
-    // Apply the local-only overlay (never sent to Supabase) so edited
-    // fields and newly added businesses show up immediately in this
-    // session, and merge it in for both real and local-only businesses.
-    const merged = [...businesses, ...localOnlyBusinesses].map((business) => ({
-      ...business,
-      ...(localBusinessEdits.get(business.id) ?? {}),
-    }));
-    return merged;
+    return businesses;
   }
 
   async getBusiness(id: string): Promise<Business | null> {
@@ -348,11 +332,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
   // silently claiming a persistence path that doesn't exist for them.
   async updateBusiness(id: string, patch: Partial<BusinessEditInput>): Promise<Business> {
     if (!id.startsWith("partner:")) {
-      const current = localBusinessEdits.get(id) ?? {};
-      localBusinessEdits.set(id, { ...current, ...patch });
-      const updated = await this.getBusiness(id);
-      if (!updated) throw new Error("Negocio no encontrado.");
-      return updated;
+      throw new ReadOnlyError("este negocio no tiene una fila persistible en referral_partners");
     }
     const partnerId = id.slice("partner:".length);
     const result = await supabase.from("referral_partners")
@@ -406,10 +386,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
         deliverySource: (campaign.delivery_source === "db" ? "db" : "legacy") as DeliverySource,
       });
     }
-    // Local-only overlay — only ever holds a businessId for a merchant:/
-    // location: selection that has no real row to persist to (see
-    // updateCoupon); every other field is real once written.
-    return coupons.map((coupon) => ({ ...coupon, ...(localCouponEdits.get(coupon.id) ?? {}) }));
+    return coupons;
   }
 
   async getCoupon(id: string): Promise<Coupon | null> {
@@ -432,11 +409,10 @@ export class RealNegociosDataSource implements NegociosDataSource {
     if (patch.expiresAt !== undefined) columns.expires_at = patch.expiresAt;
     if (patch.deliverySource !== undefined) columns.delivery_source = patch.deliverySource;
 
-    let localBusinessId: string | undefined;
     if (patch.businessId !== undefined) {
       if (patch.businessId === "") columns.business_id = null;
       else if (patch.businessId.startsWith("partner:")) columns.business_id = patch.businessId.slice("partner:".length);
-      else localBusinessId = patch.businessId;
+      else throw new ReadOnlyError("el negocio seleccionado no tiene una fila persistible para vincular el cupón");
     }
 
     if (Object.keys(columns).length > 0) {
@@ -447,14 +423,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
         .select("id")
         .single();
       if (result.error) throw new Error(result.error.message);
-      // A real write just landed for this id — drop any stale session-local
-      // overlay so it can never shadow the freshly persisted values on the
-      // next read (re-applied below only if businessId is still
-      // unpersistable this call).
-      localCouponEdits.delete(id);
-    }
-    if (localBusinessId !== undefined) {
-      localCouponEdits.set(id, { ...(localCouponEdits.get(id) ?? {}), businessId: localBusinessId });
     }
 
     const updated = await this.getCoupon(id);
@@ -535,9 +503,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
       .select("id,campaign_id,location_key,display_name,postal_code,address_text,official_media_url,active")
       .single();
     if (result.error) throw new Error(result.error.message);
-    // A real write just landed — drop any stale session-local overlay for
-    // this id so it can never shadow the freshly persisted value.
-    localLocationEdits.delete(id);
     return toSupermarketLocation(result.data as LocationRow);
   }
 }
