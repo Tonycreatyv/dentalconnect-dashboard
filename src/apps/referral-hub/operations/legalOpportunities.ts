@@ -1,6 +1,6 @@
-import { buildIntakeSummary, referralServiceLabel, resolveReferralService, resolveSummaryTopicKey, resolveTopicDisplay, referralTopicLabel, type ReferralService } from "../../referral-partner/referralPresentation";
+import { buildIntakeSummary, referralServiceLabel, resolveReferralService, resolveSummaryTopicKey, resolveTopicDisplay, type ReferralService } from "../../referral-partner/referralPresentation";
 
-export type OpportunityServiceFilter = "all" | ReferralService;
+export type OpportunityServiceFilter = "all" | ReferralService | "furniture" | "representative";
 
 export function resolveOpportunityService(serviceId: string, intake: Record<string, unknown>): ReferralService | null {
   if (serviceId === "luis_inmigracion") return "immigration";
@@ -11,6 +11,12 @@ export function resolveOpportunityService(serviceId: string, intake: Record<stri
 }
 
 export function legalOpportunityPresentation(serviceId: string, intake: Record<string, unknown>, topic: string | null) {
+  if (serviceId === "luis_muebles") {
+    return { service: null, serviceLabel: "Muebles", topic: null, summary: null, description: null };
+  }
+  if (serviceId === "luis_representante") {
+    return { service: null, serviceLabel: "Hablar con nuestro equipo", topic: null, summary: null, description: null };
+  }
   const service = resolveOpportunityService(serviceId, intake);
   const summaryKey = resolveSummaryTopicKey(intake) ?? topic;
   return {
@@ -23,5 +29,8 @@ export function legalOpportunityPresentation(serviceId: string, intake: Record<s
 }
 
 export function matchesOpportunityServiceFilter(serviceId: string, intake: Record<string, unknown>, filter: OpportunityServiceFilter): boolean {
-  return filter === "all" || resolveOpportunityService(serviceId, intake) === filter;
+  if (filter === "all") return true;
+  if (filter === "furniture") return serviceId === "luis_muebles";
+  if (filter === "representative") return serviceId === "luis_representante";
+  return resolveOpportunityService(serviceId, intake) === filter;
 }

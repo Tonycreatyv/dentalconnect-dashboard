@@ -14,6 +14,9 @@ export type PipelineLead = {
   channel: string | null;
   channel_user_id: string | null;
   phone: string | null;
+  last_channel: string | null;
+  handoff_to_human: boolean;
+  last_staff_seen_at: string | null;
   created_at: string;
   last_message_at: string | null;
   updated_at: string | null;
@@ -47,7 +50,7 @@ export function useLeadsPipeline() {
     const [leadsRes, requestsRes, staffMessagesRes] = await Promise.all([
       supabase
         .from("leads")
-        .select("id,full_name,first_name,last_name,channel,channel_user_id,phone,created_at,last_message_at,updated_at,last_user_reply_at,handoff_to_human,state")
+        .select("id,full_name,first_name,last_name,channel,last_channel,channel_user_id,phone,created_at,last_message_at,updated_at,last_user_reply_at,last_staff_seen_at,handoff_to_human,state")
         .eq("organization_id", resolvedOrgId)
         .order("updated_at", { ascending: false })
         .limit(500),
@@ -87,9 +90,9 @@ export function useLeadsPipeline() {
     }
     type LeadRow = {
       id: string; full_name: string | null; first_name: string | null; last_name: string | null;
-      channel: string | null; channel_user_id: string | null; phone: string | null;
+      channel: string | null; last_channel: string | null; channel_user_id: string | null; phone: string | null;
       created_at: string; last_message_at: string | null; updated_at: string | null; last_user_reply_at: string | null;
-      handoff_to_human: boolean; state: unknown;
+      last_staff_seen_at: string | null; handoff_to_human: boolean; state: unknown;
     };
     const rows: PipelineLead[] = ((leadsRes.data ?? []) as unknown as LeadRow[]).map((row) => {
       const request = latestRequestByLead.get(row.id) ?? null;
@@ -101,6 +104,9 @@ export function useLeadsPipeline() {
         channel: row.channel,
         channel_user_id: row.channel_user_id,
         phone: row.phone,
+        last_channel: row.last_channel,
+        handoff_to_human: row.handoff_to_human,
+        last_staff_seen_at: row.last_staff_seen_at,
         created_at: row.created_at,
         last_message_at: row.last_message_at,
         updated_at: row.updated_at,

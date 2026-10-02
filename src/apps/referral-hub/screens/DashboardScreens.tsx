@@ -320,13 +320,28 @@ export function ClientesScreen() {
 // via useImmigrationInbox). Deliberately does not invent a resolver for
 // other services (see the UX audit's Annex B): this screen only shows what
 // already has a trustworthy operational status.
-type OpportunityStatusFilter = "all" | "por_contactar" | "contactado" | "citas" | "cerrados";
+type OpportunityStatusFilter = "all" | "nuevo" | "en_gestion" | "cita" | "cerrado";
 
 function opportunityStatusBucket(operationalStatus: string): Exclude<OpportunityStatusFilter, "all"> {
-  if (operationalStatus === "Contactado") return "contactado";
-  if (operationalStatus === "Cita programada") return "citas";
-  if (operationalStatus === "Convertido" || operationalStatus === "Cerrado sin conversión") return "cerrados";
-  return "por_contactar";
+  if (operationalStatus === "Cita programada") return "cita";
+  if (operationalStatus === "Convertido" || operationalStatus === "Cerrado sin conversión") return "cerrado";
+  if (operationalStatus === "Contactado" || operationalStatus === "Pendiente de seguimiento") return "en_gestion";
+  return "nuevo";
+}
+
+function opportunityStatusLabel(operationalStatus: string): string {
+  const bucket = opportunityStatusBucket(operationalStatus);
+  if (bucket === "en_gestion") return "En gestión";
+  if (bucket === "cita") return "Cita";
+  if (bucket === "cerrado") return "Cerrado";
+  return "Nuevo";
+}
+
+function opportunityStatusTone(operationalStatus: string): StatusTone {
+  const bucket = opportunityStatusBucket(operationalStatus);
+  if (bucket === "cerrado" || bucket === "cita") return "success";
+  if (bucket === "en_gestion") return "warning";
+  return "neutral";
 }
 
 export function OportunidadesScreen() {
@@ -345,7 +360,7 @@ export function OportunidadesScreen() {
     [opportunities.requests, serviceFilter, statusFilter],
   );
   const counts = useMemo(() => {
-    const base = { por_contactar: 0, contactado: 0, citas: 0, cerrados: 0 };
+    const base = { nuevo: 0, en_gestion: 0, cita: 0, cerrado: 0 };
     for (const request of opportunities.requests) base[opportunityStatusBucket(request.operationalStatus)] += 1;
     return base;
   }, [opportunities.requests]);
@@ -354,8 +369,8 @@ export function OportunidadesScreen() {
     <div className="hub-page hub-page--wide">
       <PageHeader
         eyebrow="Operación"
-        title="Oportunidades"
-        subtitle="Casos enviados a aliados y su estado actual."
+        title="Operación"
+        subtitle="Casos activos, responsables, seguimiento y cierres."
         meta={<span className="hub-page-count">{filtered.length} {filtered.length === 1 ? "caso" : "casos"}</span>}
         actions={<button type="button" className="hub-secondary" onClick={() => void opportunities.load()}>Actualizar</button>}
       />
@@ -363,7 +378,7 @@ export function OportunidadesScreen() {
       <div className="hub-filter-group">
         <span className="hub-filter-group-label">Servicio</span>
         <FilterTabs
-          tabs={[{ id: "all", label: "Todas" }, { id: "immigration", label: "Inmigración" }, { id: "auto_accident", label: "Accidentes" }, { id: "dui", label: "DUI" }, { id: "criminal", label: "Criminal" }]}
+          tabs={[{ id: "all", label: "Todas" }, { id: "immigration", label: "Inmigración" }, { id: "auto_accident", label: "Accidentes" }, { id: "dui", label: "DUI" }, { id: "criminal", label: "Criminal" }, { id: "furniture", label: "Muebles" }, { id: "representative", label: "Equipo" }]}
           activeId={serviceFilter}
           onChange={(id) => setServiceFilter(id as OpportunityServiceFilter)}
         />
@@ -374,10 +389,10 @@ export function OportunidadesScreen() {
         <FilterTabs
           tabs={[
             { id: "all", label: "Todos los estados", count: opportunities.requests.length },
-            { id: "por_contactar", label: "Por contactar", count: counts.por_contactar },
-            { id: "contactado", label: "Contactado", count: counts.contactado },
-            { id: "citas", label: "Citas", count: counts.citas },
-            { id: "cerrados", label: "Cerrados", count: counts.cerrados },
+            { id: "nuevo", label: "Nuevo", count: counts.nuevo },
+            { id: "en_gestion", label: "En gestión", count: counts.en_gestion },
+            { id: "cita", label: "Cita", count: counts.cita },
+            { id: "cerrado", label: "Cerrado", count: counts.cerrado },
           ]}
           activeId={statusFilter}
           onChange={(id) => setStatusFilter(id as OpportunityStatusFilter)}
@@ -389,13 +404,13 @@ export function OportunidadesScreen() {
       ) : opportunities.error ? (
         <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar las oportunidades" description={opportunities.error} />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Users} title="Sin oportunidades en esta categoría" description="Las solicitudes legales enviadas por el Flow aparecerán aquí." />
+        <EmptyState icon={Users} title="Sin oportunidades en esta categoría" description="Las solicitudes de servicio aparecerán aquí." />
       ) : (
         <div className="hub-opp-list">
           {filtered.map((request) => {
             const presentation = legalOpportunityPresentation(request.serviceId, request.intake, request.topic);
             return (
-            <Link key={request.id} className="hub-opp-card" to={`/clientes/${request.leadId}`} state={{ from: "/oportunidades" }}>
+            <Link key={request.id} className="hub-opp-card" to={`/operacion/${request.id}`} state={{ from: "/operacion" }}>
               <div className="hub-opp-card-main">
                 <Avatar name={request.leadName} seed={request.leadId} />
                 <div>
@@ -407,7 +422,7 @@ export function OportunidadesScreen() {
                 </div>
               </div>
               <div className="hub-opp-card-meta">
-                <StatusBadge tone={immigrationOperationalTone(request.operationalStatus)} label={request.operationalStatus} />
+                <StatusBadge tone={opportunityStatusTone(request.operationalStatus)} label={opportunityStatusLabel(request.operationalStatus)} />
                 <small>{request.assignment?.partnerName ? `Asignado a: ${request.assignment.partnerName}` : "Sin aliado disponible"}</small>
                 <small>Última actividad {formatDateTime(request.lastActivityAt)}</small>
               </div>
@@ -424,6 +439,8 @@ const SERVICE_REQUEST_LABEL: Record<string, string> = {
   luis_accidente: "Accidente de auto",
   luis_dui: "DUI",
   luis_criminal: "Defensa criminal",
+  luis_dui_criminal: "DUI / Criminal",
+  luis_muebles: "Muebles",
   luis_inmigracion: "Inmigración",
   luis_representante: "Solicitud de asesor",
   luis_eventos: "Eventos comunitarios",
@@ -468,7 +485,7 @@ const LEGACY_REQUEST_STATUS_TONE: Record<string, StatusTone> = {
 // source tag, so a legacy referral_service_requests row is never mistaken
 // for — or silently merged with — a real Unified Services Flow submission,
 // even when both happen to describe the same underlying service.
-function SourceTag({ source }: { source: "WhatsApp Flow" | "Cupón" | "Sistema anterior" }) {
+function SourceTag({ source }: { source: "WhatsApp Flow" | "Cupón" | "Caso" }) {
   return <span className="hub-source-tag">{source}</span>;
 }
 
@@ -492,6 +509,8 @@ export function ContactDetailScreen() {
   // requirement extended to the detail screen).
   const pipelineLead = pipeline.leads.find((l) => l.id === lead.id);
   const immigrationRequests = immigrationInbox.requests.filter((request) => request.leadId === lead.id);
+  const canonicalImmigrationRequestIds = new Set(immigrationRequests.map((request) => request.id));
+  const otherServiceRequests = detail.serviceRequests.filter((request) => !canonicalImmigrationRequestIds.has(request.id));
   // The "Consultas profesionales" card below is generic across immigration/
   // accident/DUI intake and has no assignment data of its own — hardcoding
   // "Sin asignar" there contradicted the canonical immigration section's
@@ -509,7 +528,14 @@ export function ContactDetailScreen() {
   // other legal-intake type (accident/DUI) still renders here as before,
   // since neither has a canonical resolver of its own.
   const showLegalIntakeCard = Boolean(
-    detail.legalIntake && !(detail.legalIntake.intakeType === "IMMIGRATION" && immigrationRequests.length > 0),
+    detail.legalIntake && !detail.serviceRequests.some((request) => {
+      const kind = detail.legalIntake?.intakeType;
+      if (kind === "IMMIGRATION") return request.service_id === "luis_inmigracion";
+      if (kind === "AUTO_ACCIDENT") return request.service_id === "luis_accidente";
+      if (kind === "DUI") return ["luis_dui", "luis_dui_criminal", "luis_accidente"].includes(request.service_id);
+      if (kind === "CRIMINAL" || kind === "DUI_CRIMINAL") return ["luis_criminal", "luis_dui_criminal", "luis_accidente"].includes(request.service_id);
+      return false;
+    }),
   );
 
   return (
@@ -632,12 +658,12 @@ export function ContactDetailScreen() {
           historical so it is never confused with a current Flow
           submission. */}
       <section className="hub-section">
-        <h2>Historial anterior</h2>
-        {detail.serviceRequests.length === 0 ? (
-          <EmptyState icon={Users} title="Sin historial anterior" />
+        <h2>Casos y solicitudes</h2>
+        {otherServiceRequests.length === 0 ? (
+          <EmptyState icon={Users} title="Sin otros casos" />
         ) : (
           <div className="hub-list">
-            {detail.serviceRequests.map((request) => (
+            {otherServiceRequests.map((request) => (
               <div key={request.id} className="hub-list-row">
                 <div>
                   {(() => {
@@ -655,7 +681,7 @@ export function ContactDetailScreen() {
                   </small>
                 </div>
                 <div className="hub-list-row-meta">
-                  <SourceTag source="Sistema anterior" />
+                  <SourceTag source="Caso" />
                   <StatusBadge tone={LEGACY_REQUEST_STATUS_TONE[request.status] ?? "neutral"} label={LEGACY_REQUEST_STATUS_LABEL[request.status] ?? request.status} />
                 </div>
               </div>

@@ -28,7 +28,7 @@ export const QUEUE_STATUS_LABEL: Record<PartnerQueueStatus, string> = {
 // anything else.
 export function resolvePartnerQueueStatus(item: Pick<QueueItem, "status" | "workStatus">): PartnerQueueStatus {
   if (item.workStatus === "converted") return "approved";
-  if (item.workStatus === "not_converted" || item.status === "rejected") return "disqualified";
+  if (item.workStatus === "not_converted") return "disqualified";
   if (["follow_up", "contacted", "appointment_scheduled", "in_progress"].includes(item.workStatus)) return "follow_up";
   return "new";
 }
@@ -60,7 +60,7 @@ const GENERIC_FOLLOW_UP_REASONS: Array<{ id: FollowUpReason; label: string }> = 
   { id: "other", label: "Otro" },
 ];
 
-export function followUpReasonsForService(service: ReferralService): Array<{ id: FollowUpReason; label: string }> {
+export function followUpReasonsForService(service: ReferralService | null): Array<{ id: FollowUpReason; label: string }> {
   if (service === "auto_accident") return [
     { id: "no_answer", label: "No respondió" },
     { id: "missing_police_report", label: "Falta reporte policial" },

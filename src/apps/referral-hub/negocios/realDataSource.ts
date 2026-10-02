@@ -47,10 +47,8 @@ import type {
 // to guard against here). The one field that is NOT always representable
 // is businessId: it can only be persisted for a business backed by a real
 // referral_partners row (id prefixed "partner:"), since business_id is a
-// real FK to that table — selecting one of the three hardcoded merchant
-// businesses or a supermarket location (no referral_partners row at all)
-// stays a session-local-only selection, same honesty rule as
-// updateBusiness below.
+// real FK to that table. Derived merchant/location businesses remain
+// read-only association targets until they have a canonical partner row.
 //
 // referral_benefit_campaign_locations got a real, deliberately narrow
 // owner/admin write path via docs/proposed-migrations/20260824_draft_C_
@@ -64,10 +62,8 @@ import type {
 // canEditLocationImages is genuinely true now. canUploadImages stays
 // false (no Storage bucket exists yet). The three hardcoded merchant
 // businesses (Médico Urgencias/Dental Now 14/Ultra Cargo, id prefixed
-// "merchant:") still have no referral_partners row to write to at all —
-// editing those still lands in the session-local overlay below, and the
-// UI must check business.id.startsWith("partner:") before trusting
-// capabilities.canEditBusiness for a given business (see BusinessDetail.tsx).
+// "merchant:") still have no referral_partners row to write to at all.
+// They are read-only in the production UI until such a row exists.
 
 const ORGANIZATION_ID = "luis-gabriel-referral-hub";
 
@@ -213,17 +209,10 @@ const REAL_CAPABILITIES: NegociosCapabilities = {
   canEditBusiness: true,
   canCreateBusiness: true,
   canEditCoupon: true,
+  canCreateCampaign: false,
   canUploadImages: false,
   canEditLocationImages: true,
 };
-
-// Session-only local overlay (never sent to Supabase, cleared on reload) so
-// the editing UI is genuinely usable end-to-end without claiming server
-// persistence that doesn't exist yet.
-const localBusinessEdits = new Map<string, Partial<Business>>();
-const localOnlyBusinesses: Business[] = [];
-const localCouponEdits = new Map<string, Partial<Coupon>>();
-const localLocationEdits = new Map<string, Partial<SupermarketLocation>>();
 
 function toSupermarketLocation(row: LocationRow): SupermarketLocation {
   return {
@@ -233,7 +222,6 @@ function toSupermarketLocation(row: LocationRow): SupermarketLocation {
     officialMediaUrl: row.official_media_url || "",
     postalCode: row.postal_code,
     addressText: row.address_text,
-    ...(localLocationEdits.get(row.id) ?? {}),
   };
 }
 
@@ -298,14 +286,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
       businesses.push(partnerRowToBusiness(partner));
     }
 
-    // Apply the local-only overlay (never sent to Supabase) so edited
-    // fields and newly added businesses show up immediately in this
-    // session, and merge it in for both real and local-only businesses.
-    const merged = [...businesses, ...localOnlyBusinesses].map((business) => ({
-      ...business,
-      ...(localBusinessEdits.get(business.id) ?? {}),
-    }));
-    return merged;
+    return businesses;
   }
 
   async getBusiness(id: string): Promise<Business | null> {
@@ -341,17 +322,11 @@ export class RealNegociosDataSource implements NegociosDataSource {
   // Real write for a business backed by an actual referral_partners row
   // (id prefixed "partner:") — scoped by both organization_id and id, so
   // RLS and this query agree on the same boundary. The three hardcoded
-  // merchant businesses and the three supermarket locations have no
-  // referral_partners row at all (Gate 1-B/1-C territory, not this file)
-  // and keep using the session-local overlay exactly as before — never
-  // silently claiming a persistence path that doesn't exist for them.
+  // merchant businesses and supermarket locations have no referral_partners
+  // row. Reject edits rather than pretending to persist them.
   async updateBusiness(id: string, patch: Partial<BusinessEditInput>): Promise<Business> {
     if (!id.startsWith("partner:")) {
-      const current = localBusinessEdits.get(id) ?? {};
-      localBusinessEdits.set(id, { ...current, ...patch });
-      const updated = await this.getBusiness(id);
-      if (!updated) throw new Error("Negocio no encontrado.");
-      return updated;
+      throw new ReadOnlyError("este negocio no tiene una fila persistible en referral_partners");
     }
     const partnerId = id.slice("partner:".length);
     const result = await supabase.from("referral_partners")
@@ -405,10 +380,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
         deliverySource: (campaign.delivery_source === "db" ? "db" : "legacy") as DeliverySource,
       });
     }
-    // Local-only overlay — only ever holds a businessId for a merchant:/
-    // location: selection that has no real row to persist to (see
-    // updateCoupon); every other field is real once written.
-    return coupons.map((coupon) => ({ ...coupon, ...(localCouponEdits.get(coupon.id) ?? {}) }));
+    return coupons;
   }
 
   async getCoupon(id: string): Promise<Coupon | null> {
@@ -417,10 +389,9 @@ export class RealNegociosDataSource implements NegociosDataSource {
   }
 
   // Real write: referral_coupon_campaigns has owner/admin UPDATE RLS +
-  // GRANT (Gate 1-B, applied 2026-08-24). businessId is the one field that
-  // cannot always be represented as the real business_id FK — see the
-  // class-level comment — so a merchant:/location: selection is kept as a
-  // session-local overlay instead of being written or silently dropped.
+  // GRANT (Gate 1-B, applied 2026-08-24). businessId is only writable when
+  // it maps to a real referral_partners row; derived merchant/location ids
+  // are rejected rather than stored ephemerally.
   async updateCoupon(id: string, patch: Partial<Pick<Coupon, "displayName" | "businessId" | "imageUrl" | "customerCopy" | "termsText" | "active" | "expiresAt" | "deliverySource">>): Promise<Coupon> {
     const columns: Record<string, unknown> = {};
     if (patch.displayName !== undefined) columns.display_name = patch.displayName;
@@ -431,11 +402,10 @@ export class RealNegociosDataSource implements NegociosDataSource {
     if (patch.expiresAt !== undefined) columns.expires_at = patch.expiresAt;
     if (patch.deliverySource !== undefined) columns.delivery_source = patch.deliverySource;
 
-    let localBusinessId: string | undefined;
     if (patch.businessId !== undefined) {
       if (patch.businessId === "") columns.business_id = null;
       else if (patch.businessId.startsWith("partner:")) columns.business_id = patch.businessId.slice("partner:".length);
-      else localBusinessId = patch.businessId;
+      else throw new ReadOnlyError("el negocio seleccionado no tiene una fila persistible para vincular el cupón");
     }
 
     if (Object.keys(columns).length > 0) {
@@ -446,14 +416,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
         .select("id")
         .single();
       if (result.error) throw new Error(result.error.message);
-      // A real write just landed for this id — drop any stale session-local
-      // overlay so it can never shadow the freshly persisted values on the
-      // next read (re-applied below only if businessId is still
-      // unpersistable this call).
-      localCouponEdits.delete(id);
-    }
-    if (localBusinessId !== undefined) {
-      localCouponEdits.set(id, { ...(localCouponEdits.get(id) ?? {}), businessId: localBusinessId });
     }
 
     const updated = await this.getCoupon(id);
@@ -534,9 +496,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
       .select("id,campaign_id,location_key,display_name,postal_code,address_text,official_media_url,active")
       .single();
     if (result.error) throw new Error(result.error.message);
-    // A real write just landed — drop any stale session-local overlay for
-    // this id so it can never shadow the freshly persisted value.
-    localLocationEdits.delete(id);
     return toSupermarketLocation(result.data as LocationRow);
   }
 }

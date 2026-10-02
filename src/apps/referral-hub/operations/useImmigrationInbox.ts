@@ -3,6 +3,7 @@ import { supabase } from "../../../lib/supabaseClient";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
 import { normalizeImmigrationConsent, type ImmigrationInboxRow } from "./immigrationInbox";
 import { resolveImmigrationOpportunity, type ImmigrationOpportunity } from "./immigrationOpportunities";
+import { LEGAL_SERVICE_IDS } from "./luisCatalog";
 
 type RequestRow = {
   id: string;
@@ -20,7 +21,7 @@ type RequestRow = {
 
 export type OperationalOpportunity = ImmigrationOpportunity & { serviceId: string; intake: Record<string, unknown> };
 const IMMIGRATION_SERVICE_IDS = ["luis_inmigracion"];
-const LEGAL_OPPORTUNITY_SERVICE_IDS = ["luis_inmigracion", "luis_accidente", "luis_dui", "luis_criminal"];
+const LEGAL_OPPORTUNITY_SERVICE_IDS = [...LEGAL_SERVICE_IDS, "luis_muebles"] as const;
 
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -52,7 +53,7 @@ function useOperationalOpportunities(serviceIds: readonly string[]) {
       .in("service_id", [...serviceIds])
       .order("created_at", { ascending: false });
     if (result.error) {
-      if (!silent) { setRequests([]); setError("No se pudieron cargar las solicitudes de inmigración."); setLoading(false); }
+      if (!silent) { setRequests([]); setError("No se pudieron cargar los casos operativos."); setLoading(false); }
       return;
     }
     const requestRows = (result.data ?? []) as unknown as RequestRow[];
@@ -61,6 +62,7 @@ function useOperationalOpportunities(serviceIds: readonly string[]) {
       .select("id,request_id,status,work_status,assigned_at,updated_at,partner_id")
       .eq("organization_id", resolvedOrgId)
       .in("request_id", requestRows.map((request) => request.id))
+      .in("status", ["pending_assignment", "assigned", "accepted"])
       .order("assigned_at", { ascending: false }) : { data: [], error: null };
     const assignmentRows = (assignmentResult.data ?? []) as Array<{ id:string; request_id:string; status:string; work_status:string; assigned_at:string; updated_at:string; partner_id:string }>;
     const partnerIds = [...new Set(assignmentRows.map((assignment) => assignment.partner_id))];

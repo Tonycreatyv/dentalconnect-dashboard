@@ -16,10 +16,11 @@ import ReferralQrEntry from "./pages/ReferralQrEntry";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
-import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen, InicioScreen, OportunidadesScreen } from "./screens/DashboardScreens";
+import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen, OportunidadesScreen } from "./screens/DashboardScreens";
 import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
+import CaseDetailScreen from "./screens/CaseDetailScreen";
 import EmptyState from "./ui/EmptyState";
 import NegociosHub from "./negocios/NegociosScreens";
 import NegociosBusinessDetail from "./negocios/BusinessDetail";
@@ -50,8 +51,10 @@ function ProductRoutes() {
       <Route path="app/*" element={<RequirePartner><PartnerShell /></RequirePartner>} />
     </Route>
     <Route path="/" element={<RequireAuth><ReferralOrganizationProvider><BoltShell /></ReferralOrganizationProvider></RequireAuth>}>
-      <Route index element={<InicioScreen />} />
-      <Route path="oportunidades" element={<OportunidadesScreen />} />
+      <Route index element={<Navigate to="/operacion" replace />} />
+      <Route path="operacion" element={<OportunidadesScreen />} />
+      <Route path="operacion/:requestId" element={<CaseDetailScreen />} />
+      <Route path="oportunidades" element={<Navigate to="/operacion" replace />} />
       <Route path="clientes" element={<ClientesScreen />} />
       <Route path="clientes/:leadId" element={<ContactDetailScreen />} />
       <Route path="messages" element={<MessagesWorkspace />} />
@@ -61,11 +64,9 @@ function ProductRoutes() {
       <Route path="campanas/servicio/:serviceId" element={<ServiceDetailScreen />} />
       <Route path="campanas/negocio/:businessId" element={<BusinessDetailScreen />} />
 
-      {/* New business-centered tree (isolated module, local demo data only —
-          see src/apps/referral-hub/negocios/dataSource.ts). Primary nav now
-          points here instead of campanas; /campanas* above stays live and
-          reachable by URL, unredirected, until this tree is reviewed and
-          approved for cutover. */}
+      {/* Business-centered network workspace. Its active data source reads
+          production Supabase data; only capabilities backed by persistent
+          writes are exposed in the UI. */}
       <Route path="negocios" element={<NegociosHub />} />
       <Route path="negocios/negocio/:businessId" element={<NegociosBusinessDetail />} />
       <Route path="negocios/cupon/:couponId" element={<NegociosCouponEditor />} />
@@ -112,9 +113,9 @@ function ProductRoutes() {
       <Route path="network/stores/:locationId/coupons" element={<StoreWorkspaceScreen section="coupons" />} />
       <Route path="network/stores/:locationId/coverage" element={<StoreWorkspaceScreen section="coverage" />} />
       <Route path="network/stores/:locationId/activity" element={<StoreWorkspaceScreen section="activity" />} />
-      <Route path="attention" element={<Navigate to="/work" replace />} />
-      <Route path="opportunities" element={<Navigate to="/oportunidades" replace />} />
-      <Route path="assignments" element={<Navigate to="/oportunidades" replace />} />
+      <Route path="attention" element={<Navigate to="/operacion" replace />} />
+      <Route path="opportunities" element={<Navigate to="/operacion" replace />} />
+      <Route path="assignments" element={<Navigate to="/operacion" replace />} />
       <Route path="partners" element={<Navigate to="/campanas?view=negocios" replace />} />
       <Route path="partner-contacts" element={<Navigate to="/campanas?view=negocios" replace />} />
       <Route path="supermarkets" element={<Navigate to="/campanas?view=negocios" replace />} />

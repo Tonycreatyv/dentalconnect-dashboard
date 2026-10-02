@@ -2,6 +2,15 @@ export const REFERRAL_HUB_BUSINESS_TYPE = "referral_hub" as const;
 export const REFERRAL_HUB_CANONICAL_ORGANIZATION_ID =
   "luis-gabriel-referral-hub";
 
+
+export const JAMES_FURNITURE = {
+  displayName: "James Furniture & Mattress Deals",
+  address: "5211 Jimmy Carter Blvd Ste A, Norcross, GA 30093",
+  websiteUrl: null as string | null,
+  promoImageUrl:
+    "https://referral.creatyv.io/images/coupons/luis/james-furniture-downpayment-sept-2026.jpg",
+} as const;
+
 export type ReferralHubCouponAssetConfig = {
   service_id: "luis_cupon_medico" | "luis_cupon_super" | "luis_cupon_dental";
   image_url: string;

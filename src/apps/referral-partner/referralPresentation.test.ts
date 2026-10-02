@@ -368,3 +368,17 @@ Deno.test("buildHumanSummary still embeds the incident date by default — inclu
   });
   assert(summary.includes("el 2 de septiembre de 2026"));
 });
+
+
+Deno.test("non-legal services have explicit neutral presentation labels", () => {
+  assertEquals(resolveReferralService("luis_muebles"), "furniture");
+  assertEquals(referralServiceLabel("furniture"), "Muebles");
+  assertEquals(resolveReferralService("luis_representante"), "representative");
+  assertEquals(referralServiceLabel("representative"), "Hablar con nuestro equipo");
+  assertEquals(referralServiceLabel(null), "Servicio");
+});
+
+Deno.test("combined DUI/Criminal production id uses topic to avoid false DUI classification", () => {
+  assertEquals(resolveReferralService("luis_dui_criminal", { intake_type: "DUI_CRIMINAL", topic: "DUI" }), "dui");
+  assertEquals(resolveReferralService("luis_dui_criminal", { intake_type: "DUI_CRIMINAL", topic: "CRIMINAL_CHARGE" }), "criminal");
+});

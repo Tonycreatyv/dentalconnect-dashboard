@@ -82,16 +82,6 @@ function queueStatusTone(status: PartnerQueueStatus, overdue: boolean): string {
   return overdue ? "overdue" : status;
 }
 
-function reportPartnerOutcomeFailure(error: { status?: number; code?: string; message?: string; details?: string | null; hint?: string | null }) {
-  // Temporary, token-free browser diagnostic for the live 403 investigation.
-  console.warn("Partner outcome RPC rejected", {
-    status: error.status ?? null,
-    code: error.code ?? null,
-    message: error.message ?? null,
-    details: error.details ?? null,
-    hint: error.hint ?? null,
-  });
-}
 
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -189,6 +179,7 @@ function usePartnerReferrals(partnerId: string) {
         "id,request_id,partner_id,status,work_status,assigned_at,updated_at,follow_up_reason,next_followup_at,follow_up_attempt_count,referral_service_requests!inner(id,lead_id,service_id,postal_code,intake,consent,intake_complete,status,case_cycle,created_at,leads(full_name,phone,channel_user_id))",
       )
       .eq("partner_id", partnerId)
+      .in("status", ["assigned", "accepted"])
       .order("assigned_at", { ascending: false });
     if (result.error) {
       if (!silent) { setError("No se pudieron cargar las referencias asignadas."); setRows([]); }
@@ -489,14 +480,13 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     });
     for (let index = 0; index < steps.length; index += 1) {
       const isFinalStep = index === steps.length - 1;
-      const result = await supabase.rpc("partner_update_immigration_assignment", {
+      const result = await supabase.rpc("partner_update_referral_assignment", {
         p_assignment_id: assignmentId,
         p_action: steps[index],
         p_note: isFinalStep ? finalNote : null,
         p_appointment_at: null,
       });
       if (result.error) {
-        reportPartnerOutcomeFailure(result.error);
         setBusy(false);
         setFeedback({ tone: "error", text: "No se pudo registrar la acción. Intenta de nuevo." });
         return;
@@ -516,7 +506,7 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     }
     setBusy(true);
     setFeedback(null);
-    const result = await supabase.rpc("partner_update_immigration_assignment", {
+    const result = await supabase.rpc("partner_update_referral_assignment", {
       p_assignment_id: row.id,
       p_action: "correct_result",
       p_note: correctionNote.trim() || null,
@@ -526,7 +516,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
       p_correction_reason: correctionReason,
     });
     if (result.error) {
-      reportPartnerOutcomeFailure(result.error);
       setBusy(false);
       setFeedback({ tone: "error", text: "No se pudo corregir el resultado. Intenta de nuevo." });
       return;
@@ -565,7 +554,7 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     const finalNote = note.trim() || null;
     for (let index = 0; index < steps.length; index += 1) {
       const isFinalStep = index === steps.length - 1;
-      const result = await supabase.rpc("partner_update_immigration_assignment", {
+      const result = await supabase.rpc("partner_update_referral_assignment", {
         p_assignment_id: assignmentId,
         p_action: steps[index],
         p_note: isFinalStep ? finalNote : null,
@@ -574,7 +563,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
         p_next_followup_at: isFinalStep ? nextFollowupAt : null,
       });
       if (result.error) {
-        reportPartnerOutcomeFailure(result.error);
         setBusy(false);
         setFeedback({ tone: "error", text: "No se pudo registrar el seguimiento. Intenta de nuevo." });
         return;

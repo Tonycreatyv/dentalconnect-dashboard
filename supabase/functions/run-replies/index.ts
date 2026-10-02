@@ -78,6 +78,8 @@ import {
 } from "./domain/referralHub/serviceRequestOrchestrator.ts";
 import { captureImmigrationFlowRequest } from "./domain/referralHub/immigrationFlowRequest.ts";
 import { captureLegalFlowRequest } from "./domain/referralHub/legalFlowRequest.ts";
+import { captureDuiCriminalFlowRequest } from "./domain/referralHub/duiCriminalFlowRequest.ts";
+import { captureFurnitureFlowRequest } from "./domain/referralHub/furnitureFlowRequest.ts";
 import {
   clearMetaTestDemoTakeoverState,
   metaTestDemoResetAction,
@@ -110,6 +112,7 @@ import {
   type WhatsAppInteractiveListSpec,
 } from "../_shared/metaMessageAdapter.ts";
 import { handleReferralHubProductTurn } from "../_products/referral-hub/index.ts";
+import { JAMES_FURNITURE } from "../_products/referral-hub/config.ts";
 import {
   LUIS_BENEFITS,
   LUIS_BENEFITS_FLOW_ACTION,
@@ -127,6 +130,7 @@ import {
   luisBenefitsFlowCta,
   luisUnifiedFlowCta,
   parseLuisBenefitFlowCompletion,
+  parseLuisFurnitureFlowCompletion,
   parseLuisLegalFlowCompletion,
   resolveCouponMediaUrl,
   resolveCouponPartnerName,
@@ -1014,6 +1018,31 @@ async function buildLuisLegalFlowCompletionResult(args: {
       consentSource: completion.consent_source,
       fields: completion,
     });
+  } else if (completion.intake_type === "DUI_CRIMINAL") {
+    const raw = args.rawFlowResponse && typeof args.rawFlowResponse === "object"
+      ? args.rawFlowResponse as Record<string, unknown>
+      : {};
+    const sharingConsent = safeStr(raw.sharing_consent, "");
+    const consentVersion = safeStr(raw.consent_version, "");
+    const consentSource = safeStr(raw.consent_source, "");
+    if (
+      (sharingConsent === "AUTHORIZED" || sharingConsent === "DECLINED") &&
+      consentVersion === "luis_dui_criminal_sharing_v1" &&
+      consentSource === "whatsapp_flow"
+    ) {
+      await captureDuiCriminalFlowRequest({
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        channelUserId: args.channelUserId,
+        deliveryKey: args.deliveryKey,
+        completedAt: legalIntake.completed_at,
+        sharingConsent,
+        consentVersion,
+        consentSource,
+        fields: { ...completion, ...raw },
+      });
+    }
   }
   // Preserve the existing staff-side follow-up event, but do not use
   // luisHumanHandoffResult: a completion is not a request for live human
@@ -1040,7 +1069,48 @@ async function buildLuisLegalFlowCompletionResult(args: {
   };
 }
 
-function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "LEGAL" | "UNKNOWN"): GenerateReplyResult {
+async function buildLuisFurnitureFlowCompletionResult(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  rawFlowResponse: unknown;
+  channelUserId: string;
+  deliveryKey: string;
+}): Promise<GenerateReplyResult | null> {
+  if (args.organizationId !== "luis-gabriel-referral-hub" || !args.leadId) return null;
+  const completion = parseLuisFurnitureFlowCompletion(args.rawFlowResponse);
+  if (!completion) return null;
+  const leadUpdate = await args.supabase.from("leads").update({
+    full_name: completion.full_name,
+    first_name: firstNameFromFlowName(completion.full_name),
+    updated_at: nowIso(),
+  }).eq("id", args.leadId).eq("organization_id", args.organizationId);
+  if (leadUpdate.error) throw new Error("furniture_flow_lead_update_failed");
+  const completedAt = nowIso();
+  await captureFurnitureFlowRequest({
+    supabase: args.supabase,
+    organizationId: args.organizationId,
+    leadId: args.leadId,
+    channelUserId: args.channelUserId,
+    deliveryKey: args.deliveryKey,
+    completedAt,
+    fullName: completion.full_name,
+    postalCode: completion.postal_code,
+  });
+  return {
+    reply: "¡Listo! Recibimos tu información. Mira la promoción de James Furniture.",
+    statePatch: {
+      lastIntent: "luis_furniture_request",
+      luis_furniture: { postal_code: completion.postal_code, completed_at: completedAt },
+    },
+    outboundMessages: [
+      { type: "image", url: JAMES_FURNITURE.promoImageUrl, altText: "Promoción de James Furniture" },
+    ],
+    debugNote: "referral_hub:luis_furniture_flow_completed",
+  };
+}
+
+function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "FURNITURE" | "LEGAL" | "UNKNOWN"): GenerateReplyResult {
   if (kind === "LEGAL") {
     return {
       reply: "No pudimos validar tu solicitud. Por favor abre el formulario nuevamente e inténtalo otra vez.",
@@ -1053,6 +1123,13 @@ function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "LEGAL" | "UNKNOWN")
       reply: "No pudimos validar tu beneficio. Por favor abre el formulario nuevamente e inténtalo otra vez.",
       statePatch: {},
       debugNote: "referral_hub:benefit_claim_invalid_flow",
+    };
+  }
+  if (kind === "FURNITURE") {
+    return {
+      reply: "No pudimos validar tu solicitud de muebles. Por favor abre el formulario nuevamente e inténtalo otra vez.",
+      statePatch: {},
+      debugNote: "referral_hub:furniture_request_invalid_flow",
     };
   }
   return {
@@ -19451,6 +19528,15 @@ async function processSingleJob(
         rawFlowResponse,
         orgSettings: (clinicSettings ?? {}) as Record<string, unknown>,
       });
+    } else if (completionKind === "FURNITURE") {
+      earlyGeneratedOverride = await buildLuisFurnitureFlowCompletionResult({
+        supabase,
+        organizationId: effectiveOrganizationId,
+        leadId,
+        rawFlowResponse,
+        channelUserId: effectiveRecipientId,
+        deliveryKey: inboundMessageId || jobId,
+      }) ?? invalidLuisFlowCompletionResult("FURNITURE");
     } else if (completionKind === "LEGAL") {
       earlyGeneratedOverride = await buildLuisLegalFlowCompletionResult({
         supabase,

@@ -184,6 +184,7 @@ const DEMO_CAPABILITIES = {
   canEditBusiness: true,
   canCreateBusiness: true,
   canEditCoupon: true,
+  canCreateCampaign: true,
   canUploadImages: false,
   canEditLocationImages: true,
 };

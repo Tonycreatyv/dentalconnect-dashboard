@@ -252,7 +252,7 @@ function CampanasSegment() {
     <section>
       <div className="hub-section-head">
         <span className="hub-page-count">{campaigns.length} {campaigns.length === 1 ? "campaña" : "campañas"}</span>
-        <button type="button" className="hub-primary" onClick={() => setCreating(true)}><Plus size={16} />Nueva campaña</button>
+        {dataSource.capabilities.canCreateCampaign ? <button type="button" className="hub-primary" onClick={() => setCreating(true)}><Plus size={16} />Nueva campaña</button> : null}
       </div>
       {loading ? (
         <SkeletonRows count={3} />
@@ -268,7 +268,7 @@ function CampanasSegment() {
           ))}
         </div>
       )}
-      {creating ? (
+      {creating && dataSource.capabilities.canCreateCampaign ? (
         <NewCampaignDrawer
           businesses={businesses}
           coupons={coupons}

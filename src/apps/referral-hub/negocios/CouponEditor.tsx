@@ -137,6 +137,9 @@ export default function CouponEditor() {
   const business = businesses.find((b) => b.id === coupon.businessId);
   const canPersist = dataSource.capabilities.canEditCoupon;
   const canEditLocationImages = dataSource.capabilities.canEditLocationImages;
+  const canUploadImages = dataSource.capabilities.canUploadImages;
+  const persistentBusinesses = businesses.filter((item) => item.id.startsWith("partner:"));
+  const currentBusinessIsPersistent = !coupon.businessId || coupon.businessId.startsWith("partner:");
   const isSupermarketCoupon = isSupermarketCampaignKey(coupon.campaignKey);
   // Real values actually shown for this coupon: for the supermarket
   // campaign that's whichever location is selected (never a single global
@@ -214,10 +217,14 @@ export default function CouponEditor() {
         {!isSupermarketCoupon ? (
           <div className="hub-field">
             <label htmlFor="coupon-business">Negocio asociado</label>
-            <select id="coupon-business" value={coupon.businessId} onChange={(e) => void save({ businessId: e.target.value })}>
-              <option value="">Sin asignar</option>
-              {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            {currentBusinessIsPersistent ? (
+              <select id="coupon-business" value={coupon.businessId} onChange={(e) => void save({ businessId: e.target.value })}>
+                <option value="">Sin asignar</option>
+                {persistentBusinesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            ) : (
+              <p className="hub-field-hint">{business?.name || "Negocio configurado por el sistema"} · asociación de solo lectura</p>
+            )}
           </div>
         ) : null}
       </section>
@@ -242,7 +249,7 @@ export default function CouponEditor() {
                   {!canEditLocationImages ? (
                     <p className="hub-blocked-note">Esta función todavía no está disponible: la imagen se guarda localmente en esta sesión mientras se habilita el guardado en el servidor.</p>
                   ) : null}
-                  <StorageUploadField onLocalPreview={() => { /* local-only demo preview, never saved as the real image */ }} />
+                  {canUploadImages ? <StorageUploadField onLocalPreview={() => {}} /> : null}
                   <div className="hub-field">
                     <label htmlFor="location-image">O pegá el enlace de la imagen de esta ubicación</label>
                     <input
@@ -261,7 +268,7 @@ export default function CouponEditor() {
       ) : (
         <section className="hub-section">
           <h2>Imagen del cupón</h2>
-          <StorageUploadField onLocalPreview={() => { /* local-only demo preview, never saved as the real coupon image */ }} />
+          {canUploadImages ? <StorageUploadField onLocalPreview={() => {}} /> : null}
           <div className="hub-field">
             <label htmlFor="coupon-image">O pegá el enlace de una imagen</label>
             <input

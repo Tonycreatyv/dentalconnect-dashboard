@@ -45,9 +45,9 @@ Deno.test("resolvePartnerQueueStatus maps converted to approved (Aprobado) — l
   assertEquals(resolvePartnerQueueStatus({ status: "accepted", workStatus: "converted" }), "approved");
 });
 
-Deno.test("resolvePartnerQueueStatus maps not_converted, and a rejected assignment status, to disqualified (No calificó)", () => {
+Deno.test("resolvePartnerQueueStatus maps only the client outcome not_converted to disqualified (No calificó)", () => {
   assertEquals(resolvePartnerQueueStatus({ status: "accepted", workStatus: "not_converted" }), "disqualified");
-  assertEquals(resolvePartnerQueueStatus({ status: "rejected", workStatus: "new" }), "disqualified");
+  assertEquals(resolvePartnerQueueStatus({ status: "rejected", workStatus: "new" }), "new");
 });
 
 Deno.test("resolvePartnerQueueStatus falls back to new for anything else", () => {

@@ -216,7 +216,13 @@ export type LuisIntent =
  * Classify before validating so a legal intake can never be treated as a
  * benefit claim just because both arrive as `nfm_reply` messages.
  */
-export type LuisFlowCompletionKind = "BENEFITS" | "LEGAL" | "HANDOFF" | "UNKNOWN";
+export type LuisFlowCompletionKind = "BENEFITS" | "FURNITURE" | "LEGAL" | "HANDOFF" | "UNKNOWN";
+
+export type LuisFurnitureFlowCompletion = {
+  service_key: "FURNITURE";
+  full_name: string;
+  postal_code: string;
+};
 
 export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
   SUPERMARKET: {
@@ -919,10 +925,21 @@ export function classifyLuisFlowCompletion(raw: unknown): LuisFlowCompletionKind
     return "LEGAL";
   }
   if (hasBenefitKey) return "BENEFITS";
+  if (!hasIntakeType && !hasBenefitKey && text(value.service_key, 32) === "FURNITURE") return "FURNITURE";
   // Unified Flow HANDOFF_CONFIRM completes with only {service_key: "HANDOFF"} -
   // no benefit_key/intake_type, so it never collides with the branches above.
   if (!hasIntakeType && text(value.service_key, 32) === "HANDOFF") return "HANDOFF";
   return "UNKNOWN";
+}
+
+export function parseLuisFurnitureFlowCompletion(raw: unknown): LuisFurnitureFlowCompletion | null {
+  const value = record(raw);
+  if (!value || text(value.service_key, 32) !== "FURNITURE") return null;
+  const fullName = text(value.full_name, 120);
+  const postalCode = postalCodeText(value.postal_code);
+  return fullName && /^\d{5}$/.test(postalCode)
+    ? { service_key: "FURNITURE", full_name: fullName, postal_code: postalCode }
+    : null;
 }
 
 function optionalPostalCode(value: unknown) {

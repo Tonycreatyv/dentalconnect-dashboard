@@ -2,7 +2,7 @@
 // supplies immigration referrals; this resolver intentionally accepts the
 // future legal-service intake shapes without asserting that they are live.
 
-export type ReferralService = "immigration" | "auto_accident" | "dui" | "criminal";
+export type ReferralService = "immigration" | "auto_accident" | "dui" | "criminal" | "furniture" | "representative";
 
 type Intake = Record<string, unknown>;
 
@@ -11,6 +11,8 @@ const SERVICE_LABELS: Record<ReferralService, string> = {
   auto_accident: "Accidente de auto",
   dui: "DUI",
   criminal: "Criminal",
+  furniture: "Muebles",
+  representative: "Hablar con nuestro equipo",
 };
 
 const SERVICE_ALIASES: Record<string, ReferralService> = {
@@ -19,6 +21,11 @@ const SERVICE_ALIASES: Record<string, ReferralService> = {
   luis_accidente: "auto_accident",
   luis_dui: "dui",
   luis_criminal: "criminal",
+  luis_dui_criminal: "dui",
+  luis_muebles: "furniture",
+  furniture: "furniture",
+  luis_representante: "representative",
+  representative: "representative",
   auto_accident: "auto_accident",
   accident: "auto_accident",
   dui: "dui",
@@ -197,11 +204,19 @@ const FIELDS_BY_TOPIC: Record<string, readonly string[]> = {
 
 export function resolveReferralService(value: unknown, intake: Intake = {}): ReferralService | null {
   const candidate = text(value) ?? text(intake.service) ?? text(intake.service_id);
-  return candidate ? SERVICE_ALIASES[candidate.toLowerCase()] ?? null : null;
+  if (!candidate) return null;
+  const normalized = candidate.toLowerCase();
+  if (normalized === "luis_dui_criminal") {
+    const intakeType = text(intake.intake_type)?.toUpperCase();
+    const topic = text(intake.topic)?.toUpperCase();
+    if (intakeType === "CRIMINAL" || ["ARREST", "CRIMINAL_CHARGE", "COURT_SUMMONS"].includes(topic ?? "")) return "criminal";
+    return "dui";
+  }
+  return SERVICE_ALIASES[normalized] ?? null;
 }
 
 export function referralServiceLabel(service: ReferralService | null): string {
-  return service ? SERVICE_LABELS[service] : "Servicio legal";
+  return service ? SERVICE_LABELS[service] : "Servicio";
 }
 
 export function referralTopicLabel(topic: unknown, service: ReferralService | null): string {

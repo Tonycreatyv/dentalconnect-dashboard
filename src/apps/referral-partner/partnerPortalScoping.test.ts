@@ -16,6 +16,7 @@ const dashboardSource = await Deno.readTextFile(new URL("./PartnerDashboard.tsx"
 Deno.test("Partner Portal's assignment query is explicitly scoped by partner_id, not left to RLS alone", () => {
   assertStringIncludes(dashboardSource, 'function usePartnerReferrals(partnerId: string)');
   assertStringIncludes(dashboardSource, '.eq("partner_id", partnerId)');
+  assertStringIncludes(dashboardSource, '.in("status", ["assigned", "accepted"])');
   // The .eq must sit inside the same query chain as the assignments select,
   // not some unrelated call — confirm both appear within one short window.
   const selectIndex = dashboardSource.indexOf('from("referral_assignments")');
@@ -51,13 +52,13 @@ Deno.test("resolved partnerId is threaded into both PartnerList and PartnerDetai
   assertStringIncludes(dashboardSource, "function PartnerDetail({ partnerId }: { partnerId: string })");
 });
 
-Deno.test("the Partner mutation path (partner_update_immigration_assignment) is untouched by this release", () => {
-  assertStringIncludes(dashboardSource, 'supabase.rpc("partner_update_immigration_assignment"');
+Deno.test("the Partner mutation path (partner_update_referral_assignment) uses the canonical generic assignment wrapper", () => {
+  assertStringIncludes(dashboardSource, 'supabase.rpc("partner_update_referral_assignment"');
   assertStringIncludes(dashboardSource, 'p_action: "correct_result"');
   assertStringIncludes(dashboardSource, 'p_correction_reason: correctionReason');
   // Exactly the pre-existing three call sites — no fourth call was added and
   // none were removed.
-  const rpcCallCount = dashboardSource.split('supabase.rpc("partner_update_immigration_assignment"').length - 1;
+  const rpcCallCount = dashboardSource.split('supabase.rpc("partner_update_referral_assignment"').length - 1;
   assertEquals(rpcCallCount, 3);
 });
 
@@ -81,4 +82,11 @@ Deno.test("the detail view's 'Información compartida' uses a separate summary t
 Deno.test("the incident-date fact is never fabricated on the card — buildHumanSummary only suppresses its embedded date when the explicit fact exists", () => {
   assertStringIncludes(dashboardSource, "const incidentDateFact = resolveIncidentDateFact(service, intake);");
   assertStringIncludes(dashboardSource, "includeIncidentDate: !incidentDateFact");
+});
+
+Deno.test("Partner Portal excludes inactive historical assignment lifecycles from the work queue", () => {
+  assertStringIncludes(dashboardSource, '.in("status", ["assigned", "accepted"])');
+  for (const inactive of ["reassigned", "cancelled", "expired", "rejected"]) {
+    assertEquals(dashboardSource.includes(`.in("status", [${JSON.stringify(inactive)}])`), false);
+  }
 });

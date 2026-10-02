@@ -3,11 +3,28 @@
   publish = "dist"
 
 [build.environment]
+  NODE_VERSION = "24"
   VITE_PUBLIC_APP_URL = "https://referral.creatyv.io"
   SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_DASHBOARD_URL"
 
-# SPA routing - todas las rutas van a index.html
+# SPA routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Baseline browser hardening. CSP is intentionally deferred until all
+# Supabase/Meta origins are enumerated and verified in a preview deploy.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=()"
+
+# Vite fingerprints production assets, so they are safe to cache immutably.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

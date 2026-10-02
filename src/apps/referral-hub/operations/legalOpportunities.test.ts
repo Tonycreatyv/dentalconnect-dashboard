@@ -24,3 +24,14 @@ Deno.test("distinct requests for the same lead are independently matchable", () 
   assertEquals(matchesOpportunityServiceFilter("luis_accidente", { intake_type: "AUTO_ACCIDENT" }, "auto_accident"), true);
   assertEquals(matchesOpportunityServiceFilter("luis_accidente", { intake_type: "DUI" }, "dui"), true);
 });
+
+
+Deno.test("non-legal operational requests stay in Operacion with their own labels", () => {
+  const furniture = legalOpportunityPresentation("luis_muebles", { postal_code: "30093" }, null);
+  assertEquals(furniture.serviceLabel, "Muebles");
+  assertEquals(matchesOpportunityServiceFilter("luis_muebles", {}, "furniture"), true);
+
+  const representative = legalOpportunityPresentation("luis_representante", {}, null);
+  assertEquals(representative.serviceLabel, "Hablar con nuestro equipo");
+  assertEquals(matchesOpportunityServiceFilter("luis_representante", {}, "representative"), true);
+});

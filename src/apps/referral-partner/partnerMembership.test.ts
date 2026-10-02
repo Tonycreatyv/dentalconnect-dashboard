@@ -19,9 +19,6 @@ Deno.test("more than one active membership fails closed with 'multiple' instead 
     { partner_id: "0a5ab0f1-079c-4901-89ab-26d0e698308d", role: "partner_admin" },
   ]);
   assertEquals(result, { kind: "multiple" });
-  // Specifically: it must not silently pick the first row and proceed as if
-  // that were the only membership — that would be exactly the "merge" this
-  // release is meant to prevent.
   assertEquals("partnerId" in result, false);
 });
 
