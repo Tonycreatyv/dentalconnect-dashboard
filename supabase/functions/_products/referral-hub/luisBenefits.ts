@@ -216,7 +216,7 @@ export type LuisIntent =
  * Classify before validating so a legal intake can never be treated as a
  * benefit claim just because both arrive as `nfm_reply` messages.
  */
-export type LuisFlowCompletionKind = "BENEFITS" | "FURNITURE" | "LEGAL" | "HANDOFF" | "MERCADITO" | "UNKNOWN";
+export type LuisFlowCompletionKind = "BENEFITS" | "FURNITURE" | "LEGAL" | "HANDOFF" | "UNKNOWN";
 
 export type LuisFurnitureFlowCompletion = {\n  service_key: "FURNITURE";\n  full_name: string;\n  postal_code: string;\n};\n\nexport const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
   SUPERMARKET: {
@@ -923,7 +923,6 @@ export function classifyLuisFlowCompletion(raw: unknown): LuisFlowCompletionKind
   // Unified Flow HANDOFF_CONFIRM completes with only {service_key: "HANDOFF"} -
   // no benefit_key/intake_type, so it never collides with the branches above.
   if (!hasIntakeType && text(value.service_key, 32) === "HANDOFF") return "HANDOFF";
-  if (!hasIntakeType && !hasBenefitKey && text(value.service_key, 32) === "MERCADITO") return "MERCADITO";
   return "UNKNOWN";
 }
 
