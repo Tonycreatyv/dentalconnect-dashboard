@@ -1,0 +1,378 @@
+{
+  "version": "7.3",
+  "routing_model": {
+    "SERVICE_SELECT": ["BENEFIT_SELECT", "IMMIGRATION_TOPIC", "ACCIDENT_BASICS", "CRIMINAL_TOPIC", "HANDOFF_CONFIRM"],
+    "BENEFIT_SELECT": ["BENEFIT_DETAILS"],
+    "BENEFIT_DETAILS": [],
+    "IMMIGRATION_TOPIC": ["IMMIGRATION_DETAILS"],
+    "IMMIGRATION_DETAILS": ["IMMIGRATION_CONSENT"],
+    "IMMIGRATION_CONSENT": [],
+    "ACCIDENT_BASICS": ["ACCIDENT_DETAILS"],
+    "ACCIDENT_DETAILS": ["LEGAL_CONSENT"],
+    "CRIMINAL_TOPIC": ["CRIMINAL_DETAILS"],
+    "CRIMINAL_DETAILS": ["LEGAL_CONSENT"],
+    "LEGAL_CONSENT": [],
+    "HANDOFF_CONFIRM": []
+  },
+  "screens": [
+    {
+      "id": "SERVICE_SELECT",
+      "title": "¡Hola! 👋",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "NavigationList",
+            "name": "service_choice",
+            "label": "¿En qué podemos ayudarte hoy?",
+            "description": "Te saluda Luis Gabriel. Qué gusto tenerte por aquí. Contanos qué necesitás y te ayudamos a encontrar la opción correcta.",
+            "list-items": [
+              { "id": "BENEFITS", "main-content": { "title": "🎁 Beneficios y cupones", "description": "Ahorros disponibles" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "BENEFIT_SELECT" }, "payload": {} } },
+              { "id": "IMMIGRATION", "main-content": { "title": "🛂 Inmigración", "description": "Orientación inicial" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "IMMIGRATION_TOPIC" }, "payload": {} } },
+              { "id": "AUTO_ACCIDENT", "main-content": { "title": "🚗 Accidente de auto", "description": "Contanos lo básico" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "ACCIDENT_BASICS" }, "payload": {} } },
+              { "id": "DUI_CRIMINAL", "main-content": { "title": "⚖️ DUI / Defensa criminal", "description": "Orientación inicial" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "CRIMINAL_TOPIC" }, "payload": {} } },
+              { "id": "HANDOFF", "main-content": { "title": "👤 Hablar con nuestro equipo", "description": "Seguimiento personal" }, "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "HANDOFF_CONFIRM" }, "payload": {} } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "BENEFIT_SELECT",
+      "title": "Beneficios para vos",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Tenemos varios beneficios disponibles. Elegí el que más te sirva y te ayudamos con el siguiente paso." },
+          { "type": "RadioButtonsGroup", "name": "benefit_key", "label": "Elegí un beneficio", "required": true, "data-source": [
+            { "id": "SUPERMARKET", "title": "Cupón de supermercado", "description": "Descuento disponible en supermercados participantes." },
+            { "id": "MEDICAL", "title": "Cupón médico", "description": "Beneficio disponible con Médico Urgencias." },
+            { "id": "DENTAL", "title": "Cupón dental", "description": "Consulta, limpieza y rayos X." },
+            { "id": "SHIPPING", "title": "Cupón de envíos", "description": "Beneficio disponible con Ultra Cargo." }
+          ] },
+          { "type": "Footer", "label": "Quiero este beneficio", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "BENEFIT_DETAILS" }, "payload": { "benefit_key": "${form.benefit_key}" } } }
+        ]
+      }
+    },
+    {
+      "id": "BENEFIT_DETAILS",
+      "title": "Ya casi está",
+      "terminal": true,
+      "success": true,
+      "data": { "benefit_key": { "type": "string", "__example__": "SUPERMARKET" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Dejanos unos datos para encontrar el beneficio correcto y dejarlo listo para vos." },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "helper-text": "Como querés que aparezca en tu beneficio.", "required": true },
+          { "type": "TextInput", "name": "postal_code", "label": "ZIP / código postal", "helper-text": "Nos ayuda a encontrar la opción disponible cerca de vos.", "input-type": "number", "required": true },
+          { "type": "TextInput", "name": "email", "label": "Correo", "helper-text": "Para enviarte información del beneficio.", "input-type": "email", "required": false },
+          { "type": "OptIn", "name": "marketing_consent", "label": "Sí, quiero recibir beneficios y promociones." },
+          { "type": "Footer", "label": "Ver mi beneficio", "on-click-action": { "name": "complete", "payload": { "service_key": "BENEFITS", "benefit_key": "${data.benefit_key}", "full_name": "${form.full_name}", "postal_code": "${form.postal_code}", "email": "${form.email}", "marketing_consent": "${form.marketing_consent}" } } }
+        ]
+      }
+    },
+    {
+      "id": "IMMIGRATION_TOPIC",
+      "title": "¿Con qué necesitás ayuda?",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Elegí la opción que más se parece a lo que necesitás. Después te haremos unas preguntas cortas." },
+          { "type": "RadioButtonsGroup", "name": "topic", "label": "Tipo de ayuda", "required": true, "data-source": [
+            { "id": "CITIZENSHIP", "title": "Ciudadanía" },
+            { "id": "FAMILY_GREEN_CARD", "title": "Petición familiar / Green Card" },
+            { "id": "GREEN_CARD_RENEWAL", "title": "Renovar o reemplazar mi Green Card" },
+            { "id": "ASYLUM", "title": "Asilo" },
+            { "id": "U_VISA", "title": "Visa U" },
+            { "id": "WORK_PERMIT", "title": "Permiso de trabajo" },
+            { "id": "OTHER", "title": "Otro" }
+          ] },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "IMMIGRATION_DETAILS" }, "payload": { "topic": "${form.topic}" } } }
+        ]
+      }
+    },
+    {
+      "id": "IMMIGRATION_DETAILS",
+      "title": "Contanos un poco más",
+      "data": { "topic": { "type": "string", "__example__": "CITIZENSHIP" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Unas preguntas cortas para entender tu situación." },
+          { "type": "Switch", "value": "${data.topic}", "cases": {
+            "CITIZENSHIP": [
+              { "type": "RadioButtonsGroup", "name": "resident_duration", "label": "¿Cuánto tiempo llevas como residente permanente?", "required": true, "data-source": [
+                { "id": "LESS_THAN_3_YEARS", "title": "Menos de 3 años" },
+                { "id": "THREE_TO_FIVE_YEARS", "title": "Entre 3 y 5 años" },
+                { "id": "MORE_THAN_5_YEARS", "title": "Más de 5 años" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "long_absence", "label": "¿Has pasado 6 meses o más fuera de Estados Unidos desde que obtuviste la residencia?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "citizenship_marriage_basis", "label": "¿Tu solicitud sería basada en matrimonio con ciudadano estadounidense?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] }
+            ],
+            "FAMILY_GREEN_CARD": [
+              { "type": "RadioButtonsGroup", "name": "petitioner_relationship", "label": "¿Quién te está pidiendo o podría pedirte?", "required": true, "data-source": [
+                { "id": "US_CITIZEN_SPOUSE", "title": "Cónyuge ciudadano/a" },
+                { "id": "RESIDENT_SPOUSE", "title": "Cónyuge residente" },
+                { "id": "PARENT", "title": "Padre o madre" },
+                { "id": "ADULT_CHILD", "title": "Hijo/a mayor de edad" },
+                { "id": "OTHER", "title": "Otro" },
+                { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "entry_method", "label": "¿Cómo entraste a Estados Unidos?", "required": true, "data-source": [
+                { "id": "VISA", "title": "Con visa" }, { "id": "PAROLE", "title": "Con permiso humanitario (parole)" }, { "id": "WITHOUT_INSPECTION", "title": "Sin inspección" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "prior_uscis_petition", "label": "¿Ya se presentó alguna petición con USCIS?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] }
+            ],
+            "GREEN_CARD_RENEWAL": [
+              { "type": "RadioButtonsGroup", "name": "green_card_term", "label": "¿Tu Green Card es de 2 años o de 10 años?", "required": true, "data-source": [
+                { "id": "TWO_YEAR", "title": "2 años" }, { "id": "TEN_YEAR", "title": "10 años" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "green_card_issue", "label": "¿Qué necesitas hacer con tu tarjeta?", "required": true, "data-source": [
+                { "id": "EXPIRING", "title": "Está por vencer" }, { "id": "EXPIRED", "title": "Ya venció" }, { "id": "LOST_OR_STOLEN", "title": "Se perdió o me la robaron" }, { "id": "DAMAGED", "title": "Está dañada" }, { "id": "OTHER", "title": "Otro" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "prior_related_filing", "label": "¿Ya presentaste algún trámite relacionado?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] }
+            ],
+            "ASYLUM": [
+              { "type": "RadioButtonsGroup", "name": "arrival_window", "label": "¿Hace cuánto llegaste a Estados Unidos?", "required": true, "data-source": [
+                { "id": "LESS_THAN_ONE_YEAR", "title": "Menos de 1 año" }, { "id": "MORE_THAN_ONE_YEAR", "title": "Más de 1 año" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "fear_reason", "label": "¿Cuál es la razón general por la que temes regresar?", "required": true, "data-source": [
+                { "id": "POLITICAL", "title": "Política" }, { "id": "RELIGION", "title": "Religión" }, { "id": "NATIONALITY", "title": "Nacionalidad" }, { "id": "RACE", "title": "Raza" }, { "id": "SOCIAL_GROUP", "title": "Grupo social" }, { "id": "OTHER", "title": "Otro" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "immigration_court_status", "label": "¿Tienes actualmente una audiencia, corte o proceso de deportación?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] }
+            ],
+            "U_VISA": [
+              { "type": "RadioButtonsGroup", "name": "crime_victim", "label": "¿Fuiste víctima de un delito ocurrido en Estados Unidos?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "police_report", "label": "¿El incidente fue reportado a la policía u otra autoridad?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "law_enforcement_cooperation", "label": "¿Has colaborado o estás dispuesto/a a colaborar con las autoridades?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] }
+            ],
+            "WORK_PERMIT": [
+              { "type": "RadioButtonsGroup", "name": "work_permit_request_type", "label": "¿Qué necesitas?", "required": true, "data-source": [
+                { "id": "FIRST_APPLICATION", "title": "Solicitud por primera vez" }, { "id": "RENEWAL", "title": "Renovación" }, { "id": "REPLACEMENT", "title": "Reemplazo" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "work_permit_basis", "label": "¿Por medio de qué proceso migratorio lo estás solicitando?", "required": true, "data-source": [
+                { "id": "ASYLUM", "title": "Asilo" }, { "id": "ADJUSTMENT", "title": "Ajuste de estatus" }, { "id": "TPS", "title": "TPS" }, { "id": "OTHER", "title": "Otro" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] },
+              { "type": "RadioButtonsGroup", "name": "work_permit_status", "label": "¿Cuál es la situación de tu permiso actual?", "required": true, "data-source": [
+                { "id": "VALID", "title": "Vigente" }, { "id": "EXPIRING", "title": "Por vencer" }, { "id": "EXPIRED", "title": "Vencido" }, { "id": "NONE", "title": "No tengo" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] }
+            ],
+            "OTHER": []
+          } },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextInput", "name": "postal_code", "label": "ZIP", "input-type": "text", "required": false },
+          { "type": "TextArea", "name": "description", "label": "¿Qué está pasando?", "helper-text": "Contanos brevemente qué necesitás o en qué etapa está tu caso.", "required": true },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "IMMIGRATION_CONSENT" }, "payload": {
+            "topic": "${data.topic}", "full_name": "${form.full_name}", "postal_code": "${form.postal_code}", "description": "${form.description}",
+            "resident_duration": "${form.resident_duration}", "long_absence": "${form.long_absence}", "citizenship_marriage_basis": "${form.citizenship_marriage_basis}",
+            "petitioner_relationship": "${form.petitioner_relationship}", "entry_method": "${form.entry_method}", "prior_uscis_petition": "${form.prior_uscis_petition}",
+            "green_card_term": "${form.green_card_term}", "green_card_issue": "${form.green_card_issue}", "prior_related_filing": "${form.prior_related_filing}",
+            "arrival_window": "${form.arrival_window}", "fear_reason": "${form.fear_reason}", "immigration_court_status": "${form.immigration_court_status}",
+            "crime_victim": "${form.crime_victim}", "police_report": "${form.police_report}", "law_enforcement_cooperation": "${form.law_enforcement_cooperation}",
+            "work_permit_request_type": "${form.work_permit_request_type}", "work_permit_basis": "${form.work_permit_basis}", "work_permit_status": "${form.work_permit_status}"
+          } } }
+        ]
+      }
+    },
+    {
+      "id": "IMMIGRATION_CONSENT",
+      "title": "Autorización para compartir",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "topic": { "type": "string", "__example__": "CITIZENSHIP" },
+        "full_name": { "type": "string", "__example__": "Ana López" },
+        "postal_code": { "type": "string", "__example__": "30301" },
+        "description": { "type": "string", "__example__": "Necesito orientación." },
+        "resident_duration": { "type": "string", "__example__": "" },
+        "long_absence": { "type": "string", "__example__": "" },
+        "citizenship_marriage_basis": { "type": "string", "__example__": "" },
+        "petitioner_relationship": { "type": "string", "__example__": "" },
+        "entry_method": { "type": "string", "__example__": "" },
+        "prior_uscis_petition": { "type": "string", "__example__": "" },
+        "green_card_term": { "type": "string", "__example__": "" },
+        "green_card_issue": { "type": "string", "__example__": "" },
+        "prior_related_filing": { "type": "string", "__example__": "" },
+        "arrival_window": { "type": "string", "__example__": "" },
+        "fear_reason": { "type": "string", "__example__": "" },
+        "immigration_court_status": { "type": "string", "__example__": "" },
+        "crime_victim": { "type": "string", "__example__": "" },
+        "police_report": { "type": "string", "__example__": "" },
+        "law_enforcement_cooperation": { "type": "string", "__example__": "" },
+        "work_permit_request_type": { "type": "string", "__example__": "" },
+        "work_permit_basis": { "type": "string", "__example__": "" },
+        "work_permit_status": { "type": "string", "__example__": "" }
+      },
+      "layout": { "type": "SingleColumnLayout", "children": [
+        { "type": "TextBody", "text": "Autorizo que Luis Gabriel Referral Hub comparta la información proporcionada con un aliado de inmigración para que pueda contactarme sobre mi solicitud." },
+        { "type": "RadioButtonsGroup", "name": "sharing_consent", "label": "¿Autorizás compartir tu información?", "required": true, "data-source": [{ "id": "AUTHORIZED", "title": "Sí, autorizo" }, { "id": "DECLINED", "title": "No, prefiero no compartirla" }] },
+        { "type": "Footer", "label": "Enviar solicitud", "on-click-action": { "name": "complete", "payload": {
+          "service_key": "IMMIGRATION", "intake_type": "IMMIGRATION",
+          "topic": "${data.topic}", "full_name": "${data.full_name}", "postal_code": "${data.postal_code}", "description": "${data.description}",
+          "sharing_consent": "${form.sharing_consent}", "consent_version": "luis_immigration_sharing_v1", "consent_source": "whatsapp_flow",
+          "resident_duration": "${data.resident_duration}", "long_absence": "${data.long_absence}", "citizenship_marriage_basis": "${data.citizenship_marriage_basis}",
+          "petitioner_relationship": "${data.petitioner_relationship}", "entry_method": "${data.entry_method}", "prior_uscis_petition": "${data.prior_uscis_petition}",
+          "green_card_term": "${data.green_card_term}", "green_card_issue": "${data.green_card_issue}", "prior_related_filing": "${data.prior_related_filing}",
+          "arrival_window": "${data.arrival_window}", "fear_reason": "${data.fear_reason}", "immigration_court_status": "${data.immigration_court_status}",
+          "crime_victim": "${data.crime_victim}", "police_report": "${data.police_report}", "law_enforcement_cooperation": "${data.law_enforcement_cooperation}",
+          "work_permit_request_type": "${data.work_permit_request_type}", "work_permit_basis": "${data.work_permit_basis}", "work_permit_status": "${data.work_permit_status}"
+        } } }
+      ] }
+    },
+    {
+      "id": "ACCIDENT_BASICS",
+      "title": "Sobre el accidente",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Sentimos que estés pasando por esto. Vamos a pedirte unos datos básicos para que el equipo pueda entender mejor lo ocurrido." },
+          { "type": "DatePicker", "name": "accident_date", "label": "Fecha del accidente", "required": true },
+          { "type": "RadioButtonsGroup", "name": "received_medical_attention", "label": "¿Recibiste atención médica después del accidente?", "required": true, "data-source": [{ "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }] },
+          { "type": "RadioButtonsGroup", "name": "police_report", "label": "¿Hubo reporte policial?", "required": true, "data-source": [{ "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }] },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "ACCIDENT_DETAILS" }, "payload": { "accident_date": "${form.accident_date}", "received_medical_attention": "${form.received_medical_attention}", "police_report": "${form.police_report}" } } }
+        ]
+      }
+    },
+    {
+      "id": "ACCIDENT_DETAILS",
+      "title": "Unos detalles más",
+      "data": { "accident_date": { "type": "string", "__example__": "2026-08-14" }, "received_medical_attention": { "type": "string", "__example__": "YES" }, "police_report": { "type": "string", "__example__": "YES" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Ya casi terminamos. Contanos brevemente qué pasó para que nuestro equipo pueda entender mejor tu situación." },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextArea", "name": "description", "label": "Contanos qué pasó", "helper-text": "Podés escribirlo con tus propias palabras.", "required": true },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "LEGAL_CONSENT" }, "payload": {
+            "intake_type": "AUTO_ACCIDENT",
+            "full_name": "${form.full_name}", "postal_code": "", "description": "${form.description}",
+            "accident_date": "${data.accident_date}", "received_medical_attention": "${data.received_medical_attention}", "police_report": "${data.police_report}",
+            "dui_date": "", "chemical_test": "", "court_date_status": "",
+            "criminal_charge": "", "currently_detained": ""
+          } } }
+        ]
+      }
+    },
+    {
+      "id": "CRIMINAL_TOPIC",
+      "title": "¿Qué tipo de ayuda necesitás?",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Elegí la opción que mejor describe la situación. Después podés contarnos brevemente qué pasó." },
+          { "type": "RadioButtonsGroup", "name": "case_type", "label": "Tipo de situación", "required": true, "data-source": [
+            { "id": "DUI", "title": "DUI", "description": "Arresto o citación por manejar bajo efectos del alcohol/drogas." },
+            { "id": "CRIMINAL", "title": "Otro caso criminal", "description": "Arresto, cargo, citación u otro asunto criminal." }
+          ] },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "CRIMINAL_DETAILS" }, "payload": { "case_type": "${form.case_type}" } } }
+        ]
+      }
+    },
+    {
+      "id": "CRIMINAL_DETAILS",
+      "title": "Contanos sobre tu situación",
+      "data": { "case_type": { "type": "string", "__example__": "DUI" } },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Solo necesitamos algunos datos básicos para entender mejor lo que pasó y darle seguimiento." },
+          { "type": "Switch", "value": "${data.case_type}", "cases": {
+            "DUI": [
+              { "type": "DatePicker", "name": "dui_date", "label": "Fecha del DUI", "min-date": "2011-01-01", "max-date": "2026-09-02", "required": true },
+              { "type": "RadioButtonsGroup", "name": "chemical_test", "label": "¿Qué ocurrió con la prueba estatal?", "required": true, "data-source": [
+                { "id": "COMPLETED", "title": "Se realizó" }, { "id": "REFUSED", "title": "La rechacé" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+              ] }
+            ],
+            "CRIMINAL": [
+              { "type": "TextInput", "name": "criminal_charge", "label": "¿Cuál es el cargo o situación principal?", "helper-text": "Una frase corta está bien, por ejemplo \"cargo por hurto\".", "required": true },
+              { "type": "RadioButtonsGroup", "name": "currently_detained", "label": "¿Estás detenido actualmente?", "required": true, "data-source": [
+                { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }
+              ] }
+            ]
+          } },
+          { "type": "RadioButtonsGroup", "name": "court_date_status", "label": "¿Ya tienes fecha de corte?", "required": true, "data-source": [
+            { "id": "YES", "title": "Sí" }, { "id": "NO", "title": "No" }, { "id": "NOT_SURE", "title": "No estoy seguro/a" }
+          ] },
+          { "type": "TextInput", "name": "full_name", "label": "Nombre completo", "required": true },
+          { "type": "TextInput", "name": "postal_code", "label": "ZIP", "input-type": "text", "required": false },
+          { "type": "TextArea", "name": "description", "label": "¿Qué pasó?", "helper-text": "Contanos brevemente la situación o qué necesitás resolver.", "required": true },
+          { "type": "Footer", "label": "Continuar", "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "LEGAL_CONSENT" }, "payload": {
+            "intake_type": "${data.case_type}",
+            "full_name": "${form.full_name}", "postal_code": "${form.postal_code}", "description": "${form.description}",
+            "accident_date": "", "received_medical_attention": "", "police_report": "",
+            "dui_date": "${form.dui_date}", "chemical_test": "${form.chemical_test}", "court_date_status": "${form.court_date_status}",
+            "criminal_charge": "${form.criminal_charge}", "currently_detained": "${form.currently_detained}"
+          } } }
+        ]
+      }
+    },
+    {
+      "id": "LEGAL_CONSENT",
+      "title": "Autorización para compartir",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "intake_type": { "type": "string", "__example__": "AUTO_ACCIDENT" },
+        "full_name": { "type": "string", "__example__": "Ana López" },
+        "postal_code": { "type": "string", "__example__": "" },
+        "description": { "type": "string", "__example__": "Me chocaron por detrás." },
+        "accident_date": { "type": "string", "__example__": "" },
+        "received_medical_attention": { "type": "string", "__example__": "" },
+        "police_report": { "type": "string", "__example__": "" },
+        "dui_date": { "type": "string", "__example__": "" },
+        "chemical_test": { "type": "string", "__example__": "" },
+        "court_date_status": { "type": "string", "__example__": "" },
+        "criminal_charge": { "type": "string", "__example__": "" },
+        "currently_detained": { "type": "string", "__example__": "" }
+      },
+      "layout": { "type": "SingleColumnLayout", "children": [
+        { "type": "TextBody", "text": "Autorizo que Luis Gabriel Referral Hub comparta la información proporcionada con un aliado legal para que pueda contactarme sobre mi caso." },
+        { "type": "RadioButtonsGroup", "name": "sharing_consent", "label": "¿Autorizás compartir tu información?", "required": true, "data-source": [{ "id": "AUTHORIZED", "title": "Sí, autorizo" }, { "id": "DECLINED", "title": "No, prefiero no compartirla" }] },
+        { "type": "Footer", "label": "Enviar solicitud", "on-click-action": { "name": "complete", "payload": {
+          "service_key": "${data.intake_type}", "intake_type": "${data.intake_type}",
+          "full_name": "${data.full_name}", "postal_code": "${data.postal_code}", "description": "${data.description}",
+          "sharing_consent": "${form.sharing_consent}", "consent_version": "luis_legal_sharing_v1", "consent_source": "whatsapp_flow",
+          "accident_date": "${data.accident_date}", "received_medical_attention": "${data.received_medical_attention}", "police_report": "${data.police_report}",
+          "dui_date": "${data.dui_date}", "chemical_test": "${data.chemical_test}", "court_date_status": "${data.court_date_status}",
+          "criminal_charge": "${data.criminal_charge}", "currently_detained": "${data.currently_detained}"
+        } } }
+      ] }
+    },
+    {
+      "id": "HANDOFF_CONFIRM",
+      "title": "¿Preferís hablar con alguien?",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Claro. Podemos dejar tu conversación lista para que alguien de nuestro equipo le dé seguimiento." },
+          { "type": "Footer", "label": "Hablar con el equipo", "on-click-action": { "name": "complete", "payload": { "service_key": "HANDOFF" } } }
+        ]
+      }
+    }
+  ]
+}

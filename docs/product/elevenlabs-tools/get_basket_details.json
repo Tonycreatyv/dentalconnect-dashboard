@@ -1,0 +1,108 @@
+{
+  "type": "webhook",
+  "name": "get_basket_details",
+  "description": "Load the exact active grocery basket offer selected for a specific supermarket location. Call only with the real offer_id and matching partner_location_id returned by earlier tools. Never invent IDs, prices, products, or locations.",
+  "disable_interruptions": false,
+  "interruption_mode": "allow",
+  "force_pre_tool_speech": false,
+  "pre_tool_speech": "auto",
+  "tool_call_sound": null,
+  "tool_call_sound_behavior": "auto",
+  "tool_error_handling_mode": "auto",
+  "execution_mode": "immediate",
+  "api_schema": {
+    "url": "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1/referral-voice-tools",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "id": "body",
+      "type": "object",
+      "description": "Fetch details for an exact offer/location pair previously returned by check_delivery_zip and list_basket_offers. Never infer or fabricate either UUID.",
+      "properties": [
+        {
+          "id": "action",
+          "type": "string",
+          "constant_value": "get_basket_details",
+          "enum": null,
+          "required": true,
+          "value_type": "constant",
+          "description": "",
+          "dynamic_variable": "",
+          "is_system_provided": false
+        },
+        {
+          "id": "organization_id",
+          "type": "string",
+          "dynamic_variable": "organization_id",
+          "enum": null,
+          "required": true,
+          "value_type": "dynamic_variable",
+          "description": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "source_channel",
+          "type": "string",
+          "constant_value": "whatsapp",
+          "enum": null,
+          "required": true,
+          "value_type": "constant",
+          "description": "",
+          "dynamic_variable": "",
+          "is_system_provided": false
+        },
+        {
+          "id": "offer_id",
+          "type": "string",
+          "description": "Use the exact real offer_id UUID returned by list_basket_offers for the customer's selected basket. Never use basket_key and never invent an ID.",
+          "enum": null,
+          "required": true,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "partner_location_id",
+          "type": "string",
+          "description": "Use the exact partner_location_id UUID selected from check_delivery_zip and used to list offers. It must match the selected offer_id. Never invent it.",
+          "enum": null,
+          "required": true,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        }
+      ],
+      "required": false,
+      "value_type": "llm_prompt"
+    },
+    "request_headers": [
+      {
+        "type": "value",
+        "name": "Content-Type",
+        "value": "application/json"
+      },
+      {
+        "type": "secret",
+        "name": "x-creatyv-voice-secret",
+        "secret_id": "Kot9RC7dHX1kUxqfHB30"
+      }
+    ],
+    "content_type": "application/json",
+    "auth_connection": null
+  },
+  "assignments": [],
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {
+      "organization_id": {
+        "type": "string_literal",
+        "value": ""
+      }
+    }
+  },
+  "response_mocks": []
+}

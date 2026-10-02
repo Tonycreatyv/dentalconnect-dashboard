@@ -2,11 +2,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import App from "./App";
-import { applyDetectedVerticalDocumentMetadata } from "./config/verticalConfig";
+import App from "./apps/referral-hub/App";
 import "./index.css";
 
-applyDetectedVerticalDocumentMetadata();
+document.title = "Conexxion | LG Community Network";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

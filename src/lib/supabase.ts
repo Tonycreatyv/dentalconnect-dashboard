@@ -12,6 +12,6 @@ export const hasSupabaseEnv = Boolean(url && anon);
  *   (Auth fallará, pero no crashea la app completa).
  */
 export const supabase = createClient(
-  hasSupabaseEnv ? url : "http://localhost",
+  hasSupabaseEnv ? url : "https://configuration.invalid",
   hasSupabaseEnv ? anon : "public-anon-key"
 );

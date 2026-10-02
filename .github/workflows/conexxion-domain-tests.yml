@@ -1,0 +1,45 @@
+name: ConeXXion Domain Tests
+
+on:
+  pull_request:
+    paths:
+      - "src/apps/referral-hub/**"
+      - "src/apps/referral-partner/**"
+      - "supabase/migrations/**"
+      - ".github/workflows/conexxion-domain-tests.yml"
+  push:
+    branches:
+      - "hardening/conexxion-v2-final"
+
+permissions:
+  contents: read
+
+jobs:
+  domain-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: lts
+          cache: true
+
+      - name: Partner domain tests
+        run: |
+          deno test --allow-read             src/apps/referral-partner/partnerActions.test.ts             src/apps/referral-partner/partnerQueue.test.ts             src/apps/referral-partner/partnerReferralVisibility.test.ts             src/apps/referral-partner/referralPresentation.test.ts             src/apps/referral-partner/finalStateCorrection.test.ts             src/apps/referral-partner/partnerMembership.test.ts             src/apps/referral-partner/partnerPortalScoping.test.ts
+
+      - name: Admin operational domain tests
+        run: |
+          deno test --allow-read             src/apps/referral-hub/operations/legalIntake.test.ts             src/apps/referral-hub/operations/legalOpportunities.test.ts             src/apps/referral-hub/operations/period.test.ts             src/apps/referral-hub/operations/homeMetrics.test.ts             src/apps/referral-hub/operations/immigrationInbox.test.ts             src/apps/referral-hub/operations/immigrationOpportunities.test.ts             src/apps/referral-hub/operations/leadStage.test.ts
+
+      - name: Referral worker parity tests
+        run: |
+          deno test --allow-read             supabase/functions/run-replies/tests/conexxionOperationalCompletionParity.test.ts
+
+      - name: Migration contract tests
+        run: |
+          deno test --allow-read             supabase/migrations/mabletonLocationAwareClaimsMigration.test.ts             supabase/migrations/partnerAssignmentRequestLifecycleSyncMigration.test.ts             supabase/migrations/partnerFinalStateCorrectionMigration.test.ts             supabase/migrations/referralHubMultiorgCaptureAuthorizationMigration.test.ts

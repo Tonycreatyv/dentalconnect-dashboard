@@ -12,6 +12,13 @@ export function normalizeLeadStateForBusinessType(
 ): Json {
   const base = leadState && typeof leadState === "object" ? { ...leadState } as Record<string, unknown> : {};
   const normalized = safeStr(businessType, "").toLowerCase();
+  if (normalized === "referral_hub") {
+    return {
+      ...base,
+      mode: "referral_hub",
+      orgType: "referral_hub",
+    } as Json;
+  }
   if (normalized !== "barbershop") return base as Json;
 
   const contaminatedDentalMode = safeStr(base.mode, "").toLowerCase() === "dental_clinic";
