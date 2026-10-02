@@ -50,12 +50,12 @@ export default function MessagesWorkspace() {
   const [notice, setNotice] = useState("");
 
   const conversations = useMemo(() => data.leads
-    .map((lead) => { const rows = ops.byLead.get(lead.id) ?? []; return { lead: lead as LeadWithStatus, latest: lastMessage(rows) }; })
+    .map((lead) => { const rows = ops.byLead.get(lead.id) ?? []; return { lead, latest: lastMessage(rows) }; })
     .filter((item) => item.latest && `${leadName(item.lead)} ${item.latest?.content || ""}`.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => +new Date(b.latest!.created_at) - +new Date(a.latest!.created_at)),
     [data.leads, ops.byLead, query]);
 
-  const selectedLead = conversationId ? (data.leads.find((lead) => lead.id === conversationId) as LeadWithStatus | undefined) : undefined;
+  const selectedLead = conversationId ? data.leads.find((lead) => lead.id === conversationId) : undefined;
   const rows = conversationId ? (ops.byLead.get(conversationId) ?? []) : [];
   const latest = lastMessage(rows);
   const loading = ops.loading || data.loading;
