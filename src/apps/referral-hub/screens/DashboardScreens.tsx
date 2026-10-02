@@ -526,7 +526,14 @@ export function ContactDetailScreen() {
   // other legal-intake type (accident/DUI) still renders here as before,
   // since neither has a canonical resolver of its own.
   const showLegalIntakeCard = Boolean(
-    detail.legalIntake && !(detail.legalIntake.intakeType === "IMMIGRATION" && immigrationRequests.length > 0),
+    detail.legalIntake && !detail.serviceRequests.some((request) => {
+      const kind = detail.legalIntake?.intakeType;
+      if (kind === "IMMIGRATION") return request.service_id === "luis_inmigracion";
+      if (kind === "AUTO_ACCIDENT") return request.service_id === "luis_accidente";
+      if (kind === "DUI") return ["luis_dui", "luis_dui_criminal", "luis_accidente"].includes(request.service_id);
+      if (kind === "CRIMINAL" || kind === "DUI_CRIMINAL") return ["luis_criminal", "luis_dui_criminal", "luis_accidente"].includes(request.service_id);
+      return false;
+    }),
   );
 
   return (
