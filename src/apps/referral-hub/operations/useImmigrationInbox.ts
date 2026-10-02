@@ -62,6 +62,7 @@ function useOperationalOpportunities(serviceIds: readonly string[]) {
       .select("id,request_id,status,work_status,assigned_at,updated_at,partner_id")
       .eq("organization_id", resolvedOrgId)
       .in("request_id", requestRows.map((request) => request.id))
+      .in("status", ["pending_assignment", "assigned", "accepted"])
       .order("assigned_at", { ascending: false }) : { data: [], error: null };
     const assignmentRows = (assignmentResult.data ?? []) as Array<{ id:string; request_id:string; status:string; work_status:string; assigned_at:string; updated_at:string; partner_id:string }>;
     const partnerIds = [...new Set(assignmentRows.map((assignment) => assignment.partner_id))];
