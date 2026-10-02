@@ -116,6 +116,7 @@ export type NegociosCapabilities = {
   canEditBusiness: boolean;
   canCreateBusiness: boolean;
   canEditCoupon: boolean;
+  canCreateCampaign: boolean;
   canUploadImages: boolean;
   canEditLocationImages: boolean;
 };
