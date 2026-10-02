@@ -16,6 +16,7 @@ const dashboardSource = await Deno.readTextFile(new URL("./PartnerDashboard.tsx"
 Deno.test("Partner Portal's assignment query is explicitly scoped by partner_id, not left to RLS alone", () => {
   assertStringIncludes(dashboardSource, 'function usePartnerReferrals(partnerId: string)');
   assertStringIncludes(dashboardSource, '.eq("partner_id", partnerId)');
+  assertStringIncludes(dashboardSource, '.in("status", ["assigned", "accepted"])');
   // The .eq must sit inside the same query chain as the assignments select,
   // not some unrelated call — confirm both appear within one short window.
   const selectIndex = dashboardSource.indexOf('from("referral_assignments")');
@@ -81,4 +82,11 @@ Deno.test("the detail view's 'Información compartida' uses a separate summary t
 Deno.test("the incident-date fact is never fabricated on the card — buildHumanSummary only suppresses its embedded date when the explicit fact exists", () => {
   assertStringIncludes(dashboardSource, "const incidentDateFact = resolveIncidentDateFact(service, intake);");
   assertStringIncludes(dashboardSource, "includeIncidentDate: !incidentDateFact");
+});
+
+Deno.test("Partner Portal excludes inactive historical assignment lifecycles from the work queue", () => {
+  assertStringIncludes(dashboardSource, '.in("status", ["assigned", "accepted"])');
+  for (const inactive of ["reassigned", "cancelled", "expired", "rejected"]) {
+    assertEquals(dashboardSource.includes(`.in("status", [${JSON.stringify(inactive)}])`), false);
+  }
 });
