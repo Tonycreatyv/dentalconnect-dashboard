@@ -19,6 +19,7 @@ const SERVICE_ALIASES: Record<string, ReferralService> = {
   luis_accidente: "auto_accident",
   luis_dui: "dui",
   luis_criminal: "criminal",
+  luis_dui_criminal: "dui",
   auto_accident: "auto_accident",
   accident: "auto_accident",
   dui: "dui",
