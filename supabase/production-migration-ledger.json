@@ -17,7 +17,11 @@
     "20260929002000",
     "20260929003000",
     "20260930001000",
-    "20260930002000"
+    "20260930002000",
+    "20261002131239",
+    "20261002131301",
+    "20261002131322",
+    "20261002131412"
   ],
   "source_reconstructed_from_live_schema": [
     "20260928006000",
@@ -60,11 +64,12 @@
     "20260910000100",
     "20260911000100"
   ],
-  "release_pending": [
-    "20261002001000",
-    "20261002002000",
-    "20261002003000",
-    "20261002004000"
-  ],
-  "deploy_rule": "Do not run blanket supabase db push against production until the migration ledger is reconciled or explicitly repaired after schema verification."
+  "release_pending": [],
+  "deploy_rule": "Do not run blanket supabase db push against production until the migration ledger is reconciled or explicitly repaired after schema verification.",
+  "release_applied": [
+    "20261002131239",
+    "20261002131301",
+    "20261002131322",
+    "20261002131412"
+  ]
 }
