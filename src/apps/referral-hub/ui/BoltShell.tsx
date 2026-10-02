@@ -1,4 +1,4 @@
-import { Building2, ClipboardList, Home, Menu, MessageCircle, Settings, Users, X } from "lucide-react";
+import { Building2, ClipboardList, Menu, MessageCircle, Settings, Tag, Users, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
@@ -10,11 +10,18 @@ import ConexxionWordmark from "./ConexxionWordmark";
 // live and reachable by direct URL — nothing was deleted or redirected —
 // it's simply no longer linked from primary nav.
 const primaryNav = [
-  { to: "/", label: "Inicio", icon: Home, end: true },
-  { to: "/oportunidades", label: "Oportunidades", icon: ClipboardList, end: false },
-  { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
+  { to: "/operacion", label: "Operación", icon: ClipboardList, end: false },
+  { to: "/campanas", label: "Beneficios y campañas", icon: Tag, end: false },
+  { to: "/negocios", label: "Red", icon: Building2, end: false },
   { to: "/clientes", label: "Clientes", icon: Users, end: false },
-  { to: "/negocios", label: "Negocios", icon: Building2, end: false },
+  { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
+] as const;
+
+const mobileNav = [
+  { to: "/operacion", label: "Operación", icon: ClipboardList, end: false },
+  { to: "/clientes", label: "Clientes", icon: Users, end: false },
+  { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
+  { to: "/campanas", label: "Beneficios", icon: Tag, end: false },
 ] as const;
 
 // Rendered in the desktop sidebar and the mobile slide-out menu (the same
@@ -55,6 +62,6 @@ export default function BoltShell() {
       </header>
       <div className={isFlush ? "bolt-rh-content is-flush" : "bolt-rh-content"}><Outlet /></div>
     </div>
-    <nav className={isChatOpen ? "bolt-rh-bottom is-hidden" : "bolt-rh-bottom"} aria-label="Navegación móvil">{primaryNav.map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end}><Icon /><span>{label}</span></NavLink>)}</nav>
+    <nav className={isChatOpen ? "bolt-rh-bottom is-hidden" : "bolt-rh-bottom"} aria-label="Navegación móvil">{mobileNav.map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end}><Icon /><span>{label}</span></NavLink>)}</nav>
   </div>;
 }
