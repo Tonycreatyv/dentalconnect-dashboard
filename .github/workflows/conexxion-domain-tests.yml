@@ -36,6 +36,10 @@ jobs:
         run: |
           deno test --allow-read             src/apps/referral-hub/operations/legalIntake.test.ts             src/apps/referral-hub/operations/legalOpportunities.test.ts             src/apps/referral-hub/operations/period.test.ts             src/apps/referral-hub/operations/homeMetrics.test.ts             src/apps/referral-hub/operations/immigrationInbox.test.ts             src/apps/referral-hub/operations/immigrationOpportunities.test.ts             src/apps/referral-hub/operations/leadStage.test.ts
 
+      - name: Referral worker parity tests
+        run: |
+          deno test --allow-read             supabase/functions/run-replies/tests/conexxionOperationalCompletionParity.test.ts
+
       - name: Migration contract tests
         run: |
           deno test --allow-read             supabase/migrations/mabletonLocationAwareClaimsMigration.test.ts             supabase/migrations/partnerAssignmentRequestLifecycleSyncMigration.test.ts             supabase/migrations/partnerFinalStateCorrectionMigration.test.ts             supabase/migrations/referralHubMultiorgCaptureAuthorizationMigration.test.ts
