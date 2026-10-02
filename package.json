@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "check:conexxion": "node tools/check-conexxion-boundaries.mjs",
-    "verify:conexxion": "npm run check:conexxion && npm run typecheck && npm run build"
+    "verify:conexxion": "npm run check:conexxion && npm run typecheck:conexxion && npm run build",
+    "typecheck:conexxion": "tsc --noEmit -p tsconfig.conexxion.json"
   },
   "dependencies": {
     "@fullcalendar/interaction": "^6.1.20",
