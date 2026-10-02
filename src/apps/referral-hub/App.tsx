@@ -64,11 +64,9 @@ function ProductRoutes() {
       <Route path="campanas/servicio/:serviceId" element={<ServiceDetailScreen />} />
       <Route path="campanas/negocio/:businessId" element={<BusinessDetailScreen />} />
 
-      {/* New business-centered tree (isolated module, local demo data only —
-          see src/apps/referral-hub/negocios/dataSource.ts). Primary nav now
-          points here instead of campanas; /campanas* above stays live and
-          reachable by URL, unredirected, until this tree is reviewed and
-          approved for cutover. */}
+      {/* Business-centered network workspace. Its active data source reads
+          production Supabase data; only capabilities backed by persistent
+          writes are exposed in the UI. */}
       <Route path="negocios" element={<NegociosHub />} />
       <Route path="negocios/negocio/:businessId" element={<NegociosBusinessDetail />} />
       <Route path="negocios/cupon/:couponId" element={<NegociosCouponEditor />} />
