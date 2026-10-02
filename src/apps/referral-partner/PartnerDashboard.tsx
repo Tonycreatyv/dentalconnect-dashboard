@@ -179,6 +179,7 @@ function usePartnerReferrals(partnerId: string) {
         "id,request_id,partner_id,status,work_status,assigned_at,updated_at,follow_up_reason,next_followup_at,follow_up_attempt_count,referral_service_requests!inner(id,lead_id,service_id,postal_code,intake,consent,intake_complete,status,case_cycle,created_at,leads(full_name,phone,channel_user_id))",
       )
       .eq("partner_id", partnerId)
+      .in("status", ["assigned", "accepted"])
       .order("assigned_at", { ascending: false });
     if (result.error) {
       if (!silent) { setError("No se pudieron cargar las referencias asignadas."); setRows([]); }
