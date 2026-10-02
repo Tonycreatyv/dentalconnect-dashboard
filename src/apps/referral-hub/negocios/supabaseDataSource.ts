@@ -33,6 +33,7 @@ export class SupabaseNegociosDataSource implements NegociosDataSource {
     canEditBusiness: false,
     canCreateBusiness: false,
     canEditCoupon: false,
+    canCreateCampaign: false,
     canUploadImages: false,
     canEditLocationImages: false,
   };
