@@ -489,7 +489,7 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     });
     for (let index = 0; index < steps.length; index += 1) {
       const isFinalStep = index === steps.length - 1;
-      const result = await supabase.rpc("partner_update_immigration_assignment", {
+      const result = await supabase.rpc("partner_update_referral_assignment", {
         p_assignment_id: assignmentId,
         p_action: steps[index],
         p_note: isFinalStep ? finalNote : null,
@@ -516,7 +516,7 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     }
     setBusy(true);
     setFeedback(null);
-    const result = await supabase.rpc("partner_update_immigration_assignment", {
+    const result = await supabase.rpc("partner_update_referral_assignment", {
       p_assignment_id: row.id,
       p_action: "correct_result",
       p_note: correctionNote.trim() || null,
@@ -565,7 +565,7 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     const finalNote = note.trim() || null;
     for (let index = 0; index < steps.length; index += 1) {
       const isFinalStep = index === steps.length - 1;
-      const result = await supabase.rpc("partner_update_immigration_assignment", {
+      const result = await supabase.rpc("partner_update_referral_assignment", {
         p_assignment_id: assignmentId,
         p_action: steps[index],
         p_note: isFinalStep ? finalNote : null,
