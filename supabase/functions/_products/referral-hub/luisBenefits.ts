@@ -218,7 +218,13 @@ export type LuisIntent =
  */
 export type LuisFlowCompletionKind = "BENEFITS" | "FURNITURE" | "LEGAL" | "HANDOFF" | "UNKNOWN";
 
-export type LuisFurnitureFlowCompletion = {\n  service_key: "FURNITURE";\n  full_name: string;\n  postal_code: string;\n};\n\nexport const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
+export type LuisFurnitureFlowCompletion = {
+  service_key: "FURNITURE";
+  full_name: string;
+  postal_code: string;
+};
+
+export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
   SUPERMARKET: {
     key: "SUPERMARKET",
     campaignKey: "luis_benefit_supermarket_20",
