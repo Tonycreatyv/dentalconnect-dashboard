@@ -19528,6 +19528,15 @@ async function processSingleJob(
         rawFlowResponse,
         orgSettings: (clinicSettings ?? {}) as Record<string, unknown>,
       });
+    } else if (completionKind === "FURNITURE") {
+      earlyGeneratedOverride = await buildLuisFurnitureFlowCompletionResult({
+        supabase,
+        organizationId: effectiveOrganizationId,
+        leadId,
+        rawFlowResponse,
+        channelUserId: effectiveRecipientId,
+        deliveryKey: inboundMessageId || jobId,
+      }) ?? invalidLuisFlowCompletionResult("FURNITURE");
     } else if (completionKind === "LEGAL") {
       earlyGeneratedOverride = await buildLuisLegalFlowCompletionResult({
         supabase,
