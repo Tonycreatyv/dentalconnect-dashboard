@@ -198,7 +198,13 @@ const FIELDS_BY_TOPIC: Record<string, readonly string[]> = {
 
 export function resolveReferralService(value: unknown, intake: Intake = {}): ReferralService | null {
   const candidate = text(value) ?? text(intake.service) ?? text(intake.service_id);
-  return candidate ? SERVICE_ALIASES[candidate.toLowerCase()] ?? null : null;
+  if (!candidate) return null;
+  const normalized = candidate.toLowerCase();
+  if (normalized === "luis_dui_criminal") {
+    const intakeType = text(intake.intake_type)?.toUpperCase();
+    return intakeType === "CRIMINAL" ? "criminal" : "dui";
+  }
+  return SERVICE_ALIASES[normalized] ?? null;
 }
 
 export function referralServiceLabel(service: ReferralService | null): string {
