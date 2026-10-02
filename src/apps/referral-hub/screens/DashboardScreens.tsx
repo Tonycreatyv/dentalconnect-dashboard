@@ -483,7 +483,7 @@ const LEGACY_REQUEST_STATUS_TONE: Record<string, StatusTone> = {
 // source tag, so a legacy referral_service_requests row is never mistaken
 // for — or silently merged with — a real Unified Services Flow submission,
 // even when both happen to describe the same underlying service.
-function SourceTag({ source }: { source: "WhatsApp Flow" | "Cupón" | "Sistema anterior" }) {
+function SourceTag({ source }: { source: "WhatsApp Flow" | "Cupón" | "Caso" }) {
   return <span className="hub-source-tag">{source}</span>;
 }
 
@@ -647,9 +647,9 @@ export function ContactDetailScreen() {
           historical so it is never confused with a current Flow
           submission. */}
       <section className="hub-section">
-        <h2>Historial anterior</h2>
+        <h2>Casos y solicitudes</h2>
         {detail.serviceRequests.length === 0 ? (
-          <EmptyState icon={Users} title="Sin historial anterior" />
+          <EmptyState icon={Users} title="Sin otros casos" />
         ) : (
           <div className="hub-list">
             {detail.serviceRequests.map((request) => (
@@ -670,7 +670,7 @@ export function ContactDetailScreen() {
                   </small>
                 </div>
                 <div className="hub-list-row-meta">
-                  <SourceTag source="Sistema anterior" />
+                  <SourceTag source="Caso" />
                   <StatusBadge tone={LEGACY_REQUEST_STATUS_TONE[request.status] ?? "neutral"} label={LEGACY_REQUEST_STATUS_LABEL[request.status] ?? request.status} />
                 </div>
               </div>
