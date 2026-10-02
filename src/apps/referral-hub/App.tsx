@@ -16,7 +16,7 @@ import ReferralQrEntry from "./pages/ReferralQrEntry";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
-import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen, InicioScreen, OportunidadesScreen } from "./screens/DashboardScreens";
+import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen, OportunidadesScreen } from "./screens/DashboardScreens";
 import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
