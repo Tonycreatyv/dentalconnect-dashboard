@@ -378,7 +378,7 @@ export function OportunidadesScreen() {
       <div className="hub-filter-group">
         <span className="hub-filter-group-label">Servicio</span>
         <FilterTabs
-          tabs={[{ id: "all", label: "Todas" }, { id: "immigration", label: "Inmigración" }, { id: "auto_accident", label: "Accidentes" }, { id: "dui", label: "DUI" }, { id: "criminal", label: "Criminal" }]}
+          tabs={[{ id: "all", label: "Todas" }, { id: "immigration", label: "Inmigración" }, { id: "auto_accident", label: "Accidentes" }, { id: "dui", label: "DUI" }, { id: "criminal", label: "Criminal" }, { id: "furniture", label: "Muebles" }, { id: "representative", label: "Equipo" }]}
           activeId={serviceFilter}
           onChange={(id) => setServiceFilter(id as OpportunityServiceFilter)}
         />
