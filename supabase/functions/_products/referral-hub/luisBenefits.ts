@@ -2,7 +2,7 @@ export const LUIS_BENEFITS_FLOW_ACTION = "luis_benefits:complete";
 export const LUIS_BENEFITS_FLOW_SCREEN = "BENEFIT_SELECT";
 export const LUIS_BENEFITS_MARKETING_COPY_VERSION = "luis_benefits_flow_v1";
 
-export type LuisBenefitKey = "SUPERMARKET" | "MEDICAL" | "DENTAL" | "SHIPPING";
+export type LuisBenefitKey = "SUPERMARKET" | "MABLETON_PARRILLADA" | "MEDICAL" | "DENTAL" | "SHIPPING" | "TAXES";
 
 export type LuisBenefitFlowCompletion = {
   benefit_key: LuisBenefitKey;
@@ -42,10 +42,32 @@ export type LuisLegalFlowCompletion =
     intake_type: "AUTO_ACCIDENT";
     full_name: string;
     accident_date: string;
-    participant_role: "DRIVER" | "PASSENGER" | "OTHER";
+    // P0 (2026-09): the currently published Flow's ACCIDENT_DETAILS/
+    // LEGAL_CONSENT screens no longer send participant_role OR its former
+    // alias participation at all (confirmed via a real completion payload's
+    // key set — reply_outbox.payload->'flow_response' — neither key is
+    // present). Requiring it outright made every real AUTO_ACCIDENT
+    // completion fail validation unconditionally, before
+    // referral_service_requests/referral_assignments were ever reached.
+    // Nullable here, still parsed opportunistically below for forward
+    // compatibility if a future Flow version reintroduces it.
+    participant_role: "DRIVER" | "PASSENGER" | "OTHER" | null;
     received_medical_attention: "YES" | "NO";
+    // P0 (2026-09): confirmed present on the real completion payload
+    // (reply_outbox.payload->'flow_response' key inspection) but never
+    // previously parsed — informational/persisted only, never gates
+    // completion validity.
+    police_report: "YES" | "NO" | null;
     medical_provider: string | null;
     description: string;
+    // P0 (2026-09): confirmed present on the real completion payload —
+    // the published Flow's LEGAL_CONSENT screen collects sharing_consent
+    // for AUTO_ACCIDENT too, not just IMMIGRATION. Required to restore the
+    // approved "¡Gracias! ✅..." response and to gate partner assignment
+    // (see captureLegalFlowRequest — assignment only on AUTHORIZED).
+    sharing_consent: "AUTHORIZED" | "DECLINED" | "PENDING";
+    consent_version: string | null;
+    consent_source: string | null;
   }
   | {
     intake_type: "DUI_CRIMINAL";
@@ -53,6 +75,9 @@ export type LuisLegalFlowCompletion =
     full_name: string;
     postal_code: string | null;
     description: string;
+    sharing_consent: "AUTHORIZED" | "DECLINED";
+    consent_version: "luis_dui_criminal_sharing_v1";
+    consent_source: "whatsapp_flow";
   };
 
 export type LuisConversationRoute =
@@ -64,6 +89,20 @@ export type LuisConversationRoute =
   // "Claro 👌 ..." reentry copy that reads oddly outside an explicit
   // menu-return.
   | { kind: "main_menu"; trigger: "greeting" | "explicit" }
+  // "Ver beneficios" on the post-benefit-delivery menu (button id
+  // luis_benefits:another). Deliberately its own kind, checked ahead of the
+  // pre-existing "luis benefits another" match (which routed to the generic
+  // {kind:"benefits"} path and, through luisBenefitsFlowEntryResult's
+  // no-requestedBenefitKey fallback, targeted LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN
+  // ("BENEFITS_ENTRY") — a screen that was never added to the published
+  // Flow, so WhatsApp rejects it and the button silently does nothing).
+  // This kind's own handler opens SERVICE_SELECT via luisUnifiedFlowEntryResult
+  // with no custom screen argument — the same known-good mechanism as
+  // post_benefit_services — never BENEFIT_SELECT: Meta's Graph API rejects a
+  // Flow-trigger targeting BENEFIT_SELECT directly (error 131009 — it only
+  // has an inbound edge from SERVICE_SELECT in this Flow's routing_model, so
+  // it isn't a valid external entry screen).
+  | { kind: "post_benefit_reopen_benefits" }
   | { kind: "post_benefit_menu" }
   | { kind: "post_benefit_services" }
   | { kind: "post_benefit_finalize" }
@@ -125,13 +164,24 @@ export type LuisIntent =
  * Classify before validating so a legal intake can never be treated as a
  * benefit claim just because both arrive as `nfm_reply` messages.
  */
-export type LuisFlowCompletionKind = "BENEFITS" | "LEGAL" | "HANDOFF" | "UNKNOWN";
+export type LuisFlowCompletionKind = "BENEFITS" | "FURNITURE" | "LEGAL" | "HANDOFF" | "MERCADITO" | "UNKNOWN";
+
+export type LuisFurnitureFlowCompletion = {
+  service_key: "FURNITURE";
+  full_name: string;
+  postal_code: string;
+};
 
 export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
   SUPERMARKET: {
     key: "SUPERMARKET",
     campaignKey: "luis_benefit_supermarket_20",
     displayName: "$20 para tu compra de supermercado",
+  },
+  MABLETON_PARRILLADA: {
+    key: "MABLETON_PARRILLADA",
+    campaignKey: "luis_benefit_mableton_parrillada",
+    displayName: "La Super Parrillada",
   },
   MEDICAL: {
     key: "MEDICAL",
@@ -145,7 +195,7 @@ export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
     campaignKey: "luis_benefit_dental_29",
     displayName: "Consulta + limpieza + rayos X por $29",
     partnerName: "Dental Now 14",
-    mediaUrl: "https://referral.creatyv.io/images/coupons/luis/dental-now-14.jpeg",
+    mediaUrl: "https://referral.creatyv.io/images/coupons/luis/dental-now-29-sept-2026.jpg",
   },
   SHIPPING: {
     key: "SHIPPING",
@@ -153,6 +203,13 @@ export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
     displayName: "$20 de descuento en tu próximo envío",
     partnerName: "Ultra Cargo",
     mediaUrl: "https://referral.creatyv.io/images/coupons/luis/ultra-cargo.jpeg",
+  },
+  TAXES: {
+    key: "TAXES",
+    campaignKey: "luis_benefit_taxes",
+    displayName: "Beneficio de impuestos Rumba",
+    partnerName: "Rumba Impuestos",
+    mediaUrl: "https://referral.creatyv.io/images/coupons/luis/rumba-impuestos-cupon.jpeg",
   },
 };
 
@@ -521,6 +578,12 @@ export function routeLuisConversation(args: {
 
   // Priority 1: explicit WhatsApp payload/action - unchanged, highest
   // precedence, never touched by the interpreter.
+  // Production hotfix: luis_benefits:another normalizes to "luis benefits
+  // another" — checked here, ahead of everything else, so it can never fall
+  // through to the pre-existing "luis benefits another" match below (which
+  // routes to {kind:"benefits"} and could reach an invalid screen — see the
+  // post_benefit_reopen_benefits doc comment above).
+  if (action === "luis benefits another") return { kind: "post_benefit_reopen_benefits" };
   if (action === "luis benefits main menu") return { kind: "post_benefit_menu" };
   if (action === "luis benefits services") return { kind: "post_benefit_services" };
   if (action === "luis benefits finalize") return { kind: "post_benefit_finalize" };
@@ -541,7 +604,12 @@ export function routeLuisConversation(args: {
   ) {
     return { kind: "main_menu", trigger: "explicit" };
   }
-  if (action === "luis benefits another" || action === "luis main benefits") {
+  // "luis benefits another" removed from this OR — it's now matched
+  // earlier, unreachable here by construction (see post_benefit_reopen_
+  // benefits above). "luis main benefits" (a distinct trigger — the
+  // luis_main:benefits main-menu button, not the post-benefit-delivery
+  // "Ver beneficios") is unchanged.
+  if (action === "luis main benefits") {
     return { kind: "benefits" };
   }
   // Taps on the benefits_clarify buttons ("Supermercado"/"Médico"/"Ver
@@ -794,10 +862,24 @@ export function classifyLuisFlowCompletion(raw: unknown): LuisFlowCompletionKind
     return "LEGAL";
   }
   if (hasBenefitKey) return "BENEFITS";
+  if (!hasIntakeType && !hasBenefitKey && text(value.service_key, 32) === "FURNITURE") return "FURNITURE";
   // Unified Flow HANDOFF_CONFIRM completes with only {service_key: "HANDOFF"} -
   // no benefit_key/intake_type, so it never collides with the branches above.
   if (!hasIntakeType && text(value.service_key, 32) === "HANDOFF") return "HANDOFF";
+  // Mercadito is an external shopping handoff only. It has no intake fields
+  // and must never enter the benefit, legal, or assignment pipelines.
+  if (!hasIntakeType && !hasBenefitKey && text(value.service_key, 32) === "MERCADITO") return "MERCADITO";
   return "UNKNOWN";
+}
+
+export function parseLuisFurnitureFlowCompletion(raw: unknown): LuisFurnitureFlowCompletion | null {
+  const value = record(raw);
+  if (!value || text(value.service_key, 32) !== "FURNITURE") return null;
+  const fullName = text(value.full_name, 120);
+  const postalCode = postalCodeText(value.postal_code);
+  return fullName && /^\d{5}$/.test(postalCode)
+    ? { service_key: "FURNITURE", full_name: fullName, postal_code: postalCode }
+    : null;
 }
 
 function optionalPostalCode(value: unknown) {
@@ -811,6 +893,95 @@ function optionalPostalCode(value: unknown) {
 function oneOf<T extends string>(value: unknown, choices: readonly T[]) {
   const candidate = text(value, 100) as T;
   return choices.includes(candidate) ? candidate : null;
+}
+
+// P0 (2026-09): ACCIDENT_BASICS' DatePicker component submits its value as
+// a Unix timestamp in milliseconds, as a string (Meta's documented Flow
+// JSON DatePicker contract - https://developers.facebook.com/docs/whatsapp/
+// flows/reference/components#datepicker) - never the YYYY-MM-DD this parser
+// previously required outright, so every real AUTO_ACCIDENT submission from
+// the published Flow failed validation with "No pudimos validar tu
+// solicitud...", regardless of how the customer reached the Flow. Accepts
+// both: an already-YYYY-MM-DD value passes through unchanged (covers any
+// future Flow version or test payload that sends the calendar-formatted
+// value directly), and a numeric-millisecond string is converted using UTC
+// components - WhatsApp Flow DatePicker values represent midnight UTC of
+// the selected calendar day, so a UTC extraction reconstructs the exact
+// date the customer picked regardless of server-local timezone. Anything
+// else (non-numeric, NaN, out-of-range) returns null - a genuinely invalid
+// date, same as before.
+function normalizeFlowDate(raw: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (!/^\d+$/.test(raw)) return null;
+  const epochMillis = Number(raw);
+  if (!Number.isFinite(epochMillis) || epochMillis <= 0) return null;
+  const date = new Date(epochMillis);
+  if (Number.isNaN(date.getTime())) return null;
+  const iso = date.toISOString().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
+}
+
+export type AccidentValidationFailureCode =
+  | "ACCIDENT_MISSING_SERVICE_KEY"
+  | "ACCIDENT_MISSING_INTAKE_TYPE"
+  | "ACCIDENT_MISSING_FULL_NAME"
+  | "ACCIDENT_MISSING_DESCRIPTION"
+  | "ACCIDENT_INVALID_DATE"
+  | "ACCIDENT_INVALID_MEDICAL_ATTENTION"
+  | "ACCIDENT_INVALID_POLICE_REPORT"
+  | "ACCIDENT_MISSING_SHARING_CONSENT"
+  | "ACCIDENT_INVALID_SHARING_CONSENT"
+  | "ACCIDENT_CONSENT_VERSION_MISMATCH"
+  | "ACCIDENT_SCHEMA_MISMATCH"
+  | "ACCIDENT_UNKNOWN_VALIDATION_FAILURE";
+
+// P0 diagnostic (2026-09): safe, structure-only classification of why an
+// AUTO_ACCIDENT completion did or would fail validation - never inspects a
+// key's actual value, only its presence and format CATEGORY (e.g. does
+// accident_date parse as a real date, not what date). Callable on every
+// AUTO_ACCIDENT-shaped completion (success or failure) so a future Flow
+// schema drift is caught from safe logs instead of requiring another
+// reply_outbox forensic query. police_report/sharing_consent/
+// consent_version are checked here for visibility even though the parser
+// above does not currently gate on them (the real Flow's LEGAL_CONSENT
+// screen sends them, but AUTO_ACCIDENT's completion contract doesn't
+// persist them yet - out of scope for this fix, see parseLuisLegalFlow
+// Completion's AUTO_ACCIDENT branch).
+export function classifyAccidentValidationFailure(raw: unknown): AccidentValidationFailureCode | null {
+  const value = record(raw);
+  if (!value) return "ACCIDENT_SCHEMA_MISMATCH";
+  // Gate everything below to payloads that are accident-shaped or
+  // ambiguous (intake_type missing entirely). A payload that explicitly
+  // declares a different intake_type (IMMIGRATION/DUI_CRIMINAL/...) has
+  // its own validation path and must never be misclassified as an
+  // accident-specific failure just because it lacks accident-only fields.
+  const hasIntakeType = Object.prototype.hasOwnProperty.call(value, "intake_type");
+  const intakeType = hasIntakeType ? text(value.intake_type, 32) : "";
+  if (hasIntakeType && intakeType !== "AUTO_ACCIDENT") return null;
+  if (!Object.prototype.hasOwnProperty.call(value, "service_key")) return "ACCIDENT_MISSING_SERVICE_KEY";
+  if (!hasIntakeType) return "ACCIDENT_MISSING_INTAKE_TYPE";
+  if (!text(value.full_name, 120)) return "ACCIDENT_MISSING_FULL_NAME";
+  if (!text(value.description, 600)) return "ACCIDENT_MISSING_DESCRIPTION";
+  if (!normalizeFlowDate(text(value.accident_date, 32))) return "ACCIDENT_INVALID_DATE";
+  if (!oneOf(value.received_medical_attention, ["YES", "NO"] as const)) return "ACCIDENT_INVALID_MEDICAL_ATTENTION";
+  if (
+    Object.prototype.hasOwnProperty.call(value, "police_report") &&
+    !oneOf(value.police_report, ["YES", "NO"] as const)
+  ) {
+    return "ACCIDENT_INVALID_POLICE_REPORT";
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "sharing_consent")) {
+    if (!text(value.sharing_consent, 40)) return "ACCIDENT_MISSING_SHARING_CONSENT";
+    if (!oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const)) return "ACCIDENT_INVALID_SHARING_CONSENT";
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "consent_version") &&
+    typeof value.consent_version !== "string" &&
+    value.consent_version !== null && value.consent_version !== undefined
+  ) {
+    return "ACCIDENT_CONSENT_VERSION_MISMATCH";
+  }
+  return null;
 }
 
 export function parseLuisLegalFlowCompletion(
@@ -842,34 +1013,52 @@ export function parseLuisLegalFlowCompletion(
       : null;
   }
   if (intakeType === "AUTO_ACCIDENT") {
-    const accidentDate = text(value.accident_date, 32);
-    // Current draft payloads use `participation`; accept that approved contract
-    // while canonicalizing the stored intake to `participant_role`.
+    const accidentDate = normalizeFlowDate(text(value.accident_date, 32));
+    // P0 (2026-09): the currently published Flow's ACCIDENT_DETAILS/
+    // LEGAL_CONSENT screens never send participant_role or its former
+    // alias participation at all - confirmed against a real completion
+    // payload's key set (reply_outbox.payload->'flow_response'), neither
+    // key present. Requiring it outright made every real AUTO_ACCIDENT
+    // completion fail unconditionally. Still parsed opportunistically (a
+    // future Flow version may reintroduce it), but never gates validity -
+    // see the LuisLegalFlowCompletion doc comment.
     const participantRole = oneOf(
       value.participant_role ?? value.participation,
       ["DRIVER", "PASSENGER", "OTHER"] as const,
     );
     const receivedMedicalAttention = oneOf(value.received_medical_attention, ["YES", "NO"] as const);
+    const policeReport = oneOf(value.police_report, ["YES", "NO"] as const);
     const medicalProvider = value.medical_provider === null || value.medical_provider === undefined
       ? null
       : text(value.medical_provider, 160) || null;
-    return /^\d{4}-\d{2}-\d{2}$/.test(accidentDate) && participantRole && receivedMedicalAttention
+    const submittedConsent = oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const);
+    const sharingConsent = submittedConsent ?? "PENDING";
+    const consentVersion = submittedConsent ? text(value.consent_version, 80) || null : null;
+    const consentSource = submittedConsent ? text(value.consent_source, 40) || null : null;
+    return accidentDate && receivedMedicalAttention
       ? {
         intake_type: "AUTO_ACCIDENT",
         full_name: fullName,
         accident_date: accidentDate,
         participant_role: participantRole,
         received_medical_attention: receivedMedicalAttention,
+        police_report: policeReport,
         medical_provider: medicalProvider,
         description,
+        sharing_consent: sharingConsent,
+        consent_version: consentVersion,
+        consent_source: consentSource,
       }
       : null;
   }
   if (intakeType === "DUI_CRIMINAL") {
     const topic = oneOf(value.topic, ["DUI", "ARREST", "CRIMINAL_CHARGE", "COURT_SUMMONS", "OTHER"] as const);
     const postalCode = optionalPostalCode(value.postal_code);
-    return topic && postalCode !== undefined
-      ? { intake_type: "DUI_CRIMINAL", topic, full_name: fullName, postal_code: postalCode, description }
+    const sharingConsent = oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const);
+    const consentVersion = text(value.consent_version, 80);
+    const consentSource = text(value.consent_source, 40);
+    return topic && postalCode !== undefined && sharingConsent && consentVersion === "luis_dui_criminal_sharing_v1" && consentSource === "whatsapp_flow"
+      ? { intake_type: "DUI_CRIMINAL", topic, full_name: fullName, postal_code: postalCode, description, sharing_consent: sharingConsent, consent_version: "luis_dui_criminal_sharing_v1", consent_source: "whatsapp_flow" }
       : null;
   }
   return null;
@@ -905,6 +1094,7 @@ export function luisBenefitsActivationText(args: {
   benefitDisplayName: string;
   claimCode: string;
   partnerName?: string | null;
+  genericSupermarketInstruction?: boolean;
 }) {
   const firstName = text(args.firstName, 60).split(" ")[0] || "";
   return [
@@ -912,7 +1102,9 @@ export function luisBenefitsActivationText(args: {
     "Tu beneficio ya está activo.",
     args.benefitDisplayName,
     `Código de activación: ${args.claimCode}`,
-    args.partnerName
+    args.genericSupermarketInstruction
+      ? "Guarda este mensaje y presenta tu beneficio en el supermercado."
+      : args.partnerName
       ? `Guardá este mensaje y presentá tu beneficio en ${text(args.partnerName, 160)}.`
       : "Guardá este mensaje y presentá tu beneficio con el negocio participante.",
   ].join("\n\n");
