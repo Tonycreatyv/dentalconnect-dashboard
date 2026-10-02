@@ -404,7 +404,7 @@ export function OportunidadesScreen() {
       ) : opportunities.error ? (
         <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar las oportunidades" description={opportunities.error} />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Users} title="Sin oportunidades en esta categoría" description="Las solicitudes legales enviadas por el Flow aparecerán aquí." />
+        <EmptyState icon={Users} title="Sin oportunidades en esta categoría" description="Las solicitudes de servicio aparecerán aquí." />
       ) : (
         <div className="hub-opp-list">
           {filtered.map((request) => {
@@ -439,6 +439,8 @@ const SERVICE_REQUEST_LABEL: Record<string, string> = {
   luis_accidente: "Accidente de auto",
   luis_dui: "DUI",
   luis_criminal: "Defensa criminal",
+  luis_dui_criminal: "DUI / Criminal",
+  luis_muebles: "Muebles",
   luis_inmigracion: "Inmigración",
   luis_representante: "Solicitud de asesor",
   luis_eventos: "Eventos comunitarios",
