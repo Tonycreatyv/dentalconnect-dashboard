@@ -213,6 +213,7 @@ const REAL_CAPABILITIES: NegociosCapabilities = {
   canEditBusiness: true,
   canCreateBusiness: true,
   canEditCoupon: true,
+  canCreateCampaign: false,
   canUploadImages: false,
   canEditLocationImages: true,
 };
