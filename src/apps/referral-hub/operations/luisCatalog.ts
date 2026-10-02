@@ -13,6 +13,8 @@ export type LuisServiceId =
   | "luis_benefit_shipping"
   | "luis_inmigracion"
   | "luis_accidente"
+  | "luis_dui"
+  | "luis_criminal"
   | "luis_representante";
 
 export const SERVICE_LABELS: Record<LuisServiceId, string> = {
@@ -21,7 +23,9 @@ export const SERVICE_LABELS: Record<LuisServiceId, string> = {
   luis_benefit_dental: "Dental",
   luis_benefit_shipping: "Envíos",
   luis_inmigracion: "Inmigración",
-  luis_accidente: "Accidente de auto / DUI / Defensa criminal",
+  luis_accidente: "Accidente de auto",
+  luis_dui: "DUI",
+  luis_criminal: "Defensa criminal",
   luis_representante: "Hablar con nuestro equipo",
 };
 
@@ -32,7 +36,7 @@ export const BENEFIT_SERVICE_IDS: LuisServiceId[] = [
   "luis_benefit_shipping",
 ];
 
-export const LEGAL_SERVICE_IDS: LuisServiceId[] = ["luis_inmigracion", "luis_accidente", "luis_representante"];
+export const LEGAL_SERVICE_IDS: LuisServiceId[] = ["luis_inmigracion", "luis_accidente", "luis_dui", "luis_criminal", "luis_representante"];
 
 export const CAMPAIGN_KEY_BY_SERVICE: Partial<Record<LuisServiceId, string>> = {
   luis_benefit_medical: "luis_benefit_medical_20",

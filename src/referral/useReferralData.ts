@@ -15,38 +15,44 @@ export function useReferralData() {
   const [error, setError] = useState<string | null>(null);
   const [syncWarning, setSyncWarning] = useState<ReferralAssignmentSyncWarning | null>(null);
 
-  const load = useCallback(async () => {
+  // silent=true is used by background polling: never flips the big loading
+  // state, and a failed silent refresh leaves current leads/services/
+  // partners on screen instead of clearing or error-ing them out.
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     if (!organizationId) {
-      setLeads([]);
-      setLoading(false);
+      if (!silent) { setLeads([]); setLoading(false); }
       return;
     }
-    setLoading(true);
-    setError(null);
+    if (!silent) { setLoading(true); setError(null); }
     const [leadRes, serviceRes, partnerRes] = await Promise.all([
       supabase.from("leads").select("*").eq("organization_id", organizationId).order("created_at", { ascending: false }),
       supabase.from("service_configs").select("id, nombre, menu_label, icono").eq("organization_id", organizationId),
       supabase.from("partners").select("id, nombre, servicios").eq("organization_id", organizationId),
     ]);
     if (leadRes.error) {
-      console.warn("[Referral Hub] No se pudieron cargar leads", { organizationId });
-      setError("No pudimos cargar los leads. Intenta de nuevo.");
-      setLoading(false);
+      if (!silent) {
+        console.warn("[Referral Hub] No se pudieron cargar leads", { organizationId });
+        setError("No pudimos cargar los leads. Intenta de nuevo.");
+        setLoading(false);
+      }
       return;
     }
     if (serviceRes.error || partnerRes.error) {
-      console.warn("[Referral Hub] Fallaron fuentes del directorio", {
-        organizationId,
-        sources: [serviceRes.error ? "service_configs" : null, partnerRes.error ? "partners" : null].filter(Boolean),
-      });
-      setError("No pudimos cargar todos los datos del directorio. Intenta de nuevo.");
-      setLoading(false);
+      if (!silent) {
+        console.warn("[Referral Hub] Fallaron fuentes del directorio", {
+          organizationId,
+          sources: [serviceRes.error ? "service_configs" : null, partnerRes.error ? "partners" : null].filter(Boolean),
+        });
+        setError("No pudimos cargar todos los datos del directorio. Intenta de nuevo.");
+        setLoading(false);
+      }
       return;
     }
     setLeads((leadRes.data ?? []) as ReferralLead[]);
     setServices(Object.fromEntries(((serviceRes.data ?? []) as ReferralService[]).map((item) => [item.id, item])));
     setPartners(Object.fromEntries(((partnerRes.data ?? []) as ReferralPartner[]).map((item) => [item.id, item])));
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [organizationId]);
 
   useEffect(() => { void load(); }, [load]);

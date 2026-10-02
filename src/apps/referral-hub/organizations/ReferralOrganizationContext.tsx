@@ -15,6 +15,7 @@ type ReferralOrganizationValue = {
   resolvedOrgId: string;
   resolvedOrgName: string;
   resolvedBusinessType: "referral_hub";
+  timezone: string;
   membershipRole: string;
   features: LgFeatureFlags;
   loading: boolean;
@@ -30,6 +31,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
   const [name, setName] = useState("LG Community Network");
   const [features, setFeatures] = useState(DEFAULT_LG_FEATURE_FLAGS);
   const [membershipRole, setMembershipRole] = useState("");
+  const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 
   useEffect(() => {
     let active = true;
@@ -38,6 +40,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
         if (active) {
           setError("");
           setMembershipRole("");
+          setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
           setFeatures(DEFAULT_LG_FEATURE_FLAGS);
           setLoading(false);
         }
@@ -62,7 +65,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
       const [settings, profile] = await Promise.all([
         supabase
           .from("org_settings")
-          .select("organization_id,business_type,brand_name")
+          .select("organization_id,business_type,brand_name,timezone")
           .eq("organization_id", REFERRAL_HUB_ORGANIZATION_ID)
           .eq("business_type", REFERRAL_HUB_BUSINESS_TYPE)
           .maybeSingle(),
@@ -77,6 +80,7 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
         setError("La organización principal de Conexxion no está configurada.");
       } else {
         setName(settings.data.brand_name || "LG Community Network");
+        setTimezone(settings.data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
         const integrations = profile.data?.integrations as Record<string, unknown> | null;
         setFeatures(resolveLgFeatureFlags(integrations?.lg_features));
       }
@@ -90,11 +94,12 @@ export function ReferralOrganizationProvider({ children }: { children: React.Rea
     resolvedOrgId: error ? "" : REFERRAL_HUB_ORGANIZATION_ID,
     resolvedOrgName: name,
     resolvedBusinessType: "referral_hub",
+    timezone,
     membershipRole,
     features,
     loading,
     error,
-  }), [error, name, features, loading, membershipRole]);
+  }), [error, name, timezone, features, loading, membershipRole]);
 
   return (
     <ReferralOrganizationContext.Provider value={value}>

@@ -34,15 +34,16 @@ export function useReferralOperations() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
+  // silent=true is used by background polling: never flips the big loading
+  // state, and a failed silent refresh leaves current messages on screen
+  // instead of clearing or error-ing them out.
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     if (!resolvedOrgId) {
-      setMessages([]);
-      setFlowResponseByProviderMessageId(new Map());
-      setLoading(false);
+      if (!silent) { setMessages([]); setFlowResponseByProviderMessageId(new Map()); setLoading(false); }
       return;
     }
-    setLoading(true);
-    setError("");
+    if (!silent) { setLoading(true); setError(""); }
     const [messagesResult, outboxResult] = await Promise.all([
       supabase
         .from("messages")
@@ -59,8 +60,7 @@ export function useReferralOperations() {
         .limit(500),
     ]);
     if (messagesResult.error) {
-      setError("No se pudieron cargar las conversaciones.");
-      setMessages([]);
+      if (!silent) { setError("No se pudieron cargar las conversaciones."); setMessages([]); }
     } else {
       setMessages((messagesResult.data ?? []) as OperationsMessage[]);
     }
@@ -76,7 +76,7 @@ export function useReferralOperations() {
       }
       setFlowResponseByProviderMessageId(nextMap);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [resolvedOrgId]);
 
   useEffect(() => { void load(); }, [load]);

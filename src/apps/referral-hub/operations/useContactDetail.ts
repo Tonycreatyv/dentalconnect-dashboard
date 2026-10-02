@@ -34,6 +34,7 @@ export type ContactServiceRequest = {
   status: string;
   postal_code: string | null;
   created_at: string;
+  intake: Record<string, unknown>;
   businessName: string | null;
 };
 
@@ -63,7 +64,7 @@ export function useContactDetail(leadId: string | undefined) {
         .eq("id", leadId).eq("organization_id", resolvedOrgId).maybeSingle(),
       supabase.from("referral_benefit_claims").select("id,claim_code,status,postal_code,requested_at,email,email_marketing_opt_in,referral_coupon_campaigns(display_name,business_id)")
         .eq("lead_id", leadId).eq("organization_id", resolvedOrgId).order("requested_at", { ascending: false }),
-      supabase.from("referral_service_requests").select("id,service_id,status,postal_code,created_at")
+      supabase.from("referral_service_requests").select("id,service_id,status,postal_code,created_at,intake")
         .eq("lead_id", leadId).eq("organization_id", resolvedOrgId).order("created_at", { ascending: false }),
     ]);
     const requestIds = ((requestsRes.data ?? []) as unknown as Array<{ id: string }>).map((r) => r.id);
@@ -126,14 +127,20 @@ export function useContactDetail(leadId: string | undefined) {
       email_marketing_opt_in: item.email_marketing_opt_in,
     })));
     const requestRows = (requestsRes.data ?? []) as unknown as Array<{
-      id: string; service_id: string; status: string; postal_code: string | null; created_at: string;
+      id: string; service_id: string; status: string; postal_code: string | null; created_at: string; intake: Record<string, unknown> | null;
     }>;
-    setServiceRequests(requestRows.map((item) => ({
+    // luis_inmigracion already has a canonical, dedicated operational view
+    // (useImmigrationInbox / resolveImmigrationOpportunity) rendered
+    // elsewhere on this screen — including it here too would show the same
+    // case twice with two different, potentially contradictory statuses.
+    const legacyRows = requestRows.filter((item) => item.service_id !== "luis_inmigracion");
+    setServiceRequests(legacyRows.map((item) => ({
       id: item.id,
       service_id: item.service_id,
       status: item.status,
       postal_code: item.postal_code,
       created_at: item.created_at,
+      intake: item.intake ?? {},
       businessName: (() => {
         const partnerId = assignmentByRequest.get(item.id);
         return partnerId ? partnerNameById.get(partnerId) ?? null : null;

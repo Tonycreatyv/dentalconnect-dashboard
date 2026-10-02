@@ -10,7 +10,7 @@
 // needs this data reads it the same way.
 import type { LuisServiceId } from "./luisCatalog";
 
-export type LegalIntakeType = "IMMIGRATION" | "AUTO_ACCIDENT" | "DUI_CRIMINAL";
+export type LegalIntakeType = "IMMIGRATION" | "AUTO_ACCIDENT" | "DUI" | "CRIMINAL" | "DUI_CRIMINAL";
 
 export type LegalIntake = {
   intakeType: LegalIntakeType;
@@ -20,12 +20,13 @@ export type LegalIntake = {
   completedAt: string | null;
 };
 
-// Mirrors SERVICE_REQUEST_LABEL/FOLLOW_UP_SERVICE_IDS grouping used
-// elsewhere: DUI_CRIMINAL and AUTO_ACCIDENT are both shown under the
-// combined "Accidente / DUI / Criminal" service row, never their own row.
+// DUI_CRIMINAL remains a legacy compatibility payload. New completions use
+// the three canonical service types, so their requests never collide.
 export const LEGAL_INTAKE_SERVICE_ID: Record<LegalIntakeType, LuisServiceId> = {
   IMMIGRATION: "luis_inmigracion",
   AUTO_ACCIDENT: "luis_accidente",
+  DUI: "luis_dui",
+  CRIMINAL: "luis_criminal",
   DUI_CRIMINAL: "luis_accidente",
 };
 
@@ -49,7 +50,7 @@ const DUI_TOPIC_LABELS: Record<string, string> = {
 export function legalTopicLabel(intake: LegalIntake): string | null {
   if (!intake.topic) return null;
   if (intake.intakeType === "IMMIGRATION") return IMMIGRATION_TOPIC_LABELS[intake.topic] || intake.topic;
-  if (intake.intakeType === "DUI_CRIMINAL") return DUI_TOPIC_LABELS[intake.topic] || intake.topic;
+  if (intake.intakeType === "DUI" || intake.intakeType === "CRIMINAL" || intake.intakeType === "DUI_CRIMINAL") return DUI_TOPIC_LABELS[intake.topic] || intake.topic;
   return intake.topic;
 }
 
@@ -58,7 +59,7 @@ export function parseLegalIntake(state: unknown): LegalIntake | null {
     ?.collected?.luis_legal_last_completed as Record<string, unknown> | undefined;
   if (!completed || typeof completed !== "object") return null;
   const intakeType = completed.intake_type;
-  if (intakeType !== "IMMIGRATION" && intakeType !== "AUTO_ACCIDENT" && intakeType !== "DUI_CRIMINAL") return null;
+  if (intakeType !== "IMMIGRATION" && intakeType !== "AUTO_ACCIDENT" && intakeType !== "DUI" && intakeType !== "CRIMINAL" && intakeType !== "DUI_CRIMINAL") return null;
   const description = typeof completed.description === "string" ? completed.description : "";
   if (!description) return null;
   return {

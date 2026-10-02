@@ -3,6 +3,7 @@ import { supabase } from "../../../lib/supabaseClient";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
 import { useLeadsPipeline, type PipelineLead } from "./useLeadsPipeline";
 import { SERVICE_BY_CAMPAIGN_KEY, SERVICE_LABELS, type LuisServiceId } from "./luisCatalog";
+import { useSilentPolling } from "../../../hooks/useSilentPolling";
 
 export type Cliente = PipelineLead & {
   serviceId: LuisServiceId | null;
@@ -75,6 +76,10 @@ export function useClientes() {
   }, [resolvedOrgId, pipeline.leads]);
 
   useEffect(() => { void loadAssociations(); }, [loadAssociations]);
+  // This is the admin route that owns the client list. Keep it in sync with
+  // the partner queue without replacing visible rows with a loading skeleton.
+  // loadAssociations reruns from the updated pipeline.leads dependency.
+  useSilentPolling(() => pipeline.load({ silent: true }), 2500);
 
   return {
     clientes,

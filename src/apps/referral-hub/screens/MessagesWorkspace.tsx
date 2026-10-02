@@ -7,6 +7,7 @@ import { SkeletonRows } from "../ui/Skeleton";
 import StatusBadge from "../ui/StatusBadge";
 import { useReferralData } from "../../../referral/useReferralData";
 import { useReferralOperations, type FlowResponseRecord, type OperationsMessage } from "../operations/useReferralOperations";
+import { useSilentPolling } from "../../../hooks/useSilentPolling";
 import { describeFlowSubmission, looksLikeUnpersistedCouponImage } from "../operations/flowSubmission";
 import { leadName, leadPhone } from "../../../referral/status";
 import type { ReferralLead } from "../../../referral/types";
@@ -32,6 +33,10 @@ export default function MessagesWorkspace() {
   const { conversationId } = useParams();
   const data = useReferralData();
   const ops = useReferralOperations();
+  // Demo-safe live refresh: same load() functions the initial mount already
+  // uses, called silently every ~2.5s so new inbound messages/leads show up
+  // without a manual refresh. Never touches send/draft state.
+  useSilentPolling(() => Promise.all([data.load({ silent: true }), ops.load({ silent: true })]), 2500);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");

@@ -51,8 +51,27 @@ function completePayload(id: string) {
   return footer["on-click-action"].payload;
 }
 
+function navigatePayload(id: string) {
+  const footer = screen(id).layout.children.find((child: any) =>
+    child?.["on-click-action"]?.name === "navigate"
+  );
+  assert(footer, `missing navigate footer for ${id}`);
+  return footer["on-click-action"].payload;
+}
+
 Deno.test("unified Luis services Flow is static and branches from the approved five-service menu", () => {
   assertEquals(flow.version, "7.3");
+  // Runtime recovery (Sep 2026): NavigationList only works reliably as the
+  // Flow's entry screen (SERVICE_SELECT) — chaining a second NavigationList
+  // on IMMIGRATION_TOPIC/CRIMINAL_TOPIC produced "Something went wrong" on
+  // real devices despite passing Meta's static asset validation. Both are
+  // now RadioButtonsGroup+Footer (the pattern already proven by
+  // ACCIDENT_BASICS/BENEFIT_SELECT), and IMMIGRATION_TOPIC's 7 topic-specific
+  // detail screens / CRIMINAL_TOPIC's DUI+CRIMINAL detail screens collapsed
+  // into one IMMIGRATION_DETAILS / CRIMINAL_DETAILS screen each, with a
+  // Switch component (Meta's documented conditional-rendering feature)
+  // showing only the fields for the selected topic. Micro-intake fields and
+  // the backend completion contract are unchanged.
   assertEquals(flow.screens.map((entry) => entry.id), [
     "SERVICE_SELECT",
     "BENEFIT_SELECT",
@@ -64,6 +83,7 @@ Deno.test("unified Luis services Flow is static and branches from the approved f
     "ACCIDENT_DETAILS",
     "CRIMINAL_TOPIC",
     "CRIMINAL_DETAILS",
+    "LEGAL_CONSENT",
     "HANDOFF_CONFIRM",
   ]);
   assertEquals(flow.routing_model.SERVICE_SELECT, [
@@ -85,6 +105,15 @@ Deno.test("unified Luis services Flow is static and branches from the approved f
   for (const item of menu["list-items"]) {
     assertEquals(item["on-click-action"].name, "navigate");
     assertEquals(item["on-click-action"].payload, {});
+  }
+  // IMMIGRATION_TOPIC/CRIMINAL_TOPIC must never reintroduce a chained
+  // NavigationList — that's the exact pattern that broke on real devices.
+  for (const id of ["IMMIGRATION_TOPIC", "CRIMINAL_TOPIC"]) {
+    assertEquals(
+      screen(id).layout.children.some((child: any) => child.type === "NavigationList"),
+      false,
+      `${id} must not use NavigationList (non-entry screens only support RadioButtonsGroup+Footer navigation)`,
+    );
   }
   assertEquals(source.includes("data_exchange"), false);
   assertEquals(source.includes("data_api_version"), false);
@@ -172,24 +201,74 @@ Deno.test("unified Flow preserves benefits and legal flat completion contracts w
     "sharing_consent",
     "consent_version",
     "consent_source",
+    "resident_duration",
+    "long_absence",
+    "citizenship_marriage_basis",
+    "petitioner_relationship",
+    "entry_method",
+    "prior_uscis_petition",
+    "green_card_term",
+    "green_card_issue",
+    "prior_related_filing",
+    "arrival_window",
+    "fear_reason",
+    "immigration_court_status",
+    "crime_victim",
+    "police_report",
+    "law_enforcement_cooperation",
+    "work_permit_request_type",
+    "work_permit_basis",
+    "work_permit_status",
   ]);
-  assertEquals(Object.keys(completePayload("ACCIDENT_DETAILS")), [
-    "service_key",
+  // ACCIDENT_DETAILS/CRIMINAL_DETAILS no longer complete directly — they
+  // navigate into the new shared LEGAL_CONSENT terminal (accident/DUI/
+  // criminal never had a consent step before V1). CRIMINAL_DETAILS now
+  // covers both DUI and CRIMINAL (merged screen, Switch-gated fields).
+  assertEquals(Object.keys(navigatePayload("ACCIDENT_DETAILS")), [
     "intake_type",
-    "accident_date",
-    "participation",
-    "received_medical_attention",
-    "full_name",
-    "medical_provider",
-    "description",
-  ]);
-  assertEquals(Object.keys(completePayload("CRIMINAL_DETAILS")), [
-    "service_key",
-    "intake_type",
-    "topic",
     "full_name",
     "postal_code",
     "description",
+    "accident_date",
+    "received_medical_attention",
+    "police_report",
+    "dui_date",
+    "chemical_test",
+    "court_date_status",
+    "criminal_charge",
+    "currently_detained",
+  ]);
+  assertEquals(Object.keys(navigatePayload("CRIMINAL_DETAILS")), [
+    "intake_type",
+    "full_name",
+    "postal_code",
+    "description",
+    "accident_date",
+    "received_medical_attention",
+    "police_report",
+    "dui_date",
+    "chemical_test",
+    "court_date_status",
+    "criminal_charge",
+    "currently_detained",
+  ]);
+  assertEquals(Object.keys(completePayload("LEGAL_CONSENT")), [
+    "service_key",
+    "intake_type",
+    "full_name",
+    "postal_code",
+    "description",
+    "sharing_consent",
+    "consent_version",
+    "consent_source",
+    "accident_date",
+    "received_medical_attention",
+    "police_report",
+    "dui_date",
+    "chemical_test",
+    "court_date_status",
+    "criminal_charge",
+    "currently_detained",
   ]);
   assertEquals(completePayload("HANDOFF_CONFIRM"), { service_key: "HANDOFF" });
   assertEquals(completePayload("BENEFIT_DETAILS").service_key, "BENEFITS");
@@ -197,11 +276,17 @@ Deno.test("unified Flow preserves benefits and legal flat completion contracts w
     completePayload("IMMIGRATION_CONSENT").intake_type,
     "IMMIGRATION",
   );
-  assertEquals(
-    completePayload("ACCIDENT_DETAILS").intake_type,
-    "AUTO_ACCIDENT",
-  );
-  assertEquals(completePayload("CRIMINAL_DETAILS").intake_type, "DUI_CRIMINAL");
+  assertEquals(navigatePayload("ACCIDENT_DETAILS").intake_type, "AUTO_ACCIDENT");
+  // CRIMINAL_DETAILS now serves both DUI and CRIMINAL (merged via Switch on
+  // CRIMINAL_TOPIC's case_type selection), so intake_type forwards whichever
+  // case_type the caller passed rather than a per-screen literal.
+  assertEquals(navigatePayload("CRIMINAL_DETAILS").intake_type, "${data.case_type}");
+  // LEGAL_CONSENT's own complete payload forwards whichever intake_type its
+  // caller passed via ${data.intake_type} — it is not a literal on this
+  // shared screen (unlike IMMIGRATION_CONSENT, which has exactly one
+  // caller-shape family and can hardcode "IMMIGRATION").
+  assertEquals(completePayload("LEGAL_CONSENT").service_key, "${data.intake_type}");
+  assertEquals(completePayload("LEGAL_CONSENT").intake_type, "${data.intake_type}");
   const benefits = screen("BENEFIT_SELECT").layout.children.find((child: any) =>
     child.name === "benefit_key"
   );

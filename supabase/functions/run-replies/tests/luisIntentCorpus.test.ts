@@ -236,13 +236,18 @@ Deno.test("16. nearest-supermarket confirm button wins over any text classificat
 });
 
 // 17. Coupon post-delivery buttons remain unaffected by the interpreter.
+// Post-benefit-button hotfix: "luis benefits another" now routes to its own
+// post_benefit_reopen_benefits kind, not the generic {kind:"benefits"} path
+// - see luisConversationRouter.test.ts for the full rationale. The point of
+// THIS test - the button id wins over any text classification - is
+// unaffected by which specific kind it resolves to.
 Deno.test("17. post-coupon 'another benefit' button wins over any text classification", () => {
   assertEquals(
     routeLuisConversation({
       inboundText: "necesito ayuda con inmigracion",
       payloadAction: "luis benefits another",
     }),
-    { kind: "benefits" },
+    { kind: "post_benefit_reopen_benefits" },
   );
 });
 

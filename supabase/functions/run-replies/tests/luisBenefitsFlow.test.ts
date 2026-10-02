@@ -200,6 +200,26 @@ Deno.test("Luis legal Flow completions accept only the approved non-documentary 
     sharing_consent: "PENDING",
     consent_version: null,
     consent_source: null,
+    // V1 micro-intake fields: all absent on this payload, so all null —
+    // never fail the whole parse, never silently drop the base contract.
+    resident_duration: null,
+    long_absence: null,
+    citizenship_marriage_basis: null,
+    petitioner_relationship: null,
+    entry_method: null,
+    prior_uscis_petition: null,
+    green_card_term: null,
+    green_card_issue: null,
+    prior_related_filing: null,
+    arrival_window: null,
+    fear_reason: null,
+    immigration_court_status: null,
+    crime_victim: null,
+    police_report: null,
+    law_enforcement_cooperation: null,
+    work_permit_request_type: null,
+    work_permit_basis: null,
+    work_permit_status: null,
   });
   const auto = parseLuisLegalFlowCompletion({
     intake_type: "AUTO_ACCIDENT",

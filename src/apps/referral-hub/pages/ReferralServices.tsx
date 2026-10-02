@@ -82,6 +82,14 @@ export default function ReferralServices() {
       <Link className="bolt-rh-back" to="/more"><ArrowLeft />Volver</Link>
       <header className="rh-services-header">
         <div><p className="rh-eyebrow">EXPERIENCIA DEL CLIENTE</p><h1>Servicios</h1><p>Organiza lo que tus clientes pueden encontrar y decide qué quieres mostrar primero.</p></div>
+        {/* service_configs is not read by the live WhatsApp send path (see
+            operations/luisCatalog.ts's own header comment, verified by grep,
+            zero references). "Disponible/No disponible" was a real DB write
+            with no live effect — disabled here rather than removed, so this
+            stays a pure UI/data-trust fix with no backend change. */}
+        <div className="rh-service-alert" role="note">
+          Esta pantalla organiza la vista previa interna, pero todavía no controla el menú real de WhatsApp. Activar o desactivar un servicio aquí no lo activa ni lo desactiva para tus clientes.
+        </div>
         <section className="rh-general-preview" aria-label="Vista previa del menú general">
           <span><Sparkles />Vista previa del menú</span>
           <strong>¿Qué necesitas hoy?</strong>
@@ -105,7 +113,7 @@ export default function ReferralServices() {
                 <span className="rh-drag-handle" aria-label={`Arrastrar ${serviceTitle(service)}`}><GripVertical /></span>
               </div>
               <div className="rh-service-controls">
-                <button type="button" className={`rh-state-button ${service.activo ? "is-on" : ""}`} aria-pressed={service.activo === true} disabled={disabled} onClick={() => void updateAvailability(service)}>
+                <button type="button" className={`rh-state-button ${service.activo ? "is-on" : ""}`} aria-pressed={service.activo === true} disabled title="Esta pantalla todavía no controla el menú real de WhatsApp." onClick={() => void updateAvailability(service)}>
                   <i />{service.activo ? "Disponible" : "No disponible"}
                 </button>
                 <button type="button" className={`rh-front-button ${shownFirst ? "is-on" : ""}`} aria-pressed={shownFirst} disabled={!service.activo || disabled} onClick={() => toggleFront(service)}>

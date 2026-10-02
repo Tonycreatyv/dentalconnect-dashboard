@@ -1,6 +1,6 @@
 /// <reference lib="deno.ns" />
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { buildTelLink, buildWhatsAppLink, planPartnerActionSteps, resolveActionNote, resolvePartnerPhone } from "./partnerActions.ts";
+import { buildTelLink, buildWhatsAppLink, formatPhoneForDisplay, planFollowUpSteps, planPartnerActionSteps, resolveActionNote, resolvePartnerPhone } from "./partnerActions.ts";
 
 Deno.test("buildWhatsAppLink strips formatting and keeps only digits", () => {
   assertEquals(buildWhatsAppLink("+1 (555) 123-4567"), "https://wa.me/15551234567");
@@ -17,6 +17,11 @@ Deno.test("buildTelLink keeps a leading plus for E.164 dialing", () => {
 
 Deno.test("buildTelLink returns null when there is no phone", () => {
   assertEquals(buildTelLink(undefined), null);
+});
+
+Deno.test("formatPhoneForDisplay formats 10 and 11 digit numbers without changing link inputs", () => {
+  assertEquals(formatPhoneForDisplay("17812961757"), "+1 (781) 296-1757");
+  assertEquals(formatPhoneForDisplay("7812961757"), "(781) 296-1757");
 });
 
 Deno.test("resolvePartnerPhone prefers the lead phone over the WhatsApp identity", () => {
@@ -58,4 +63,12 @@ Deno.test("resolveActionNote is null for contacted/no_answer when the partner le
 Deno.test("resolveActionNote falls back to a fixed label for pending when blank", () => {
   assertEquals(resolveActionNote("pending", ""), "Marcado como pendiente por el aliado");
   assertEquals(resolveActionNote("pending", "  "), "Marcado como pendiente por el aliado");
+});
+
+Deno.test("planFollowUpSteps inserts an accept step before follow_up when still only assigned", () => {
+  assertEquals(planFollowUpSteps("assigned"), ["accept", "follow_up"]);
+});
+
+Deno.test("planFollowUpSteps skips the accept step once already accepted", () => {
+  assertEquals(planFollowUpSteps("accepted"), ["follow_up"]);
 });

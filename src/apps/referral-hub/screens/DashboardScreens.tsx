@@ -15,13 +15,16 @@ import { PERIOD_LABELS, PERIOD_TABS, type PeriodId } from "../operations/period"
 import { CAMPAIGN_KEY_BY_SERVICE, SERVICE_BY_CAMPAIGN_KEY } from "../operations/luisCatalog";
 import { filterCouponClaims, SIN_LOCALIDAD_KEY, useCouponDemand } from "../operations/useCouponDemand";
 import { useServiceFollowUps } from "../operations/useServiceFollowUps";
+import { useHomeClientCount } from "../operations/useHomeClientCount";
 import { useQrCampaigns } from "../operations/useQrCampaigns";
 import { LEAD_STAGE_LABELS, useLeadsPipeline, type LeadStage } from "../operations/useLeadsPipeline";
 import { useClientes } from "../operations/useClientes";
 import { legalTopicLabel, useContactDetail } from "../operations/useContactDetail";
 import { relativeAge } from "../../../referral/status";
-import { immigrationInboxTotals, immigrationReadinessLabel, immigrationReadinessTone, immigrationTopicLabel } from "../operations/immigrationInbox";
-import { useImmigrationInbox } from "../operations/useImmigrationInbox";
+import { immigrationTopicLabel } from "../operations/immigrationInbox";
+import { useImmigrationInbox, useLegalOpportunities } from "../operations/useImmigrationInbox";
+import { legalOpportunityPresentation, matchesOpportunityServiceFilter, type OpportunityServiceFilter } from "../operations/legalOpportunities";
+import { useSilentPolling } from "../../../hooks/useSilentPolling";
 
 function firstNameGreeting(user: { user_metadata?: Record<string, unknown> } | null): string {
   const meta = user?.user_metadata ?? {};
@@ -45,14 +48,6 @@ function formatDateTime(value: string | null) {
   return Number.isNaN(date.getTime()) ? "Sin fecha" : new Intl.DateTimeFormat("es-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-// The canonical opportunity's assignment is the source of truth for "who is
-// working this" — never buried inline with unrelated text, so ASIGNADO A /
-// SIN ALIADO DISPONIBLE always reads as its own fact.
-function immigrationAssignmentLine(partnerName: string | null | undefined, assignedAt: string | null | undefined, lastActivityAt: string) {
-  const assignment = partnerName ? `Asignado a: ${partnerName}` : "Sin aliado disponible";
-  const assignedPart = assignedAt ? ` · Asignado ${formatDateTime(assignedAt)}` : "";
-  return `${assignment}${assignedPart} · Última actividad ${formatDateTime(lastActivityAt)}`;
-}
 function immigrationOperationalTone(operationalStatus: string): StatusTone {
   if (operationalStatus.includes("Contactado") || operationalStatus.includes("Cita") || operationalStatus.includes("Convertido")) return "success";
   if (operationalStatus.includes("Sin aliado") || operationalStatus.includes("Rechazada")) return "danger";
@@ -63,11 +58,11 @@ export function InicioScreen() {
   const { user } = useAuth();
   const [period, setPeriod] = useState<PeriodId>("today");
   const demand = useCouponDemand(period);
+  const homeClients = useHomeClientCount(period);
   const followUps = useServiceFollowUps();
   const qr = useQrCampaigns();
   const claims = useMemo(() => demand.filterClaims(demand.rawClaims, "", ""), [demand]);
   const totalRequests = claims.length;
-  const uniqueClients = useMemo(() => new Set(claims.map((c) => c.lead_id)).size, [claims]);
   const ranking = useMemo(() => demand.locationRanking(claims), [claims, demand]);
   const topLocation = ranking.find((row) => row.key !== SIN_LOCALIDAD_KEY) ?? null;
   const trendPoints = useMemo(() => demand.trend(claims), [claims, demand]);
@@ -92,13 +87,13 @@ export function InicioScreen() {
       id: `followup-${item.id}`,
       text: <><strong>{item.lead_name}</strong> solicitó {item.service_label}</>,
       leadId: item.lead_id,
-      at: item.created_at,
+      at: item.assigned_at,
     }));
     return [...fromClaims, ...fromFollowUps].sort((a, b) => +new Date(b.at) - +new Date(a.at)).slice(0, 5);
   }, [claims, followUps.requests]);
   const topCampaigns = useMemo(() => qr.campaigns.filter((c) => c.active).sort((a, b) => b.requestsCount - a.requestsCount).slice(0, 6), [qr.campaigns]);
-  const loading = demand.loading || followUps.loading;
-  const failure = demand.error || followUps.error;
+  const loading = demand.loading || homeClients.loading || followUps.loading;
+  const failure = demand.error || homeClients.error || followUps.error;
 
   return (
     <div className="hub-page">
@@ -114,7 +109,7 @@ export function InicioScreen() {
         <>
           <div className="hub-stat-grid">
             <StatCard label="Cupones pedidos" value={totalRequests} to={`/negocios/solicitudes?period=${period}`} />
-            <StatCard label="Clientes" value={uniqueClients} to="/clientes" />
+            <StatCard label="Clientes" value={homeClients.count} to="/clientes" />
             <StatCard label="Por contactar" value={followUps.requests.length} to="/clientes?stage=por_contactar" />
             <StatCard label="Localidad principal" value={topLocation?.label ?? "Sin datos"} sub={topLocation ? `${topLocation.requests} ${topLocation.requests === 1 ? "pedido" : "pedidos"}` : "Sin pedidos en este período"} to={topLocation ? `/negocios/solicitudes?period=${period}&location=${topLocation.key}` : "/negocios"} />
           </div>
@@ -141,7 +136,7 @@ export function InicioScreen() {
                 {followUps.requests.slice(0, 5).map((item) => (
                   <Link key={item.id} className="hub-list-row" to={`/clientes/${item.lead_id}`}>
                     <Avatar name={item.lead_name} seed={item.lead_id} />
-                    <div><strong>{item.lead_name}</strong><small>{item.service_label} · {relativeAge(item.created_at)}</small></div>
+                    <div><strong>{item.lead_name}</strong><small>{item.service_label} · {relativeAge(item.assigned_at)}</small></div>
                   </Link>
                 ))}
               </div>
@@ -270,9 +265,7 @@ export function ClientesScreen() {
   const serviceFilter = params.get("service") || "";
   const campaignFilter = params.get("campaign") || "";
   const { clientes, loading, error, counts } = useClientes();
-  const immigration = useImmigrationInbox();
   const [query, setQuery] = useState("");
-  const [inbox, setInbox] = useState<"all" | "immigration">("all");
   const stages: LeadStage[] = ["nuevo", "por_contactar", "contactado", "respondio", "confirmado", "cerrado"];
   const filtered = useMemo(() => clientes.filter((cliente) => {
     if (activeStage && cliente.stage !== activeStage) return false;
@@ -282,36 +275,10 @@ export function ClientesScreen() {
     return true;
   }), [clientes, activeStage, serviceFilter, campaignFilter, query]);
   const hasScopeFilter = Boolean(serviceFilter || campaignFilter);
-  const immigrationTotals = useMemo(() => immigrationInboxTotals(immigration.requests), [immigration.requests]);
 
   return (
     <div className="hub-page">
-      <PageHeader eyebrow="Clientes" title="Clientes" meta={<span className="hub-page-count">{inbox === "immigration" ? immigrationTotals.total : filtered.length} {inbox === "immigration" ? "oportunidades" : filtered.length === 1 ? "cliente" : "clientes"}</span>} actions={inbox === "immigration" ? <button type="button" className="hub-secondary" onClick={() => void immigration.load()}>Actualizar</button> : undefined} />
-      <FilterTabs
-        tabs={[{ id: "all", label: "Todos", count: clientes.length }, { id: "immigration", label: "Inmigración", count: immigrationTotals.total }]}
-        activeId={inbox}
-        onChange={(id) => setInbox(id === "immigration" ? "immigration" : "all")}
-      />
-      {inbox === "immigration" ? (
-        <>
-          <div className="hub-scope-banner"><span>{immigrationTotals.ready} listos para revisión · {immigrationTotals.pending} consentimiento pendiente · {immigrationTotals.declined} rechazados</span></div>
-          {immigration.loading ? <SkeletonRows count={4} /> : immigration.error ? (
-            <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar las solicitudes" description={immigration.error} />
-          ) : immigration.requests.length === 0 ? (
-            <EmptyState icon={Users} title="Sin solicitudes de inmigración" description="Las solicitudes enviadas por el Flow aparecerán aquí." />
-          ) : (
-            <div className="hub-list">
-              {immigration.requests.map((request) => (
-                <Link key={request.id} className="hub-list-row" to={`/clientes/${request.leadId}`} state={{ from: `${location.pathname}${location.search}` }}>
-                  <Avatar name={request.leadName} seed={request.leadId} />
-                  <div><strong>{request.leadName}</strong><small>Inmigración · {immigrationTopicLabel(request.topic)} · {request.postalCode ? `ZIP ${request.postalCode} · ` : ""}Recibido {formatDateTime(request.createdAt)}</small><small>{request.description || "Sin resumen"}</small><small>{immigrationAssignmentLine(request.assignment?.partnerName, request.assignment?.assignedAt, request.lastActivityAt)}</small></div>
-                  <div className="hub-list-row-meta"><StatusBadge tone={request.consentStatus === "authorized" ? "success" : request.consentStatus === "declined" ? "danger" : "warning"} label={request.consentStatus === "authorized" ? "Consentimiento autorizado" : request.consentStatus === "declined" ? "Consentimiento rechazado" : "Consentimiento pendiente"} /><StatusBadge tone={immigrationOperationalTone(request.operationalStatus)} label={request.operationalStatus} /><small>{request.recommendedAction}</small></div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </>
-      ) : <>
+      <PageHeader eyebrow="Clientes" title="Clientes" meta={<span className="hub-page-count">{filtered.length} {filtered.length === 1 ? "cliente" : "clientes"}</span>} />
       <label className="hub-search"><Search /><span className="sr-only">Buscar cliente</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre…" /></label>
       <FilterTabs
         tabs={[{ id: "", label: "Todos", count: clientes.length }, ...stages.map((stage) => ({ id: stage, label: LEAD_STAGE_LABELS[stage], count: counts[stage] }))]}
@@ -344,13 +311,119 @@ export function ClientesScreen() {
           ))}
         </div>
       )}
-      </>}
+    </div>
+  );
+}
+
+// Operational center for services that already have a canonical, dedicated
+// resolver — today that is only Inmigración (resolveImmigrationOpportunity
+// via useImmigrationInbox). Deliberately does not invent a resolver for
+// other services (see the UX audit's Annex B): this screen only shows what
+// already has a trustworthy operational status.
+type OpportunityStatusFilter = "all" | "por_contactar" | "contactado" | "citas" | "cerrados";
+
+function opportunityStatusBucket(operationalStatus: string): Exclude<OpportunityStatusFilter, "all"> {
+  if (operationalStatus === "Contactado") return "contactado";
+  if (operationalStatus === "Cita programada") return "citas";
+  if (operationalStatus === "Convertido" || operationalStatus === "Cerrado sin conversión") return "cerrados";
+  return "por_contactar";
+}
+
+export function OportunidadesScreen() {
+  const opportunities = useLegalOpportunities();
+  // Demo-safe live refresh: same load() the "Actualizar" button already
+  // uses, called silently every ~2.5s so a new WhatsApp Flow submission
+  // shows up without the user touching anything. No new query, no overlap
+  // (useSilentPolling), no realtime channel.
+  useSilentPolling(() => opportunities.load({ silent: true }), 2500);
+  const [serviceFilter, setServiceFilter] = useState<OpportunityServiceFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<OpportunityStatusFilter>("all");
+  const filtered = useMemo(
+    () => opportunities.requests.filter((request) =>
+      matchesOpportunityServiceFilter(request.serviceId, request.intake, serviceFilter)
+      && (statusFilter === "all" || opportunityStatusBucket(request.operationalStatus) === statusFilter)),
+    [opportunities.requests, serviceFilter, statusFilter],
+  );
+  const counts = useMemo(() => {
+    const base = { por_contactar: 0, contactado: 0, citas: 0, cerrados: 0 };
+    for (const request of opportunities.requests) base[opportunityStatusBucket(request.operationalStatus)] += 1;
+    return base;
+  }, [opportunities.requests]);
+
+  return (
+    <div className="hub-page hub-page--wide">
+      <PageHeader
+        eyebrow="Operación"
+        title="Oportunidades"
+        subtitle="Casos enviados a aliados y su estado actual."
+        meta={<span className="hub-page-count">{filtered.length} {filtered.length === 1 ? "caso" : "casos"}</span>}
+        actions={<button type="button" className="hub-secondary" onClick={() => void opportunities.load()}>Actualizar</button>}
+      />
+
+      <div className="hub-filter-group">
+        <span className="hub-filter-group-label">Servicio</span>
+        <FilterTabs
+          tabs={[{ id: "all", label: "Todas" }, { id: "immigration", label: "Inmigración" }, { id: "auto_accident", label: "Accidentes" }, { id: "dui", label: "DUI" }, { id: "criminal", label: "Criminal" }]}
+          activeId={serviceFilter}
+          onChange={(id) => setServiceFilter(id as OpportunityServiceFilter)}
+        />
+      </div>
+
+      <div className="hub-filter-group">
+        <span className="hub-filter-group-label">Estado</span>
+        <FilterTabs
+          tabs={[
+            { id: "all", label: "Todos los estados", count: opportunities.requests.length },
+            { id: "por_contactar", label: "Por contactar", count: counts.por_contactar },
+            { id: "contactado", label: "Contactado", count: counts.contactado },
+            { id: "citas", label: "Citas", count: counts.citas },
+            { id: "cerrados", label: "Cerrados", count: counts.cerrados },
+          ]}
+          activeId={statusFilter}
+          onChange={(id) => setStatusFilter(id as OpportunityStatusFilter)}
+        />
+      </div>
+
+      {opportunities.loading ? (
+        <SkeletonRows count={4} />
+      ) : opportunities.error ? (
+        <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar las oportunidades" description={opportunities.error} />
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={Users} title="Sin oportunidades en esta categoría" description="Las solicitudes legales enviadas por el Flow aparecerán aquí." />
+      ) : (
+        <div className="hub-opp-list">
+          {filtered.map((request) => {
+            const presentation = legalOpportunityPresentation(request.serviceId, request.intake, request.topic);
+            return (
+            <Link key={request.id} className="hub-opp-card" to={`/clientes/${request.leadId}`} state={{ from: "/oportunidades" }}>
+              <div className="hub-opp-card-main">
+                <Avatar name={request.leadName} seed={request.leadId} />
+                <div>
+                  <span className="hub-opp-service-tag">{presentation.serviceLabel}</span>
+                  <strong>{request.leadName}</strong>
+                  {presentation.topic ? <small>{presentation.topic}</small> : null}
+                  {presentation.summary ? <small>{presentation.summary}</small> : null}
+                  {presentation.description ? <small>{presentation.description}</small> : null}
+                </div>
+              </div>
+              <div className="hub-opp-card-meta">
+                <StatusBadge tone={immigrationOperationalTone(request.operationalStatus)} label={request.operationalStatus} />
+                <small>{request.assignment?.partnerName ? `Asignado a: ${request.assignment.partnerName}` : "Sin aliado disponible"}</small>
+                <small>Última actividad {formatDateTime(request.lastActivityAt)}</small>
+              </div>
+            </Link>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
 const SERVICE_REQUEST_LABEL: Record<string, string> = {
-  luis_accidente: "Accidente / DUI / Criminal",
+  luis_accidente: "Accidente de auto",
+  luis_dui: "DUI",
+  luis_criminal: "Defensa criminal",
   luis_inmigracion: "Inmigración",
   luis_representante: "Solicitud de asesor",
   luis_eventos: "Eventos comunitarios",
@@ -360,6 +433,8 @@ const LEGAL_INTAKE_TITLE: Record<string, string> = {
   IMMIGRATION: "Información de inmigración",
   AUTO_ACCIDENT: "Información del accidente",
   DUI_CRIMINAL: "Información de DUI / criminal",
+  DUI: "Información de DUI",
+  CRIMINAL: "Información criminal",
 };
 
 // Legacy referral_service_requests.status/work_status values, translated —
@@ -417,9 +492,28 @@ export function ContactDetailScreen() {
   // requirement extended to the detail screen).
   const pipelineLead = pipeline.leads.find((l) => l.id === lead.id);
   const immigrationRequests = immigrationInbox.requests.filter((request) => request.leadId === lead.id);
+  // The "Consultas profesionales" card below is generic across immigration/
+  // accident/DUI intake and has no assignment data of its own — hardcoding
+  // "Sin asignar" there contradicted the canonical immigration section's
+  // real partner. Only immigration has a canonical resolver (see UX audit
+  // Annex B), so only immigration gets a corrected value here; accident/DUI
+  // keep "Sin asignar" since no canonical partner data exists for them yet.
+  const legalIntakePartnerLabel = detail.legalIntake?.intakeType === "IMMIGRATION"
+    ? (immigrationRequests[0]?.assignment?.partnerName ? `Asignado a: ${immigrationRequests[0].assignment.partnerName}` : "Sin aliado disponible")
+    : "Sin asignar";
+  // Once the canonical "Solicitud de inmigración" card below exists for
+  // this lead, the generic "Consultas profesionales" card would render the
+  // exact same case a second time under a different, less complete label —
+  // conceptual duplication even though the technical status no longer
+  // conflicts. Immigration gets exactly one primary representation; any
+  // other legal-intake type (accident/DUI) still renders here as before,
+  // since neither has a canonical resolver of its own.
+  const showLegalIntakeCard = Boolean(
+    detail.legalIntake && !(detail.legalIntake.intakeType === "IMMIGRATION" && immigrationRequests.length > 0),
+  );
 
   return (
-    <div className="hub-page">
+    <div className="hub-page hub-page--wide">
       <Link className="hub-back" to={backTo}><ArrowLeft />Volver</Link>
       <PageHeader
         eyebrow="Cliente"
@@ -427,7 +521,10 @@ export function ContactDetailScreen() {
         subtitle={lead.channel === "whatsapp" ? lead.channel_user_id || "Sin WhatsApp" : lead.phone || "Sin teléfono"}
         actions={lead.channel_user_id ? <button type="button" className="hub-primary" onClick={() => navigate(`/messages/${lead.id}`)}><MessageCircle size={16} />Conversación</button> : undefined}
       />
-      {pipelineLead ? <StatusBadge tone={STAGE_TONE[pipelineLead.stage]} label={LEAD_STAGE_LABELS[pipelineLead.stage]} /> : null}
+      {/* No global status badge over the client's name — a person can have
+          several services at once, each with its own operational status
+          (item 4 of the demo-safe scope). The badge lives inside each
+          service card below instead. */}
       <dl className="hub-facts">
         <div><dt>Canal</dt><dd>{lead.channel === "whatsapp" ? "WhatsApp" : lead.channel || "—"}</dd></div>
         <div><dt>WhatsApp</dt><dd>{lead.channel === "whatsapp" ? (lead.channel_user_id || "—") : "—"}</dd></div>
@@ -437,6 +534,8 @@ export function ContactDetailScreen() {
         <div><dt>Última actividad</dt><dd>{formatDateTime(lead.last_message_at || lead.updated_at)}</dd></div>
         <div><dt>Consentimiento de email</dt><dd>{consentedCoupon ? `Sí (${consentedCoupon.email || "email registrado"})` : "No"}</dd></div>
       </dl>
+
+      <h2 className="hub-section-group-title">Servicios</h2>
 
       {/* Cupones y beneficios */}
       <section className="hub-section">
@@ -467,28 +566,34 @@ export function ContactDetailScreen() {
       {/* Consultas profesionales — the real, canonical Unified Services
           Flow intake (immigration/accident/DUI/criminal defense). Never
           rendered alongside, or as if it were, a legacy service_requests
-          row — item 5. */}
-      <section className="hub-section">
-        <h2>Consultas profesionales</h2>
-        {detail.legalIntake ? (
+          row — item 5. Omitted entirely (not just its content) when the
+          intake is immigration and the canonical card below already covers
+          it, so this section never shows an empty/misleading state for a
+          case that does exist, just elsewhere. */}
+      {showLegalIntakeCard ? (
+        <section className="hub-section">
+          <h2>Consultas profesionales</h2>
           <div className="hub-list-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
             <div className="hub-list-row-meta">
               <SourceTag source="WhatsApp Flow" />
               {pipelineLead ? <StatusBadge tone={STAGE_TONE[pipelineLead.stage]} label={LEAD_STAGE_LABELS[pipelineLead.stage]} /> : null}
             </div>
-            <strong>{LEGAL_INTAKE_TITLE[detail.legalIntake.intakeType] || "Información capturada"}</strong>
+            <strong>{LEGAL_INTAKE_TITLE[detail.legalIntake!.intakeType] || "Información capturada"}</strong>
             <dl className="hub-facts">
-              {legalTopicLabel(detail.legalIntake) ? <div><dt>Tipo de ayuda</dt><dd>{legalTopicLabel(detail.legalIntake)}</dd></div> : null}
-              {detail.legalIntake.postalCode ? <div><dt>ZIP</dt><dd>{detail.legalIntake.postalCode}</dd></div> : null}
-              <div><dt>Enviado</dt><dd>{formatDateTime(detail.legalIntake.completedAt)}</dd></div>
-              <div><dt>Negocio / aliado</dt><dd>Sin asignar</dd></div>
+              {legalTopicLabel(detail.legalIntake!) ? <div><dt>Tipo de ayuda</dt><dd>{legalTopicLabel(detail.legalIntake!)}</dd></div> : null}
+              {detail.legalIntake!.postalCode ? <div><dt>ZIP</dt><dd>{detail.legalIntake!.postalCode}</dd></div> : null}
+              <div><dt>Enviado</dt><dd>{formatDateTime(detail.legalIntake!.completedAt)}</dd></div>
+              <div><dt>Negocio / aliado</dt><dd>{legalIntakePartnerLabel}</dd></div>
             </dl>
-            <div><strong>Qué contó el cliente</strong><br /><small style={{ whiteSpace: "pre-wrap" }}>{detail.legalIntake.description}</small></div>
+            <div><strong>Qué contó el cliente</strong><br /><small style={{ whiteSpace: "pre-wrap" }}>{detail.legalIntake!.description}</small></div>
           </div>
-        ) : (
+        </section>
+      ) : !detail.legalIntake && immigrationRequests.length === 0 ? (
+        <section className="hub-section">
+          <h2>Consultas profesionales</h2>
           <EmptyState icon={Users} title="Sin consultas profesionales" description="Este cliente no ha enviado una consulta de inmigración, accidente, DUI o defensa criminal por WhatsApp." />
-        )}
-      </section>
+        </section>
+      ) : null}
 
       <section className="hub-section">
         <h2>Solicitud de inmigración</h2>
@@ -502,16 +607,13 @@ export function ContactDetailScreen() {
               <div key={request.id} className="hub-list-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
                 <div className="hub-list-row-meta">
                   <SourceTag source="WhatsApp Flow" />
-                  <StatusBadge tone={request.consentStatus === "authorized" ? "success" : request.consentStatus === "declined" ? "danger" : "warning"} label={request.consentStatus === "authorized" ? "Consentimiento autorizado" : request.consentStatus === "declined" ? "Consentimiento rechazado" : "Consentimiento pendiente"} />
-                  <StatusBadge tone={immigrationReadinessTone(request)} label={immigrationReadinessLabel(request)} />
                   <StatusBadge tone={immigrationOperationalTone(request.operationalStatus)} label={request.operationalStatus} />
+                  <StatusBadge tone={request.consentStatus === "authorized" ? "success" : request.consentStatus === "declined" ? "danger" : "warning"} label={request.consentStatus === "authorized" ? "Consentimiento autorizado" : request.consentStatus === "declined" ? "Consentimiento rechazado" : "Consentimiento pendiente"} />
                 </div>
-                <strong>{immigrationTopicLabel(request.topic)}</strong>
+                <strong>Inmigración · {immigrationTopicLabel(request.topic)}</strong>
                 <dl className="hub-facts">
                   <div><dt>Enviado</dt><dd>{formatDateTime(request.createdAt)}</dd></div>
-                  <div><dt>Ciclo de caso</dt><dd>{request.caseCycle}</dd></div>
-                  <div><dt>ZIP</dt><dd>{request.postalCode || "—"}</dd></div>
-                  <div><dt>Versión de consentimiento</dt><dd>{request.consentVersion || "Sin versión"}</dd></div>
+                  {request.postalCode ? <div><dt>ZIP</dt><dd>{request.postalCode}</dd></div> : null}
                   <div><dt>Aliado</dt><dd>{request.assignment?.partnerName ? `Asignado a: ${request.assignment.partnerName}` : "Sin aliado disponible"}</dd></div>
                   {request.assignment?.assignedAt ? <div><dt>Fecha de asignación</dt><dd>{formatDateTime(request.assignment.assignedAt)}</dd></div> : null}
                   <div><dt>Última actividad</dt><dd>{formatDateTime(request.lastActivityAt)}</dd></div>
@@ -522,6 +624,8 @@ export function ContactDetailScreen() {
           </div>
         )}
       </section>
+
+      <h2 className="hub-section-group-title">Actividad</h2>
 
       {/* Historial anterior — legacy referral_service_requests rows only,
           from the older conversational text menu, explicitly labeled as
@@ -536,7 +640,15 @@ export function ContactDetailScreen() {
             {detail.serviceRequests.map((request) => (
               <div key={request.id} className="hub-list-row">
                 <div>
-                  <strong>{SERVICE_REQUEST_LABEL[request.service_id] || request.service_id}</strong>
+                  {(() => {
+                    const presentation = legalOpportunityPresentation(request.service_id, request.intake, typeof request.intake.topic === "string" ? request.intake.topic : null);
+                    const isLegal = presentation.service !== null;
+                    return <>
+                      <strong>{isLegal ? `${presentation.serviceLabel}${presentation.topic ? ` · ${presentation.topic}` : ""}` : SERVICE_REQUEST_LABEL[request.service_id] || request.service_id}</strong>
+                      {presentation.summary ? <small>{presentation.summary}</small> : null}
+                      {presentation.description ? <small>{presentation.description}</small> : null}
+                    </>;
+                  })()}
                   <small>
                     Enviado {formatDate(request.created_at)}
                     {request.businessName ? ` · ${request.businessName}` : ""}

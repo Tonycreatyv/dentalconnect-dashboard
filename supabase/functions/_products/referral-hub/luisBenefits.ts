@@ -2,7 +2,7 @@ export const LUIS_BENEFITS_FLOW_ACTION = "luis_benefits:complete";
 export const LUIS_BENEFITS_FLOW_SCREEN = "BENEFIT_SELECT";
 export const LUIS_BENEFITS_MARKETING_COPY_VERSION = "luis_benefits_flow_v1";
 
-export type LuisBenefitKey = "SUPERMARKET" | "MEDICAL" | "DENTAL" | "SHIPPING";
+export type LuisBenefitKey = "SUPERMARKET" | "MEDICAL" | "DENTAL" | "SHIPPING" | "MABLETON_PARRILLADA";
 
 export type LuisBenefitFlowCompletion = {
   benefit_key: LuisBenefitKey;
@@ -27,32 +27,109 @@ export type LuisLegalState = {
   step?: "description" | "date" | "medical_attention" | "medical_location" | "completed";
 };
 
+// Micro-intake V1 (frozen data contract): FAMILY_GREEN_CARD/GREEN_CARD_RENEWAL/
+// ASYLUM/U_VISA are new canonical topics; CONSULTATION/GREEN_CARD/
+// FAMILY_PETITION/IMMIGRATION_COURT remain accepted forever for old stored
+// completions — never removed, never renamed (see parseLuisLegalFlowCompletion).
+export type LuisImmigrationTopic =
+  | "CONSULTATION"
+  | "GREEN_CARD"
+  | "CITIZENSHIP"
+  | "WORK_PERMIT"
+  | "FAMILY_PETITION"
+  | "IMMIGRATION_COURT"
+  | "OTHER"
+  | "FAMILY_GREEN_CARD"
+  | "GREEN_CARD_RENEWAL"
+  | "ASYLUM"
+  | "U_VISA";
+
 export type LuisLegalFlowCompletion =
   | {
     intake_type: "IMMIGRATION";
-    topic: "CONSULTATION" | "GREEN_CARD" | "CITIZENSHIP" | "WORK_PERMIT" | "FAMILY_PETITION" | "IMMIGRATION_COURT" | "OTHER";
+    topic: LuisImmigrationTopic;
     full_name: string;
     postal_code: string | null;
     description: string;
     sharing_consent: "AUTHORIZED" | "DECLINED" | "PENDING";
     consent_version: string | null;
     consent_source: string | null;
+    // Every field below is optional/additive: present only for its matching
+    // topic, absent for every other topic, and always absent on any
+    // completion from before this V1 micro-intake existed.
+    resident_duration?: "LESS_THAN_3_YEARS" | "THREE_TO_FIVE_YEARS" | "MORE_THAN_5_YEARS" | null;
+    long_absence?: "YES" | "NO" | "NOT_SURE" | null;
+    citizenship_marriage_basis?: "YES" | "NO" | "NOT_SURE" | null;
+    petitioner_relationship?: "US_CITIZEN_SPOUSE" | "RESIDENT_SPOUSE" | "PARENT" | "ADULT_CHILD" | "OTHER" | "NOT_SURE" | null;
+    entry_method?: "VISA" | "PAROLE" | "WITHOUT_INSPECTION" | "NOT_SURE" | null;
+    prior_uscis_petition?: "YES" | "NO" | "NOT_SURE" | null;
+    green_card_term?: "TWO_YEAR" | "TEN_YEAR" | "NOT_SURE" | null;
+    green_card_issue?: "EXPIRING" | "EXPIRED" | "LOST_OR_STOLEN" | "DAMAGED" | "OTHER" | null;
+    prior_related_filing?: "YES" | "NO" | "NOT_SURE" | null;
+    arrival_window?: "LESS_THAN_ONE_YEAR" | "MORE_THAN_ONE_YEAR" | "NOT_SURE" | null;
+    fear_reason?: "POLITICAL" | "RELIGION" | "NATIONALITY" | "RACE" | "SOCIAL_GROUP" | "OTHER" | "NOT_SURE" | null;
+    immigration_court_status?: "YES" | "NO" | "NOT_SURE" | null;
+    crime_victim?: "YES" | "NO" | "NOT_SURE" | null;
+    police_report?: "YES" | "NO" | "NOT_SURE" | null;
+    law_enforcement_cooperation?: "YES" | "NO" | "NOT_SURE" | null;
+    work_permit_request_type?: "FIRST_APPLICATION" | "RENEWAL" | "REPLACEMENT" | null;
+    work_permit_basis?: "ASYLUM" | "ADJUSTMENT" | "TPS" | "OTHER" | "NOT_SURE" | null;
+    work_permit_status?: "VALID" | "EXPIRING" | "EXPIRED" | "NONE" | "NOT_SURE" | null;
   }
   | {
     intake_type: "AUTO_ACCIDENT";
     full_name: string;
+    postal_code: string | null;
     accident_date: string;
-    participant_role: "DRIVER" | "PASSENGER" | "OTHER";
     received_medical_attention: "YES" | "NO";
+    // participant_role/medical_provider are legacy-only: the V1 micro-intake
+    // Flow no longer asks either, but old stored completions that have them
+    // must keep parsing (see parseLuisLegalFlowCompletion).
+    participant_role: "DRIVER" | "PASSENGER" | "OTHER" | null;
     medical_provider: string | null;
+    police_report: "YES" | "NO" | "NOT_SURE" | null;
     description: string;
+    // Defaults to "PENDING" when absent, exactly like IMMIGRATION's own
+    // fallback — every pre-V1 stored completion lacked this field entirely
+    // (this branch never had a consent step before V1). See capture gating
+    // in buildLuisLegalFlowCompletionResult.
+    sharing_consent: "AUTHORIZED" | "DECLINED" | "PENDING";
+    consent_version: string | null;
+    consent_source: string | null;
   }
+  // Legacy-only: no longer produced by the V1 Flow (DUI/CRIMINAL are now
+  // their own distinct intake_type below), kept solely so old stored
+  // completions of this shape keep parsing without error.
   | {
     intake_type: "DUI_CRIMINAL";
     topic: "DUI" | "ARREST" | "CRIMINAL_CHARGE" | "COURT_SUMMONS" | "OTHER";
     full_name: string;
     postal_code: string | null;
     description: string;
+  }
+  | {
+    intake_type: "DUI";
+    full_name: string;
+    postal_code: string | null;
+    dui_date: string;
+    chemical_test: "COMPLETED" | "REFUSED" | "NOT_SURE";
+    court_date_status: "YES" | "NO" | "NOT_SURE";
+    description: string;
+    sharing_consent: "AUTHORIZED" | "DECLINED" | "PENDING";
+    consent_version: string | null;
+    consent_source: string | null;
+  }
+  | {
+    intake_type: "CRIMINAL";
+    full_name: string;
+    postal_code: string | null;
+    criminal_charge: string;
+    court_date_status: "YES" | "NO" | "NOT_SURE";
+    currently_detained: "YES" | "NO";
+    description: string;
+    sharing_consent: "AUTHORIZED" | "DECLINED" | "PENDING";
+    consent_version: string | null;
+    consent_source: string | null;
   };
 
 export type LuisConversationRoute =
@@ -64,6 +141,20 @@ export type LuisConversationRoute =
   // "Claro 👌 ..." reentry copy that reads oddly outside an explicit
   // menu-return.
   | { kind: "main_menu"; trigger: "greeting" | "explicit" }
+  // "Ver beneficios" on the post-benefit-delivery menu (button id
+  // luis_benefits:another). Deliberately its own kind, checked ahead of
+  // the pre-existing "luis benefits another" match a few lines down (which
+  // routes to the generic {kind:"benefits"} path and, through
+  // luisBenefitsFlowEntryResult's un-configured-legacy-Flow fallback,
+  // could reach LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN — a screen name
+  // that is documented elsewhere in this file as draft-only and NOT live
+  // on the published Flow). This kind's own handler in run-replies/index.ts
+  // opens SERVICE_SELECT via luisUnifiedFlowEntryResult (same mechanism as
+  // post_benefit_services) — NOT BENEFIT_SELECT: Meta's Graph API rejects a
+  // Flow-trigger targeting BENEFIT_SELECT directly (error 131009 — it only
+  // has an inbound edge from SERVICE_SELECT in this Flow's routing_model,
+  // so it isn't a valid external entry screen), confirmed via a live send.
+  | { kind: "post_benefit_reopen_benefits" }
   | { kind: "post_benefit_menu" }
   | { kind: "post_benefit_services" }
   | { kind: "post_benefit_finalize" }
@@ -133,6 +224,16 @@ export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
     campaignKey: "luis_benefit_supermarket_20",
     displayName: "$20 para tu compra de supermercado",
   },
+  // Location-aware like SUPERMARKET (own referral_benefit_campaign_locations
+  // row, single ZIP 30126) — deliberately has no partnerName/mediaUrl here,
+  // since both are resolved exclusively from that location row via the RPC,
+  // never from this static definition. A fixed-price offer, not a discount:
+  // see referral_coupon_campaigns.offer_terms for luis_benefit_mableton_parrillada.
+  MABLETON_PARRILLADA: {
+    key: "MABLETON_PARRILLADA",
+    campaignKey: "luis_benefit_mableton_parrillada",
+    displayName: "La Super Parrillada",
+  },
   MEDICAL: {
     key: "MEDICAL",
     campaignKey: "luis_benefit_medical_20",
@@ -155,6 +256,19 @@ export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
     mediaUrl: "https://referral.creatyv.io/images/coupons/luis/ultra-cargo.jpeg",
   },
 };
+
+// The Mableton Supermarket's fixed-price offer overrides the default $20
+// SUPERMARKET benefit for exactly the postal_code its own
+// referral_benefit_campaign_locations row is configured for — resolved by
+// the caller querying that table generically (never a hardcoded ZIP
+// literal here), so this stays pure and unit-testable. SUPERMARKET is the
+// only benefit_key the Flow ever submits for any supermarket-family
+// request (there is no separate "Mableton" menu option, by design), so the
+// caller must resolve this before choosing which campaign_key to claim
+// against and which displayName/activation text to show.
+export function resolveSupermarketBenefit(mabletonLocationMatched: boolean): LuisBenefitDefinition {
+  return mabletonLocationMatched ? LUIS_BENEFITS.MABLETON_PARRILLADA : LUIS_BENEFITS.SUPERMARKET;
+}
 
 function text(value: unknown, max: number) {
   return typeof value === "string" && value.trim().length > 0 &&
@@ -521,6 +635,12 @@ export function routeLuisConversation(args: {
 
   // Priority 1: explicit WhatsApp payload/action - unchanged, highest
   // precedence, never touched by the interpreter.
+  // Production hotfix: luis_benefits:another normalizes to "luis benefits
+  // another" — checked here, ahead of everything else, so it can never fall
+  // through to the pre-existing "luis benefits another" match below (which
+  // routes to {kind:"benefits"} and could reach an invalid screen — see
+  // the post_benefit_reopen_benefits doc comment above).
+  if (action === "luis benefits another") return { kind: "post_benefit_reopen_benefits" };
   if (action === "luis benefits main menu") return { kind: "post_benefit_menu" };
   if (action === "luis benefits services") return { kind: "post_benefit_services" };
   if (action === "luis benefits finalize") return { kind: "post_benefit_finalize" };
@@ -541,7 +661,12 @@ export function routeLuisConversation(args: {
   ) {
     return { kind: "main_menu", trigger: "explicit" };
   }
-  if (action === "luis benefits another" || action === "luis main benefits") {
+  // "luis benefits another" removed from this OR — it's now matched
+  // earlier, unreachable here by construction (see post_benefit_reopen_
+  // benefits above). "luis main benefits" (a distinct trigger — the
+  // luis_main:benefits main-menu button, not the post-benefit-delivery
+  // "Ver beneficios") is unchanged.
+  if (action === "luis main benefits") {
     return { kind: "benefits" };
   }
   // Taps on the benefits_clarify buttons ("Supermercado"/"Médico"/"Ver
@@ -813,6 +938,16 @@ function oneOf<T extends string>(value: unknown, choices: readonly T[]) {
   return choices.includes(candidate) ? candidate : null;
 }
 
+// Absent (null/undefined) is a valid "not provided" for every V1
+// micro-intake structured field — never fails the whole completion parse.
+// A present-but-invalid value is treated the same as absent (returns null)
+// rather than rejecting the entire completion, since none of these fields
+// are load-bearing for identity/consent.
+function optionalOneOf<T extends string>(value: unknown, choices: readonly T[]): T | null {
+  if (value === null || value === undefined) return null;
+  return oneOf(value, choices);
+}
+
 export function parseLuisLegalFlowCompletion(
   raw: unknown,
 ): LuisLegalFlowCompletion | null {
@@ -831,6 +966,10 @@ export function parseLuisLegalFlowCompletion(
       "FAMILY_PETITION",
       "IMMIGRATION_COURT",
       "OTHER",
+      "FAMILY_GREEN_CARD",
+      "GREEN_CARD_RENEWAL",
+      "ASYLUM",
+      "U_VISA",
     ] as const);
     const postalCode = optionalPostalCode(value.postal_code);
     const submittedConsent = oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const);
@@ -838,14 +977,36 @@ export function parseLuisLegalFlowCompletion(
     const consentVersion = submittedConsent ? text(value.consent_version, 80) || null : null;
     const consentSource = submittedConsent ? text(value.consent_source, 40) || null : null;
     return topic && postalCode !== undefined
-      ? { intake_type: "IMMIGRATION", topic, full_name: fullName, postal_code: postalCode, description, sharing_consent: sharingConsent, consent_version: consentVersion, consent_source: consentSource }
+      ? {
+        intake_type: "IMMIGRATION", topic, full_name: fullName, postal_code: postalCode, description,
+        sharing_consent: sharingConsent, consent_version: consentVersion, consent_source: consentSource,
+        resident_duration: optionalOneOf(value.resident_duration, ["LESS_THAN_3_YEARS", "THREE_TO_FIVE_YEARS", "MORE_THAN_5_YEARS"] as const),
+        long_absence: optionalOneOf(value.long_absence, ["YES", "NO", "NOT_SURE"] as const),
+        citizenship_marriage_basis: optionalOneOf(value.citizenship_marriage_basis, ["YES", "NO", "NOT_SURE"] as const),
+        petitioner_relationship: optionalOneOf(value.petitioner_relationship, ["US_CITIZEN_SPOUSE", "RESIDENT_SPOUSE", "PARENT", "ADULT_CHILD", "OTHER", "NOT_SURE"] as const),
+        entry_method: optionalOneOf(value.entry_method, ["VISA", "PAROLE", "WITHOUT_INSPECTION", "NOT_SURE"] as const),
+        prior_uscis_petition: optionalOneOf(value.prior_uscis_petition, ["YES", "NO", "NOT_SURE"] as const),
+        green_card_term: optionalOneOf(value.green_card_term, ["TWO_YEAR", "TEN_YEAR", "NOT_SURE"] as const),
+        green_card_issue: optionalOneOf(value.green_card_issue, ["EXPIRING", "EXPIRED", "LOST_OR_STOLEN", "DAMAGED", "OTHER"] as const),
+        prior_related_filing: optionalOneOf(value.prior_related_filing, ["YES", "NO", "NOT_SURE"] as const),
+        arrival_window: optionalOneOf(value.arrival_window, ["LESS_THAN_ONE_YEAR", "MORE_THAN_ONE_YEAR", "NOT_SURE"] as const),
+        fear_reason: optionalOneOf(value.fear_reason, ["POLITICAL", "RELIGION", "NATIONALITY", "RACE", "SOCIAL_GROUP", "OTHER", "NOT_SURE"] as const),
+        immigration_court_status: optionalOneOf(value.immigration_court_status, ["YES", "NO", "NOT_SURE"] as const),
+        crime_victim: optionalOneOf(value.crime_victim, ["YES", "NO", "NOT_SURE"] as const),
+        police_report: optionalOneOf(value.police_report, ["YES", "NO", "NOT_SURE"] as const),
+        law_enforcement_cooperation: optionalOneOf(value.law_enforcement_cooperation, ["YES", "NO", "NOT_SURE"] as const),
+        work_permit_request_type: optionalOneOf(value.work_permit_request_type, ["FIRST_APPLICATION", "RENEWAL", "REPLACEMENT"] as const),
+        work_permit_basis: optionalOneOf(value.work_permit_basis, ["ASYLUM", "ADJUSTMENT", "TPS", "OTHER", "NOT_SURE"] as const),
+        work_permit_status: optionalOneOf(value.work_permit_status, ["VALID", "EXPIRING", "EXPIRED", "NONE", "NOT_SURE"] as const),
+      }
       : null;
   }
   if (intakeType === "AUTO_ACCIDENT") {
     const accidentDate = text(value.accident_date, 32);
-    // Current draft payloads use `participation`; accept that approved contract
-    // while canonicalizing the stored intake to `participant_role`.
-    const participantRole = oneOf(
+    // Current/legacy payloads may use `participation`; accept that shape
+    // while canonicalizing the stored intake to `participant_role`. Neither
+    // is asked by the V1 micro-intake UI anymore — both are optional now.
+    const participantRole = optionalOneOf(
       value.participant_role ?? value.participation,
       ["DRIVER", "PASSENGER", "OTHER"] as const,
     );
@@ -853,15 +1014,26 @@ export function parseLuisLegalFlowCompletion(
     const medicalProvider = value.medical_provider === null || value.medical_provider === undefined
       ? null
       : text(value.medical_provider, 160) || null;
-    return /^\d{4}-\d{2}-\d{2}$/.test(accidentDate) && participantRole && receivedMedicalAttention
+    const policeReport = optionalOneOf(value.police_report, ["YES", "NO", "NOT_SURE"] as const);
+    const postalCode = optionalPostalCode(value.postal_code);
+    const submittedConsent = oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const);
+    const sharingConsent = submittedConsent ?? "PENDING";
+    const consentVersion = submittedConsent ? text(value.consent_version, 80) || null : null;
+    const consentSource = submittedConsent ? text(value.consent_source, 40) || null : null;
+    return /^\d{4}-\d{2}-\d{2}$/.test(accidentDate) && receivedMedicalAttention && postalCode !== undefined
       ? {
         intake_type: "AUTO_ACCIDENT",
         full_name: fullName,
+        postal_code: postalCode,
         accident_date: accidentDate,
         participant_role: participantRole,
         received_medical_attention: receivedMedicalAttention,
         medical_provider: medicalProvider,
+        police_report: policeReport,
         description,
+        sharing_consent: sharingConsent,
+        consent_version: consentVersion,
+        consent_source: consentSource,
       }
       : null;
   }
@@ -872,23 +1044,59 @@ export function parseLuisLegalFlowCompletion(
       ? { intake_type: "DUI_CRIMINAL", topic, full_name: fullName, postal_code: postalCode, description }
       : null;
   }
+  if (intakeType === "DUI") {
+    const duiDate = text(value.dui_date, 32);
+    const chemicalTest = oneOf(value.chemical_test, ["COMPLETED", "REFUSED", "NOT_SURE"] as const);
+    const courtDateStatus = oneOf(value.court_date_status, ["YES", "NO", "NOT_SURE"] as const);
+    const postalCode = optionalPostalCode(value.postal_code);
+    const submittedConsent = oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const);
+    const sharingConsent = submittedConsent ?? "PENDING";
+    const consentVersion = submittedConsent ? text(value.consent_version, 80) || null : null;
+    const consentSource = submittedConsent ? text(value.consent_source, 40) || null : null;
+    return duiDate && chemicalTest && courtDateStatus && postalCode !== undefined
+      ? {
+        intake_type: "DUI", full_name: fullName, postal_code: postalCode, dui_date: duiDate,
+        chemical_test: chemicalTest, court_date_status: courtDateStatus, description,
+        sharing_consent: sharingConsent, consent_version: consentVersion, consent_source: consentSource,
+      }
+      : null;
+  }
+  if (intakeType === "CRIMINAL") {
+    const criminalCharge = text(value.criminal_charge, 200);
+    const courtDateStatus = oneOf(value.court_date_status, ["YES", "NO", "NOT_SURE"] as const);
+    const currentlyDetained = oneOf(value.currently_detained, ["YES", "NO"] as const);
+    const postalCode = optionalPostalCode(value.postal_code);
+    const submittedConsent = oneOf(value.sharing_consent, ["AUTHORIZED", "DECLINED"] as const);
+    const sharingConsent = submittedConsent ?? "PENDING";
+    const consentVersion = submittedConsent ? text(value.consent_version, 80) || null : null;
+    const consentSource = submittedConsent ? text(value.consent_source, 40) || null : null;
+    return criminalCharge && courtDateStatus && currentlyDetained && postalCode !== undefined
+      ? {
+        intake_type: "CRIMINAL", full_name: fullName, postal_code: postalCode, criminal_charge: criminalCharge,
+        court_date_status: courtDateStatus, currently_detained: currentlyDetained, description,
+        sharing_consent: sharingConsent, consent_version: consentVersion, consent_source: consentSource,
+      }
+      : null;
+  }
   return null;
 }
 
 // Pure, unit-testable image/name precedence rules for the DB-driven coupon
-// cutover. SUPERMARKET never reaches the "db" branch of either helper — its
+// cutover. A location-aware benefit (any campaign with active
+// referral_benefit_campaign_locations rows — currently SUPERMARKET and
+// MABLETON_PARRILLADA) never reaches the "db" branch of either helper — its
 // image/location are exclusively resolved by request_referral_benefit_claim
 // via rpcOfficialMediaUrl (exact-ZIP match) or the requires_location_verification
 // early-return in buildLuisBenefitsFlowCompletionResult; neither helper here
 // changes that. See supabase/functions/run-replies/tests/couponImagePrecedence.test.ts.
 export function resolveCouponMediaUrl(args: {
-  isSupermarket: boolean;
+  isLocationAware: boolean;
   rpcOfficialMediaUrl: string;
   dbImageUrl: string;
   hardcodedFallback: string;
 }): string {
   if (args.rpcOfficialMediaUrl) return args.rpcOfficialMediaUrl;
-  if (!args.isSupermarket && args.dbImageUrl) return args.dbImageUrl;
+  if (!args.isLocationAware && args.dbImageUrl) return args.dbImageUrl;
   return args.hardcodedFallback;
 }
 

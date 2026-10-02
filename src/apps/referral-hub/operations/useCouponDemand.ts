@@ -23,11 +23,11 @@ type RawClaimRow = {
 };
 
 export function useCouponDemand(period: PeriodId, customRange?: { start: string; end: string }) {
-  const { resolvedOrgId } = useReferralOrganization();
+  const { resolvedOrgId, timezone } = useReferralOrganization();
   const [rawClaims, setRawClaims] = useState<CouponClaimRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const range = useMemo(() => periodRange(period, customRange), [period, customRange?.start, customRange?.end]);
+  const range = useMemo(() => periodRange(period, customRange, timezone), [period, customRange?.start, customRange?.end, timezone]);
 
   const load = useCallback(async () => {
     if (!resolvedOrgId) {

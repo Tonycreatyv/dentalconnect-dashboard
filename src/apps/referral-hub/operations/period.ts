@@ -20,25 +20,81 @@ export const PERIOD_LABELS: Record<PeriodId, string> = {
   all: "Todo el tiempo",
 };
 
-export function periodRange(id: PeriodId, custom?: { start: string; end: string }): { start: Date; end: Date } {
-  const now = new Date();
-  if (id === "custom" && custom?.start && custom?.end) {
-    const start = new Date(`${custom.start}T00:00:00`);
-    const end = new Date(`${custom.end}T23:59:59.999`);
-    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) return { start, end };
+type CalendarDate = { year: number; month: number; day: number };
+
+function safeTimeZone(timeZone?: string): string {
+  if (!timeZone) return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format();
+    return timeZone;
+  } catch {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   }
-  const end = new Date(now);
-  end.setHours(23, 59, 59, 999);
+}
+
+function zonedParts(date: Date, timeZone: string): CalendarDate & { hour: number; minute: number; second: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return { year: value("year"), month: value("month"), day: value("day"), hour: value("hour"), minute: value("minute"), second: value("second") };
+}
+
+function timezoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = zonedParts(instant, timeZone);
+  // formatToParts has second precision. Compare against the corresponding
+  // whole-second instant so an end-of-day .999 millisecond never becomes a
+  // one-millisecond timezone offset.
+  const wholeSecond = Math.floor(instant.getTime() / 1000) * 1000;
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - wholeSecond;
+}
+
+function zonedDateTimeToUtc(date: CalendarDate, hour: number, minute: number, second: number, millisecond: number, timeZone: string): Date {
+  const localAsUtc = Date.UTC(date.year, date.month - 1, date.day, hour, minute, second, millisecond);
+  let utc = localAsUtc - timezoneOffsetMs(new Date(localAsUtc), timeZone);
+  // Recalculate once for DST transitions, where the first candidate can be
+  // on the other side of the offset change.
+  utc = localAsUtc - timezoneOffsetMs(new Date(utc), timeZone);
+  return new Date(utc);
+}
+
+function addDays(date: CalendarDate, amount: number): CalendarDate {
+  const value = new Date(Date.UTC(date.year, date.month - 1, date.day));
+  value.setUTCDate(value.getUTCDate() + amount);
+  return { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1, day: value.getUTCDate() };
+}
+
+function parseCalendarDate(value: string): CalendarDate | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+  const verified = new Date(Date.UTC(date.year, date.month - 1, date.day));
+  return verified.getUTCFullYear() === date.year && verified.getUTCMonth() + 1 === date.month && verified.getUTCDate() === date.day ? date : null;
+}
+
+export function periodRange(id: PeriodId, custom?: { start: string; end: string }, timeZone?: string, now = new Date()): { start: Date; end: Date } {
+  const zone = safeTimeZone(timeZone);
+  if (id === "custom" && custom?.start && custom?.end) {
+    const startDate = parseCalendarDate(custom.start);
+    const endDate = parseCalendarDate(custom.end);
+    if (startDate && endDate) return {
+      start: zonedDateTimeToUtc(startDate, 0, 0, 0, 0, zone),
+      end: zonedDateTimeToUtc(endDate, 23, 59, 59, 999, zone),
+    };
+  }
+  const today = zonedParts(now, zone);
+  const endDate = { year: today.year, month: today.month, day: today.day };
   if (id === "all") {
     // No real claim predates this product's existence — 2020-01-01 is a
     // safe, deliberately-early floor, never a guess at a "real" start date.
-    return { start: new Date("2020-01-01T00:00:00Z"), end };
+    return { start: zonedDateTimeToUtc({ year: 2020, month: 1, day: 1 }, 0, 0, 0, 0, zone), end: zonedDateTimeToUtc(endDate, 23, 59, 59, 999, zone) };
   }
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  if (id === "week") start.setDate(start.getDate() - 6);
-  if (id === "month") start.setDate(start.getDate() - 29);
-  return { start, end };
+  const startDate = id === "week" ? addDays(endDate, -6) : id === "month" ? addDays(endDate, -29) : endDate;
+  return {
+    start: zonedDateTimeToUtc(startDate, 0, 0, 0, 0, zone),
+    end: zonedDateTimeToUtc(endDate, 23, 59, 59, 999, zone),
+  };
 }
 
 export function dayKey(value: string | Date): string {

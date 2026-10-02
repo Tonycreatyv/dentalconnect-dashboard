@@ -15,6 +15,28 @@ export type ImmigrationFlowCompletion = {
   sharing_consent?: string;
   consent_version?: string | null;
   consent_source?: string | null;
+  // Micro-intake V1 structured fields — present only for their matching
+  // topic, absent (undefined) for every other topic and for any completion
+  // from before this field set existed. All optional/additive: never
+  // required, never renamed, never removed.
+  resident_duration?: string | null;
+  long_absence?: string | null;
+  citizenship_marriage_basis?: string | null;
+  petitioner_relationship?: string | null;
+  entry_method?: string | null;
+  prior_uscis_petition?: string | null;
+  green_card_term?: string | null;
+  green_card_issue?: string | null;
+  prior_related_filing?: string | null;
+  arrival_window?: string | null;
+  fear_reason?: string | null;
+  immigration_court_status?: string | null;
+  crime_victim?: string | null;
+  police_report?: string | null;
+  law_enforcement_cooperation?: string | null;
+  work_permit_request_type?: string | null;
+  work_permit_basis?: string | null;
+  work_permit_status?: string | null;
 };
 
 function stringValue(value: unknown): string {
@@ -41,6 +63,27 @@ export async function captureImmigrationFlowRequest(args: {
     sharing_consent: ["AUTHORIZED", "DECLINED"].includes(args.completion.sharing_consent ?? "") ? args.completion.sharing_consent : "PENDING",
     consent_version: args.completion.consent_version ?? null,
     consent_source: args.completion.consent_source ?? null,
+    // Micro-intake V1 structured fields — additive, always written (as null
+    // when absent) so every intake row has a consistent key set regardless
+    // of topic or Flow version.
+    resident_duration: args.completion.resident_duration ?? null,
+    long_absence: args.completion.long_absence ?? null,
+    citizenship_marriage_basis: args.completion.citizenship_marriage_basis ?? null,
+    petitioner_relationship: args.completion.petitioner_relationship ?? null,
+    entry_method: args.completion.entry_method ?? null,
+    prior_uscis_petition: args.completion.prior_uscis_petition ?? null,
+    green_card_term: args.completion.green_card_term ?? null,
+    green_card_issue: args.completion.green_card_issue ?? null,
+    prior_related_filing: args.completion.prior_related_filing ?? null,
+    arrival_window: args.completion.arrival_window ?? null,
+    fear_reason: args.completion.fear_reason ?? null,
+    immigration_court_status: args.completion.immigration_court_status ?? null,
+    crime_victim: args.completion.crime_victim ?? null,
+    police_report: args.completion.police_report ?? null,
+    law_enforcement_cooperation: args.completion.law_enforcement_cooperation ?? null,
+    work_permit_request_type: args.completion.work_permit_request_type ?? null,
+    work_permit_basis: args.completion.work_permit_basis ?? null,
+    work_permit_status: args.completion.work_permit_status ?? null,
   };
   const result = await args.supabase.rpc("capture_immigration_flow_request", {
     p_organization_id: args.organizationId,

@@ -20,9 +20,42 @@ export function resolvePartnerPhone(phone: string | null | undefined, channelUse
   return value || null;
 }
 
-export type PartnerAction = "contacted" | "no_answer" | "pending";
+// Display-only — never used for wa.me/tel: links, which keep the raw digit
+// string. resolvePartnerPhone's value is a raw WhatsApp identity like
+// "17707784450" (E.164 without the +); this never renders that to the
+// partner, only a readable "(770) 778-4450".
+export function formatPhoneForDisplay(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/[^0-9]/g, "");
+  const local = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits.length === 10 ? digits : null;
+  if (!local) return phone;
+  return digits.length === 11 && digits.startsWith("1")
+    ? `+1 (${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`
+    : `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`;
+}
 
-const ACTIONS_REQUIRING_ACCEPTANCE: readonly PartnerAction[] = ["contacted", "no_answer"];
+// "pending" is a P0-era UI-only label kept for planPartnerActionSteps/
+// resolveActionNote test coverage (see partnerActions.test.ts) — Phase 1B no
+// longer renders it as a button (see PartnerDashboard.tsx STAGE_ACTIONS).
+// appointment_scheduled/converted/closed_not_converted are the RPC's own
+// existing contact-outcome actions (same migration), surfaced here as
+// contextual "next step" actions once a case has been contacted — no new
+// backend capability, purely exposing what the RPC already accepts.
+export type PartnerAction =
+  | "contacted"
+  | "no_answer"
+  | "pending"
+  | "appointment_scheduled"
+  | "converted"
+  | "closed_not_converted";
+
+const ACTIONS_REQUIRING_ACCEPTANCE: readonly PartnerAction[] = [
+  "contacted",
+  "no_answer",
+  "appointment_scheduled",
+  "converted",
+  "closed_not_converted",
+];
 
 // partner_update_immigration_assignment (20260904000100_immigration_partner_dashboard.sql)
 // has no dedicated "pending" work_status — contact-outcome actions are
@@ -35,6 +68,9 @@ const RPC_ACTION_BY_PARTNER_ACTION: Record<PartnerAction, string> = {
   contacted: "contacted",
   no_answer: "no_answer",
   pending: "note",
+  appointment_scheduled: "appointment_scheduled",
+  converted: "converted",
+  closed_not_converted: "closed_not_converted",
 };
 
 export const PENDING_NOTE_TEXT = "Marcado como pendiente por el aliado";
@@ -61,4 +97,12 @@ export function resolveActionNote(action: PartnerAction, partnerNote: string | n
   const trimmed = (partnerNote ?? "").trim();
   if (trimmed) return trimmed;
   return action === "pending" ? PENDING_NOTE_TEXT : null;
+}
+
+// 'follow_up' isn't a PartnerAction (it carries a reason + reminder the
+// other actions don't), so it gets its own step planner. Same accept-first
+// rule as planPartnerActionSteps: the RPC's follow_up branch also requires
+// status='accepted'.
+export function planFollowUpSteps(assignmentStatus: string): string[] {
+  return assignmentStatus === "assigned" ? ["accept", "follow_up"] : ["follow_up"];
 }

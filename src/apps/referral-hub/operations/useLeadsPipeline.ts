@@ -31,14 +31,19 @@ export function useLeadsPipeline() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     if (!resolvedOrgId) {
-      setLeads([]);
-      setLoading(false);
+      if (!silent) {
+        setLeads([]);
+        setLoading(false);
+      }
       return;
     }
-    setLoading(true);
-    setError("");
+    if (!silent) {
+      setLoading(true);
+      setError("");
+    }
     const [leadsRes, requestsRes, staffMessagesRes] = await Promise.all([
       supabase
         .from("leads")
@@ -60,9 +65,11 @@ export function useLeadsPipeline() {
         .order("created_at", { ascending: true }),
     ]);
     if (leadsRes.error) {
-      setError("No se pudieron cargar los leads.");
-      setLeads([]);
-      setLoading(false);
+      if (!silent) {
+        setError("No se pudieron cargar los leads.");
+        setLeads([]);
+        setLoading(false);
+      }
       return;
     }
     type RequestRow = { lead_id: string; status: string; referral_assignments: { work_status: string | null; assigned_at: string }[] | null };
@@ -109,7 +116,7 @@ export function useLeadsPipeline() {
       };
     });
     setLeads(rows);
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [resolvedOrgId]);
 
   useEffect(() => { void load(); }, [load]);

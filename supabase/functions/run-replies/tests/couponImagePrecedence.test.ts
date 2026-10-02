@@ -10,7 +10,7 @@ import { resolveCouponMediaUrl, resolveCouponPartnerName } from "../../_products
 
 Deno.test("supermarket: ZIP-matched location image wins over everything, including a configured db image", () => {
   const result = resolveCouponMediaUrl({
-    isSupermarket: true,
+    isLocationAware: true,
     rpcOfficialMediaUrl: "https://cdn.example.com/mi-tierra-plaza-fiesta.jpg",
     dbImageUrl: "https://cdn.example.com/should-never-be-used.jpg",
     hardcodedFallback: "",
@@ -25,7 +25,7 @@ Deno.test("supermarket: no location match never falls through to a db/business-l
   // so a future refactor that removes the early return can't silently
   // start leaking a generic image for an unsupported ZIP.
   const result = resolveCouponMediaUrl({
-    isSupermarket: true,
+    isLocationAware: true,
     rpcOfficialMediaUrl: "",
     dbImageUrl: "https://cdn.example.com/should-never-be-used.jpg",
     hardcodedFallback: "",
@@ -35,7 +35,7 @@ Deno.test("supermarket: no location match never falls through to a db/business-l
 
 Deno.test("supermarket: no location match and no hardcoded fallback resolves to empty (never a stale/wrong image)", () => {
   const result = resolveCouponMediaUrl({
-    isSupermarket: true,
+    isLocationAware: true,
     rpcOfficialMediaUrl: "",
     dbImageUrl: "",
     hardcodedFallback: "",
@@ -45,7 +45,7 @@ Deno.test("supermarket: no location match and no hardcoded fallback resolves to 
 
 Deno.test("medical/dental/shipping: db image used when delivery_source='db' and image_url is set", () => {
   const result = resolveCouponMediaUrl({
-    isSupermarket: false,
+    isLocationAware: false,
     rpcOfficialMediaUrl: "",
     dbImageUrl: "https://referral.creatyv.io/images/coupons/luis/medico-urgencias-v2.jpeg",
     hardcodedFallback: "https://referral.creatyv.io/images/coupons/luis/medico-urgencias.jpeg",
@@ -55,7 +55,7 @@ Deno.test("medical/dental/shipping: db image used when delivery_source='db' and 
 
 Deno.test("medical/dental/shipping: hardcoded fallback used when not db-driven (delivery_source stays 'legacy')", () => {
   const result = resolveCouponMediaUrl({
-    isSupermarket: false,
+    isLocationAware: false,
     rpcOfficialMediaUrl: "",
     dbImageUrl: "",
     hardcodedFallback: "https://referral.creatyv.io/images/coupons/luis/medico-urgencias.jpeg",

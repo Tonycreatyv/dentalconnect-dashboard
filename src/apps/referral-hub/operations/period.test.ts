@@ -2,18 +2,18 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { PERIOD_LABELS, periodRange } from "./period.ts";
 
-Deno.test("period: 'today' spans only the current calendar day", () => {
-  const { start, end } = periodRange("today");
-  assertEquals(start.getHours(), 0);
-  assertEquals(end.getHours(), 23);
-  assertEquals(start.toDateString(), end.toDateString());
+Deno.test("period: 'today' uses the organization business timezone, not browser-local midnight", () => {
+  // At this instant Tegucigalpa is still September 3 while UTC is September 4.
+  const { start, end } = periodRange("today", undefined, "America/Tegucigalpa", new Date("2026-09-04T03:00:00.000Z"));
+  assertEquals(start.toISOString(), "2026-09-03T06:00:00.000Z");
+  assertEquals(end.toISOString(), "2026-09-04T05:59:59.999Z");
 });
 
 Deno.test("period: 'all' starts far in the past and ends today - never silently narrower than an all-time card count", () => {
   const { start, end } = periodRange("all");
-  const now = new Date();
+  const today = periodRange("today");
   assertEquals(start.getUTCFullYear() <= 2020, true);
-  assertEquals(end.toDateString(), now.toDateString());
+  assertEquals(end.getTime(), today.end.getTime());
 });
 
 Deno.test("period: 'all' range strictly contains 'today'/'week'/'month' ranges", () => {

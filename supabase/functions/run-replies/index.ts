@@ -77,6 +77,7 @@ import {
   orchestrateCompletedServiceRequest,
 } from "./domain/referralHub/serviceRequestOrchestrator.ts";
 import { captureImmigrationFlowRequest } from "./domain/referralHub/immigrationFlowRequest.ts";
+import { captureLegalFlowRequest } from "./domain/referralHub/legalFlowRequest.ts";
 import {
   clearMetaTestDemoTakeoverState,
   metaTestDemoResetAction,
@@ -129,6 +130,7 @@ import {
   parseLuisLegalFlowCompletion,
   resolveCouponMediaUrl,
   resolveCouponPartnerName,
+  resolveSupermarketBenefit,
   routeLuisTestFlowIntent,
   routeLuisConversation,
 } from "../_products/referral-hub/luisBenefits.ts";
@@ -217,6 +219,7 @@ type BenefitClaimRpcRow = {
   claim_code?: unknown;
   claim_status?: unknown;
   official_media_url?: unknown;
+  supermarket_location_id?: unknown;
   supermarket_location_name?: unknown;
   requires_location_verification?: unknown;
 };
@@ -386,6 +389,36 @@ async function tryFindNearestSupermarket(args: {
   }
 }
 
+// Generic, data-driven check — never a hardcoded postal_code literal — so
+// Mableton's own location row (or a future sibling fixed-price offer added
+// the same way) is the only source of truth for which ZIP it owns. Mirrors
+// tryFindNearestSupermarket's own two-query campaign-then-location shape
+// above. Any DB error fails closed to the existing SUPERMARKET behavior,
+// never a guess.
+async function hasMabletonLocationMatch(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  postalCode: string;
+}): Promise<boolean> {
+  const campaignRow = await args.supabase
+    .from("referral_coupon_campaigns")
+    .select("id")
+    .eq("organization_id", args.organizationId)
+    .eq("campaign_key", LUIS_BENEFITS.MABLETON_PARRILLADA.campaignKey)
+    .maybeSingle();
+  const campaignId = safeStr((campaignRow.data as { id?: unknown } | null)?.id, "");
+  if (campaignRow.error || !campaignId) return false;
+  const locationRow = await args.supabase
+    .from("referral_benefit_campaign_locations")
+    .select("id")
+    .eq("organization_id", args.organizationId)
+    .eq("campaign_id", campaignId)
+    .eq("postal_code", args.postalCode)
+    .eq("active", true)
+    .maybeSingle();
+  return !locationRow.error && Boolean(locationRow.data);
+}
+
 async function buildLuisBenefitsFlowCompletionResult(args: {
   supabase: SupabaseClientType;
   organizationId: string;
@@ -418,7 +451,18 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
       debugNote: "referral_hub:benefit_claim_invalid_flow",
     };
   }
-  const benefit = LUIS_BENEFITS[completion.benefit_key];
+  // SUPERMARKET is the only benefit_key the Flow ever submits for a
+  // supermarket-family request — Mableton's own fixed-price offer is
+  // resolved internally here, by postal_code, never exposed as a separate
+  // menu option. Every other benefit_key (MEDICAL/DENTAL/SHIPPING) and
+  // every legal flow is completely untouched by this check.
+  const benefit = completion.benefit_key === "SUPERMARKET"
+    ? resolveSupermarketBenefit(await hasMabletonLocationMatch({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      postalCode: completion.postal_code,
+    }))
+    : LUIS_BENEFITS[completion.benefit_key];
   const leadUpdate = await args.supabase.from("leads").update({
     full_name: completion.full_name,
     first_name: firstNameFromFlowName(completion.full_name),
@@ -519,15 +563,22 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
       debugNote: `referral_hub:benefit_claim_nearest_proposed:${claimId}`,
     };
   }
-  // Rollback-safe DB-driven lookup. Never consulted for SUPERMARKET at all —
-  // that benefit's image is exclusively resolved by the existing RPC via
+  // Rollback-safe DB-driven lookup. Never consulted for a location-aware
+  // benefit (any campaign with active referral_benefit_campaign_locations
+  // rows — currently SUPERMARKET and MABLETON_PARRILLADA) — that benefit's
+  // image is exclusively resolved by the existing RPC via
   // row.official_media_url (exact-ZIP location match or nothing, per
   // request_referral_benefit_claim), which this block does not touch.
+  // Derived from the RPC's own response (supermarket_location_id is only
+  // ever populated for a location-aware campaign — see
+  // request_referral_benefit_claim's v_location_aware), never from a
+  // literal benefit_key/campaign_key comparison, so a new location-aware
+  // campaign needs no change here.
   // For every other benefit: delivery_source='db' (the default is
   // 'legacy') is the entire cutover switch. If the lookup fails for any
   // reason, or delivery_source isn't 'db', behavior is byte-for-byte
   // identical to today - see couponMessageTemplateParity.test.ts.
-  const isSupermarket = completion.benefit_key === "SUPERMARKET";
+  const isLocationAware = safeStr(row?.supermarket_location_id, "") !== "";
   let dbCoupon: {
     image_url: string;
     customer_copy: string;
@@ -535,7 +586,7 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
     businessName: string;
     businessAddress: string;
   } | null = null;
-  if (!isSupermarket) {
+  if (!isLocationAware) {
     const couponRow = await args.supabase
       .from("referral_coupon_campaigns")
       .select("image_url, customer_copy, terms_text, delivery_source, referral_partners(name, address_text)")
@@ -560,7 +611,7 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
     }
   }
   const mediaUrl = resolveCouponMediaUrl({
-    isSupermarket,
+    isLocationAware,
     rpcOfficialMediaUrl: safeStr(row?.official_media_url, ""),
     dbImageUrl: dbCoupon?.image_url ?? "",
     hardcodedFallback: benefit.mediaUrl ?? "",
@@ -915,7 +966,53 @@ async function buildLuisLegalFlowCompletionResult(args: {
         sharing_consent: completion.sharing_consent,
         consent_version: completion.consent_version,
         consent_source: completion.consent_source,
+        // Micro-intake V1: forward every topic-specific structured field —
+        // additive only, each is undefined/null on every topic but its own
+        // and on any pre-V1 completion. Previously parsed here and then
+        // silently dropped before reaching captureImmigrationFlowRequest.
+        resident_duration: completion.resident_duration,
+        long_absence: completion.long_absence,
+        citizenship_marriage_basis: completion.citizenship_marriage_basis,
+        petitioner_relationship: completion.petitioner_relationship,
+        entry_method: completion.entry_method,
+        prior_uscis_petition: completion.prior_uscis_petition,
+        green_card_term: completion.green_card_term,
+        green_card_issue: completion.green_card_issue,
+        prior_related_filing: completion.prior_related_filing,
+        arrival_window: completion.arrival_window,
+        fear_reason: completion.fear_reason,
+        immigration_court_status: completion.immigration_court_status,
+        crime_victim: completion.crime_victim,
+        police_report: completion.police_report,
+        law_enforcement_cooperation: completion.law_enforcement_cooperation,
+        work_permit_request_type: completion.work_permit_request_type,
+        work_permit_basis: completion.work_permit_basis,
+        work_permit_status: completion.work_permit_status,
       },
+    });
+  } else if (
+    completion.intake_type === "AUTO_ACCIDENT" ||
+    completion.intake_type === "DUI" ||
+    completion.intake_type === "CRIMINAL"
+  ) {
+    // Micro-intake V1: same canonical operational capture as immigration,
+    // generalized across the three legal intake types that share
+    // service_id='luis_accidente' (see legalFlowRequest.ts /
+    // 20260905000100_luis_micro_intake_legal_services.sql). Legacy
+    // DUI_CRIMINAL completions (no consent step, no canonical request) are
+    // deliberately left out of this branch — untouched, same as before.
+    await captureLegalFlowRequest({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      channelUserId: args.channelUserId,
+      deliveryKey: args.deliveryKey,
+      intakeType: completion.intake_type,
+      completedAt: legalIntake.completed_at,
+      sharingConsent: completion.sharing_consent,
+      consentVersion: completion.consent_version,
+      consentSource: completion.consent_source,
+      fields: completion,
     });
   }
   // Preserve the existing staff-side follow-up event, but do not use
@@ -928,10 +1025,14 @@ async function buildLuisLegalFlowCompletionResult(args: {
     channel: args.channel,
     messagePreview: `Solicitud legal Flow: ${completion.intake_type}`,
   });
+  // sharing_consent only exists on IMMIGRATION/AUTO_ACCIDENT/DUI/CRIMINAL —
+  // legacy DUI_CRIMINAL has none, so it always falls through to the
+  // original generic fallback text, unchanged.
+  const sharingConsent = "sharing_consent" in completion ? completion.sharing_consent : undefined;
   return {
-    reply: completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "DECLINED"
+    reply: sharingConsent === "DECLINED"
       ? "Gracias. Guardamos tu solicitud, pero no compartiremos tu información con un aliado. Si deseas continuar más adelante, puedes volver a escribirnos."
-      : completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "AUTHORIZED"
+      : sharingConsent === "AUTHORIZED"
       ? "¡Gracias! ✅\n\nRecibimos tu información.\n\nEn breve, alguien de nuestro equipo se comunicará contigo."
       : "Gracias. Recibimos tu solicitud y un integrante del equipo te dará seguimiento por este mismo WhatsApp.",
     statePatch: luisLegalPatch(args.leadState, legalIntake),
@@ -1086,12 +1187,29 @@ export async function buildLuisConversationResult(args: {
       : effectiveRoute.trigger === "greeting"
       ? returningCustomerGreeting()
       : explicitReentryGreeting;
+    // Explicit, named attempt at the Unified Flow entry BEFORE any fallback
+    // is even considered — every bare greeting/menu request (new or
+    // returning contact alike) must try this first. luisUnifiedFlowEntryResult
+    // itself is what degrades to the legacy interactive-list menu, and only
+    // when organization_settings.integrations.luis_unified_flow_id is
+    // genuinely unset (see its own doc comment). Logged explicitly so a
+    // production incident like this one is diagnosable from logs alone,
+    // without needing to re-derive this reasoning from scratch.
+    const unifiedFlowResult = luisUnifiedFlowEntryResult(
+      args.orgSettings,
+      args.leadState,
+      contextualGreeting,
+    );
+    logEvent("luis_main_menu_entry_resolved", {
+      resolvedVia: unifiedFlowResult ? "unified_flow" : "legacy_menu",
+      hasUnifiedFlowId: Boolean(
+        safeStr(getIntegrationsConfig(args.orgSettings).luis_unified_flow_id, ""),
+      ),
+      isReturningLead,
+      trigger: effectiveRoute.trigger,
+    });
     return await withQrAttributionIfResolved(
-      luisUnifiedFlowEntryResult(
-        args.orgSettings,
-        args.leadState,
-        contextualGreeting,
-      ) ?? luisMainMenuResult(args.leadState, contextualGreeting),
+      unifiedFlowResult ?? luisMainMenuResult(args.leadState, contextualGreeting),
     );
   }
   if (effectiveRoute.kind === "benefits") {
@@ -1116,6 +1234,28 @@ export async function buildLuisConversationResult(args: {
       ],
       debugNote: "referral_hub:luis_benefits_clarify",
     };
+  }
+  // Production hotfix, corrected after live verification: a WhatsApp
+  // Flow-trigger message cannot target BENEFIT_SELECT directly — confirmed
+  // via Meta's own Graph API rejection (error 131009: "Specified screen
+  // BENEFIT_SELECT is not allowed as first screen of this flow. Allowed
+  // screen name is: SERVICE_SELECT."), because BENEFIT_SELECT's only
+  // inbound edge in this Flow's routing_model is FROM SERVICE_SELECT — it
+  // is not a valid external entry screen, and no run-replies code can
+  // change that without a Flow change (out of scope for this hotfix).
+  // SERVICE_SELECT is the only screen WhatsApp accepts as a Flow-trigger's
+  // first screen, so "Ver beneficios" opens there too, via the exact same
+  // known-good mechanism as post_benefit_services below
+  // (luisUnifiedFlowEntryResult, no custom screen argument — its own
+  // internal clearLuisTemporaryState call already starts a fresh cycle: no
+  // stale ZIP, location, or coupon from a prior claim carries over) — only
+  // the contextual greeting differs, so the customer knows to tap
+  // "Beneficios y cupones" once more inside the menu.
+  if (route.kind === "post_benefit_reopen_benefits") {
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    const contextualGreeting = `Perfecto${firstName ? `, ${firstName}` : ""}. Elegí "Beneficios y cupones" para ver tus opciones.`;
+    return luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting) ??
+      luisMainMenuResult(args.leadState, contextualGreeting);
   }
   if (route.kind === "post_benefit_menu") {
     const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));

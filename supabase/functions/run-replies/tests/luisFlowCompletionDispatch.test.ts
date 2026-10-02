@@ -71,7 +71,7 @@ Deno.test("every Unified Flow legal completion stays automated while retaining i
   }
 });
 
-Deno.test("only a valid Immigration Flow completion invokes the internal-review capture bridge", async () => {
+Deno.test("Immigration and the three legal micro-intake types each invoke their own canonical capture bridge; legacy DUI_CRIMINAL invokes neither", async () => {
   const source = await Deno.readTextFile(new URL("../index.ts", import.meta.url));
   const start = source.indexOf("async function buildLuisLegalFlowCompletionResult");
   const end = source.indexOf("function invalidLuisFlowCompletionResult", start);
@@ -81,7 +81,18 @@ Deno.test("only a valid Immigration Flow completion invokes the internal-review 
   assertStringIncludes(completion, 'if (completion.intake_type === "IMMIGRATION")');
   assertStringIncludes(completion, "await captureImmigrationFlowRequest({");
   assertStringIncludes(completion, "sharing_consent: completion.sharing_consent");
-  assertStringIncludes(completion, 'completion.sharing_consent === "DECLINED"');
+  // Micro-intake V1: AUTO_ACCIDENT/DUI/CRIMINAL share a sibling capture
+  // bridge (captureLegalFlowRequest) — additive, immigration's own bridge
+  // above is untouched. Legacy DUI_CRIMINAL completions still invoke
+  // neither bridge (no canonical request, exactly as before this session).
+  assertStringIncludes(completion, 'completion.intake_type === "AUTO_ACCIDENT" ||');
+  assertStringIncludes(completion, 'completion.intake_type === "DUI" ||');
+  assertStringIncludes(completion, 'completion.intake_type === "CRIMINAL"');
+  assertStringIncludes(completion, "await captureLegalFlowRequest({");
+  assertStringIncludes(completion, "sharingConsent: completion.sharing_consent");
+  assertStringIncludes(completion, 'sharingConsent === "DECLINED"');
+  assertStringIncludes(completion, 'sharingConsent === "AUTHORIZED"');
   assertStringIncludes(completion, "statePatch: luisLegalPatch(args.leadState, legalIntake)");
   assert(!completion.includes("orchestrateCompletedServiceRequest({"));
+  assert(!completion.includes("orchestrate_referral_service_request"));
 });

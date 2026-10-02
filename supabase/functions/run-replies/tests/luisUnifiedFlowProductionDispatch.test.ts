@@ -37,11 +37,13 @@ Deno.test("normal entry and MENU dispatch the unified Flow CTA before falling ba
   // unchanged by luisConversationRouter.test.ts.
   const mainMenuBranch = workerSource.indexOf('if (effectiveRoute.kind === "main_menu")');
   assert(mainMenuBranch >= 0);
-  // 600 (not the previous 400) - a stale fixed budget from before the
-  // returning-customer contextualGreeting ternary was added drifted this
-  // slice short of its own target string; widened with real margin instead
-  // of tightening it again to the exact current byte count.
-  const branchBody = workerSource.slice(mainMenuBranch, mainMenuBranch + 600);
+  // 1600 (not the previous 600) - the hotfix that names unifiedFlowResult
+  // explicitly and logs luis_main_menu_entry_resolved (production incident:
+  // a confirmed-valid luis_unified_flow_id still fell back to the legacy
+  // menu) added a genuine, real comment+log block between the branch guard
+  // and luisMainMenuResult(args.leadState, - widened with real margin again
+  // instead of tightening it back down, same as the last time this drifted.
+  const branchBody = workerSource.slice(mainMenuBranch, mainMenuBranch + 1600);
   assertStringIncludes(branchBody, "luisUnifiedFlowEntryResult(");
   assertStringIncludes(branchBody, "args.orgSettings");
   assertStringIncludes(branchBody, "args.leadState");

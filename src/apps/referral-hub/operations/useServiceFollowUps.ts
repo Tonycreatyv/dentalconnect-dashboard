@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
+import { ACTIONABLE_ASSIGNMENT_WORK_STATUSES } from "./homeMetrics";
 
-export const FOLLOW_UP_SERVICE_IDS = ["luis_accidente", "luis_inmigracion"] as const;
+export const FOLLOW_UP_SERVICE_IDS = ["luis_accidente", "luis_dui", "luis_criminal", "luis_inmigracion"] as const;
 
 const SERVICE_LABELS: Record<string, string> = {
-  luis_accidente: "Accidente / DUI / Criminal",
+  luis_accidente: "Accidente de auto",
+  luis_dui: "DUI",
+  luis_criminal: "Defensa criminal",
   luis_inmigracion: "Inmigración",
 };
 
 export type FollowUpRequest = {
   id: string;
+  request_id: string;
   lead_id: string;
   service_id: string;
   service_label: string;
-  status: string;
+  work_status: string;
   postal_code: string | null;
+  assigned_at: string;
   created_at: string;
   lead_name: string;
   channel_user_id: string | null;
@@ -36,32 +41,37 @@ export function useServiceFollowUps() {
     setLoading(true);
     setError("");
     const result = await supabase
-      .from("referral_service_requests")
-      .select("id,lead_id,service_id,status,postal_code,created_at,leads(full_name,channel_user_id)")
+      .from("referral_assignments")
+      .select("id,request_id,work_status,assigned_at,referral_service_requests!inner(id,lead_id,service_id,postal_code,created_at,leads(full_name,channel_user_id))")
       .eq("organization_id", resolvedOrgId)
-      .in("service_id", FOLLOW_UP_SERVICE_IDS as unknown as string[])
-      .eq("status", "qualified")
-      .order("created_at", { ascending: false });
+      .in("work_status", ACTIONABLE_ASSIGNMENT_WORK_STATUSES as unknown as string[])
+      .in("referral_service_requests.service_id", FOLLOW_UP_SERVICE_IDS as unknown as string[])
+      .order("assigned_at", { ascending: false });
     if (result.error) {
       setError("No se pudieron cargar los casos por contactar.");
       setRequests([]);
       setLoading(false);
       return;
     }
-    type RequestRow = {
-      id: string; lead_id: string; service_id: string; status: string; postal_code: string | null;
-      created_at: string; leads: { full_name: string | null; channel_user_id: string | null } | null;
+    type AssignmentRow = {
+      id: string; request_id: string; work_status: string; assigned_at: string;
+      referral_service_requests: {
+        id: string; lead_id: string; service_id: string; postal_code: string | null; created_at: string;
+        leads: { full_name: string | null; channel_user_id: string | null } | null;
+      };
     };
-    setRequests(((result.data ?? []) as unknown as RequestRow[]).map((row) => ({
+    setRequests(((result.data ?? []) as unknown as AssignmentRow[]).map((row) => ({
       id: row.id,
-      lead_id: row.lead_id,
-      service_id: row.service_id,
-      service_label: SERVICE_LABELS[row.service_id] || row.service_id,
-      status: row.status,
-      postal_code: row.postal_code,
-      created_at: row.created_at,
-      lead_name: row.leads?.full_name || "Cliente",
-      channel_user_id: row.leads?.channel_user_id ?? null,
+      request_id: row.request_id,
+      lead_id: row.referral_service_requests.lead_id,
+      service_id: row.referral_service_requests.service_id,
+      service_label: SERVICE_LABELS[row.referral_service_requests.service_id] || row.referral_service_requests.service_id,
+      work_status: row.work_status,
+      postal_code: row.referral_service_requests.postal_code,
+      assigned_at: row.assigned_at,
+      created_at: row.referral_service_requests.created_at,
+      lead_name: row.referral_service_requests.leads?.full_name || "Cliente",
+      channel_user_id: row.referral_service_requests.leads?.channel_user_id ?? null,
     })));
     setLoading(false);
   }, [resolvedOrgId]);

@@ -52,9 +52,11 @@ Deno.test("optional postal_code is honestly null when the customer skipped it (t
   assertEquals(intake?.postalCode, null);
 });
 
-Deno.test("LEGAL_INTAKE_SERVICE_ID groups AUTO_ACCIDENT and DUI_CRIMINAL under the same combined service row, matching SERVICE_REQUEST_LABEL elsewhere", () => {
+Deno.test("LEGAL_INTAKE_SERVICE_ID maps new legal intake types to distinct canonical service IDs", () => {
   assertEquals(LEGAL_INTAKE_SERVICE_ID.IMMIGRATION, "luis_inmigracion");
   assertEquals(LEGAL_INTAKE_SERVICE_ID.AUTO_ACCIDENT, "luis_accidente");
+  assertEquals(LEGAL_INTAKE_SERVICE_ID.DUI, "luis_dui");
+  assertEquals(LEGAL_INTAKE_SERVICE_ID.CRIMINAL, "luis_criminal");
   assertEquals(LEGAL_INTAKE_SERVICE_ID.DUI_CRIMINAL, "luis_accidente");
 });
 
