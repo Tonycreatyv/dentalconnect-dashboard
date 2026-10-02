@@ -8,7 +8,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "check:conexxion": "node tools/check-conexxion-boundaries.mjs",
+    "verify:conexxion": "npm run check:conexxion && npm run typecheck && npm run build"
   },
   "dependencies": {
     "@fullcalendar/interaction": "^6.1.20",
