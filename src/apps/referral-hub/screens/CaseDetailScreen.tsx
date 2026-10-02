@@ -8,6 +8,7 @@ import EmptyState from "../ui/EmptyState";
 import StatusBadge, { type StatusTone } from "../ui/StatusBadge";
 import { SkeletonRows } from "../ui/Skeleton";
 import { legalOpportunityPresentation } from "../operations/legalOpportunities";
+import { assignAdminCase, updateAdminCase } from "../operations/adminCaseActions";
 
 type CaseRequest = {
   id: string;
@@ -43,6 +44,7 @@ type CaseAssignment = {
 };
 
 type CasePartner = { id: string; name: string };
+type PartnerOption = { id: string; name: string };
 type CaseEvent = { id: string; aggregate_id: string; event_type: string; occurred_at: string; metadata: Record<string, unknown> | null };
 type CaseState = { request: CaseRequest; lead: CaseLead | null; assignment: CaseAssignment | null; partner: CasePartner | null; events: CaseEvent[] };
 
@@ -84,6 +86,11 @@ export default function CaseDetailScreen() {
   const [state, setState] = useState<CaseState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [partners, setPartners] = useState<PartnerOption[]>([]);
+  const [selectedPartnerId, setSelectedPartnerId] = useState("");
+  const [nextFollowupLocal, setNextFollowupLocal] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   const load = useCallback(async () => {
     if (!resolvedOrgId || !requestId) {
@@ -109,7 +116,7 @@ export default function CaseDetailScreen() {
     }
 
     const request = requestRes.data as unknown as CaseRequest;
-    const [leadRes, assignmentsRes] = await Promise.all([
+    const [leadRes, assignmentsRes, partnersRes] = await Promise.all([
       supabase.from("leads")
         .select("id,full_name,first_name,last_name,phone,channel_user_id")
         .eq("id", request.lead_id).eq("organization_id", resolvedOrgId).maybeSingle(),
@@ -117,6 +124,11 @@ export default function CaseDetailScreen() {
         .select("id,partner_id,status,work_status,assigned_at,updated_at,follow_up_reason,next_followup_at,follow_up_attempt_count")
         .eq("request_id", request.id).eq("organization_id", resolvedOrgId)
         .order("attempt_number", { ascending: false }),
+      supabase.from("referral_partners")
+        .select("id,name")
+        .eq("organization_id", resolvedOrgId)
+        .eq("active", true)
+        .order("name"),
     ]);
 
     const assignments = (assignmentsRes.data ?? []) as unknown as CaseAssignment[];
@@ -137,6 +149,8 @@ export default function CaseDetailScreen() {
           .limit(100)
       : { data: [] as CaseEvent[] };
 
+    setPartners((partnersRes.data ?? []) as unknown as PartnerOption[]);
+    setSelectedPartnerId(assignment?.partner_id ?? "");
     setState({
       request,
       lead: (leadRes.data as unknown as CaseLead | null) ?? null,
@@ -150,6 +164,47 @@ export default function CaseDetailScreen() {
   useEffect(() => { void load(); }, [load]);
 
   const status = useMemo(() => state ? displayStatus(state.request, state.assignment) : "Nuevo", [state]);
+
+  const hasActiveAssignment = Boolean(state?.assignment && ["pending_assignment", "assigned", "accepted"].includes(state.assignment.status));
+  const partnerAccepted = state?.assignment?.status === "accepted";
+
+  async function runCaseAction(work: () => Promise<{ error: { message?: string } | null }>) {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setActionError("");
+    const result = await work();
+    setActionBusy(false);
+    if (result.error) {
+      setActionError(result.error.message || "No se pudo guardar el cambio.");
+      return;
+    }
+    await load();
+  }
+
+  async function saveResponsible() {
+    if (!state || !resolvedOrgId || !selectedPartnerId) return;
+    await runCaseAction(() => assignAdminCase({
+      organizationId: resolvedOrgId,
+      requestId: state.request.id,
+      partnerId: selectedPartnerId,
+      hasActiveAssignment,
+    }) as Promise<{ error: { message?: string } | null }>);
+  }
+
+  async function saveFollowUp() {
+    if (!state || !nextFollowupLocal) return;
+    const parsed = new Date(nextFollowupLocal);
+    if (Number.isNaN(parsed.getTime())) {
+      setActionError("Selecciona una fecha y hora válida.");
+      return;
+    }
+    await runCaseAction(() => updateAdminCase({
+      requestId: state.request.id,
+      action: "follow_up",
+      followUpReason: "other",
+      nextFollowupAt: parsed.toISOString(),
+    }) as Promise<{ error: { message?: string } | null }>);
+  }
 
   if (loading) return <div className="hub-page"><Link className="hub-back" to="/operacion"><ArrowLeft />Volver</Link><SkeletonRows count={4} /></div>;
   if (error || !state) return <div className="hub-page"><Link className="hub-back" to="/operacion"><ArrowLeft />Volver</Link><EmptyState tone="error" icon={AlertTriangle} title="Caso no encontrado" description={error || "No existe este caso."} /></div>;
@@ -179,6 +234,49 @@ export default function CaseDetailScreen() {
         <div><dt>Próximo paso</dt><dd>{state.assignment?.next_followup_at ? formatDateTime(state.assignment.next_followup_at) : status === "Cerrado" ? "Caso cerrado" : "Falta programar el próximo paso"}</dd></div>
         <div><dt>Intentos de seguimiento</dt><dd>{state.assignment?.follow_up_attempt_count ?? 0}</dd></div>
       </dl>
+
+      <section className="hub-section">
+        <h2>Gestión</h2>
+        {actionError ? <p className="partner-feedback is-error" role="alert">{actionError}</p> : null}
+        <div className="hub-field">
+          <label htmlFor="case-responsible"><strong>Responsable</strong></label>
+          <div className="hub-campaign-actions">
+            <select id="case-responsible" className="hub-input" value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)} disabled={actionBusy}>
+              <option value="">Seleccionar aliado</option>
+              {partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name}</option>)}
+            </select>
+            <button type="button" className="hub-primary" disabled={actionBusy || !selectedPartnerId || selectedPartnerId === state.assignment?.partner_id} onClick={() => void saveResponsible()}>
+              {hasActiveAssignment ? "Cambiar responsable" : "Asignar responsable"}
+            </button>
+          </div>
+        </div>
+
+        {partnerAccepted && status !== "Cerrado" ? (
+          <>
+            <div className="hub-campaign-actions">
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "contacted" }) as Promise<{ error: { message?: string } | null }>)}>Registrar contactado</button>
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "appointment_scheduled" }) as Promise<{ error: { message?: string } | null }>)}>Registrar cita</button>
+            </div>
+            <div className="hub-field">
+              <label htmlFor="case-followup"><strong>Próximo seguimiento</strong></label>
+              <div className="hub-campaign-actions">
+                <input id="case-followup" className="hub-input" type="datetime-local" value={nextFollowupLocal} onChange={(event) => setNextFollowupLocal(event.target.value)} />
+                <button type="button" className="hub-primary" disabled={actionBusy || !nextFollowupLocal} onClick={() => void saveFollowUp()}>Guardar próximo paso</button>
+              </div>
+            </div>
+            <div className="hub-campaign-actions">
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "converted" }) as Promise<{ error: { message?: string } | null }>)}>Cerrar · convertido</button>
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "closed_not_converted" }) as Promise<{ error: { message?: string } | null }>)}>Cerrar · no convertido</button>
+            </div>
+          </>
+        ) : status === "Cerrado" ? (
+          <p className="hub-field-hint">Este caso está cerrado. El historial permanece disponible.</p>
+        ) : hasActiveAssignment ? (
+          <p className="hub-field-hint">El aliado todavía no ha aceptado la asignación. Podés cambiar responsable, pero no registrar gestión en su nombre.</p>
+        ) : (
+          <p className="hub-field-hint">Asigná un responsable para iniciar la gestión.</p>
+        )}
+      </section>
 
       <section className="hub-section">
         <h2>Contexto del caso</h2>
