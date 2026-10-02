@@ -77,6 +77,9 @@ import {
   orchestrateCompletedServiceRequest,
 } from "./domain/referralHub/serviceRequestOrchestrator.ts";
 import { captureImmigrationFlowRequest } from "./domain/referralHub/immigrationFlowRequest.ts";
+import { captureLegalFlowRequest } from "./domain/referralHub/legalFlowRequest.ts";
+import { captureDuiCriminalFlowRequest } from "./domain/referralHub/duiCriminalFlowRequest.ts";
+import { captureFurnitureFlowRequest } from "./domain/referralHub/furnitureFlowRequest.ts";
 import {
   clearMetaTestDemoTakeoverState,
   metaTestDemoResetAction,
@@ -105,30 +108,32 @@ import {
   buildWhatsAppFlowCtaMessage,
   type InteractiveButton,
   sendViaMetaAdapter,
+  type WhatsAppCtaUrlSpec,
   type WhatsAppFlowCtaSpec,
   type WhatsAppInteractiveListSpec,
 } from "../_shared/metaMessageAdapter.ts";
 import { handleReferralHubProductTurn } from "../_products/referral-hub/index.ts";
+import { JAMES_FURNITURE } from "../_products/referral-hub/config.ts";
 import {
   LUIS_BENEFITS,
   LUIS_BENEFITS_FLOW_ACTION,
   LUIS_BENEFITS_MARKETING_COPY_VERSION,
   type LuisBenefitKey,
   type LuisLegalState,
+  classifyAccidentValidationFailure,
   classifyLuisFlowCompletion,
   diagnoseLuisBenefitFlowCompletionFailure,
   diagnoseLuisIntentRoute,
   isLuisLegalIntakeActive,
   isLuisMainMenuCommand,
-  luisBenefitsActivationText,
   LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN,
   LUIS_UNIFIED_FLOW_DIRECT_ENTRY_SCREENS,
   luisBenefitsFlowCta,
   luisUnifiedFlowCta,
   parseLuisBenefitFlowCompletion,
+  parseLuisFurnitureFlowCompletion,
   parseLuisLegalFlowCompletion,
   resolveCouponMediaUrl,
-  resolveCouponPartnerName,
   routeLuisTestFlowIntent,
   routeLuisConversation,
 } from "../_products/referral-hub/luisBenefits.ts";
@@ -141,7 +146,6 @@ import {
   recordLuisQrVisit,
   withLuisQrAttribution,
 } from "./domain/referralHub/luisQrCampaign.ts";
-import { renderCouponMessage } from "../_shared/couponMessageTemplate.ts";
 import {
   findSupermarketMatch,
   formatNearestSupermarketIntroText,
@@ -202,14 +206,22 @@ interface GenerateReplyResult {
   debugNote: string;
   bookingSuccessAuthorized?: boolean;
   flowCta?: WhatsAppFlowCtaSpec;
+  ctaUrl?: WhatsAppCtaUrlSpec;
   interactiveButtons?: InteractiveButton[];
   interactiveList?: WhatsAppInteractiveListSpec;
   outboundPrelude?: Array<{ text?: string; imageUrl?: string }>;
   outboundMessages?: Array<
     | { type: "text"; text: string }
-    | { type: "image"; url: string; altText?: string; reusable?: boolean }
+    | { type: "image"; url: string; text?: string; altText?: string; reusable?: boolean }
     | { type: "location"; latitude: number; longitude: number; name: string; address: string }
   >;
+  benefitDelivery?: {
+    selectedBenefitKey: "SUPERMARKET" | "MABLETON_PARRILLADA";
+    campaignKey: string;
+    locationId: string;
+    postalCode: string;
+    mediaUrl: string;
+  };
 }
 
 type BenefitClaimRpcRow = {
@@ -386,6 +398,66 @@ async function tryFindNearestSupermarket(args: {
   }
 }
 
+type EligibleBenefitLocation = {
+  id: string;
+  displayName: string;
+  officialMediaUrl: string;
+};
+
+// Restrict the candidate set to the selected benefit campaign before exact-ZIP
+// or nearest-in-radius matching. This prevents cross-benefit substitution.
+async function resolveEligibleBenefitLocation(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  campaignKey: string;
+  postalCode: string;
+  selectedBenefitKey: "SUPERMARKET" | "MABLETON_PARRILLADA";
+}): Promise<EligibleBenefitLocation | null> {
+  const campaignRow = await args.supabase.from("referral_coupon_campaigns").select("id")
+    .eq("organization_id", args.organizationId)
+    .eq("campaign_key", args.campaignKey)
+    .maybeSingle();
+  const campaignId = safeStr((campaignRow.data as { id?: unknown } | null)?.id, "");
+  if (campaignRow.error || !campaignId) {
+    logEvent("benefit_location_resolution", { selected_benefit_key: args.selectedBenefitKey, resolved_campaign: args.campaignKey, resolved_location: null, zip: args.postalCode, fallback_reason: "campaign_unavailable" });
+    return null;
+  }
+  const exact = await args.supabase.from("referral_benefit_campaign_locations")
+    .select("id, display_name, official_media_url")
+    .eq("organization_id", args.organizationId)
+    .eq("campaign_id", campaignId)
+    .eq("postal_code", args.postalCode)
+    .eq("active", true)
+    .maybeSingle();
+  const exactId = safeStr((exact.data as any)?.id, "");
+  const exactName = safeStr((exact.data as any)?.display_name, "");
+  const exactMedia = safeStr((exact.data as any)?.official_media_url, "");
+  if (!exact.error && exactId && exactName && /^https:\/\//.test(exactMedia)) {
+    return { id: exactId, displayName: exactName, officialMediaUrl: exactMedia };
+  }
+  const nearest = await tryFindNearestSupermarket({
+    supabase: args.supabase, organizationId: args.organizationId, leadId: args.leadId,
+    campaignKey: args.campaignKey, postalCode: args.postalCode,
+  });
+  if (!nearest) {
+    logEvent("benefit_location_resolution", { selected_benefit_key: args.selectedBenefitKey, resolved_campaign: args.campaignKey, resolved_location: null, zip: args.postalCode, fallback_reason: "no_eligible_location_within_radius" });
+    return null;
+  }
+  const location = await args.supabase.from("referral_benefit_campaign_locations")
+    .select("id, display_name, official_media_url")
+    .eq("organization_id", args.organizationId).eq("campaign_id", campaignId)
+    .eq("id", nearest.locationId).eq("active", true).maybeSingle();
+  const id = safeStr((location.data as any)?.id, "");
+  const displayName = safeStr((location.data as any)?.display_name, "");
+  const officialMediaUrl = safeStr((location.data as any)?.official_media_url, "");
+  if (location.error || !id || !displayName || !/^https:\/\//.test(officialMediaUrl)) {
+    logEvent("benefit_location_resolution", { selected_benefit_key: args.selectedBenefitKey, resolved_campaign: args.campaignKey, resolved_location: null, zip: args.postalCode, fallback_reason: "eligible_location_media_unavailable" });
+    return null;
+  }
+  return { id, displayName, officialMediaUrl };
+}
+
 async function buildLuisBenefitsFlowCompletionResult(args: {
   supabase: SupabaseClientType;
   organizationId: string;
@@ -419,6 +491,13 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
     };
   }
   const benefit = LUIS_BENEFITS[completion.benefit_key];
+  const locationBoundBenefit = completion.benefit_key === "SUPERMARKET" || completion.benefit_key === "MABLETON_PARRILLADA";
+  const selectedLocation = locationBoundBenefit
+    ? await resolveEligibleBenefitLocation({ supabase: args.supabase, organizationId: args.organizationId, leadId: args.leadId, campaignKey: benefit.campaignKey, postalCode: completion.postal_code, selectedBenefitKey: completion.benefit_key as "SUPERMARKET" | "MABLETON_PARRILLADA" })
+    : null;
+  if (locationBoundBenefit && !selectedLocation) {
+    return { reply: "Estamos verificando cuál de nuestras ubicaciones te corresponde.\n\nTe ayudaremos por este mismo WhatsApp.", statePatch: { lastIntent: "luis_benefit_claim" }, debugNote: `referral_hub:benefit_claim_no_coverage:${completion.benefit_key}:${completion.postal_code}` };
+  }
   const leadUpdate = await args.supabase.from("leads").update({
     full_name: completion.full_name,
     first_name: firstNameFromFlowName(completion.full_name),
@@ -427,7 +506,11 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
   }).eq("id", args.leadId).eq("organization_id", args.organizationId);
   if (leadUpdate.error) throw new Error("benefit_claim_lead_update_failed");
 
-  const claimResult = await args.supabase.rpc("request_referral_benefit_claim", {
+  const claimResult = await args.supabase.rpc(
+    locationBoundBenefit
+      ? "request_location_bound_referral_benefit_claim"
+      : "request_referral_benefit_claim",
+    {
     p_organization_id: args.organizationId,
     p_campaign_key: benefit.campaignKey,
     p_lead_id: args.leadId,
@@ -438,6 +521,7 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
     p_marketing_copy_version: completion.marketing_consent
       ? LUIS_BENEFITS_MARKETING_COPY_VERSION
       : null,
+    ...(locationBoundBenefit ? { p_location_id: selectedLocation!.id } : {}),
   });
   if (claimResult.error) throw new Error("benefit_claim_request_failed");
   const row = (Array.isArray(claimResult.data)
@@ -458,7 +542,7 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
       debugNote: `referral_hub:benefit_claim_redeemed:${claimId}`,
     };
   }
-  if (row?.requires_location_verification === true) {
+  if (!locationBoundBenefit && row?.requires_location_verification === true) {
     const verifyingFallback: GenerateReplyResult = {
       reply: "Estamos verificando cuál de nuestras ubicaciones te corresponde.\n\nTe ayudaremos por este mismo WhatsApp.",
       statePatch: { lastIntent: "luis_benefit_claim" },
@@ -559,7 +643,7 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
       };
     }
   }
-  const mediaUrl = resolveCouponMediaUrl({
+  const mediaUrl = selectedLocation?.officialMediaUrl || resolveCouponMediaUrl({
     isSupermarket,
     rpcOfficialMediaUrl: safeStr(row?.official_media_url, ""),
     dbImageUrl: dbCoupon?.image_url ?? "",
@@ -572,56 +656,18 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
       debugNote: `referral_hub:benefit_claim_media_pending:${claimId}`,
     };
   }
-  const partnerName = resolveCouponPartnerName({
-    rpcSupermarketLocationName: safeStr(row?.supermarket_location_name, ""),
-    dbBusinessName: dbCoupon?.businessName ?? "",
-    hardcodedFallback: benefit.partnerName ?? null,
-  });
-  const activationText = dbCoupon?.customer_copy
-    ? [
-      renderCouponMessage(dbCoupon.customer_copy, {
-        customer_first_name: firstNameFromFlowName(completion.full_name),
-        business_name: partnerName ?? "",
-        benefit_name: benefit.displayName,
-        claim_code: claimCode,
-        address: dbCoupon.businessAddress,
-      }),
-      ...(dbCoupon.terms_text ? [dbCoupon.terms_text] : []),
-    ].join("\n\n")
-    : luisBenefitsActivationText({
-      firstName: firstNameFromFlowName(completion.full_name),
-      benefitDisplayName: benefit.displayName,
-      claimCode,
-      partnerName,
-    });
   return {
-    // Problem 2 (2026-08-25): the required activation message (image +
-    // "¡Listo, {name}! ... Código de activación: ..." above, sent via
-    // outboundMessages) already delivers the coupon - this second message
-    // is the interactive-button container the buttons must ride on
-    // (WhatsApp requires a dedicated message for that), not a duplicate
-    // dispatch. It repeated "Listo, {name} 🎉 Tu beneficio ya está
-    // disponible" right under the real activation message and read as an
-    // accidental duplicate, so its copy is now just the CTA question -
-    // buttons/ids unchanged.
-    reply: "¿Te gustaría ver otro beneficio o consultar alguno de nuestros servicios?",
+    reply: "¿Querés ver otro beneficio o servicio?",
     statePatch: { lastIntent: "luis_benefit_claim" },
     interactiveButtons: [
       { id: "luis_benefits:another", title: "Ver beneficios" },
       { id: "luis_benefits:services", title: "Ver servicios" },
       { id: "luis_benefits:finalize", title: "Finalizar" },
     ],
-    // Order (2026-08-27): image only here - the claim is issued
-    // immediately after this image is accepted (see the shared send-
-    // processing gate on this exact debugNote prefix), strictly before the
-    // activation text is sent, so the text is never shown claiming the
-    // benefit is active while the database still says otherwise.
-    // activationText moves to outboundPrelude, which the same gate sends
-    // right after issuance and strictly before this reply+menu below.
     outboundMessages: [
-      { type: "image", url: mediaUrl, altText: `Beneficio ${benefit.displayName}` },
+      { type: "image", url: mediaUrl, text: "🎟️ Guarda este mensaje y presenta tu beneficio.", altText: `Beneficio ${benefit.displayName}` },
     ],
-    outboundPrelude: [{ text: activationText }],
+    ...(locationBoundBenefit && selectedLocation ? { benefitDelivery: { selectedBenefitKey: completion.benefit_key as "SUPERMARKET" | "MABLETON_PARRILLADA", campaignKey: benefit.campaignKey, locationId: selectedLocation.id, postalCode: completion.postal_code, mediaUrl } } : {}),
     debugNote: `referral_hub:benefit_claim_delivery:${claimId}`,
   };
 }
@@ -888,7 +934,25 @@ async function buildLuisLegalFlowCompletionResult(args: {
     return null;
   }
   const completion = parseLuisLegalFlowCompletion(args.rawFlowResponse);
-  if (!completion) return null;
+  if (!completion) {
+    // Sanitized diagnostic (2026-09 P0) - real AUTO_ACCIDENT completions
+    // were unconditionally rejected in production (missing
+    // participant_role, a field the published Flow never sends), same
+    // pattern as diagnoseLuisBenefitFlowCompletionFailure above. Only
+    // meaningful for AUTO_ACCIDENT-shaped payloads today; returns null for
+    // anything else, which logEvent below simply omits. Never logs the
+    // raw name/description/date/consent values, only structural presence
+    // and format category.
+    const accidentFailureCode = classifyAccidentValidationFailure(args.rawFlowResponse);
+    if (accidentFailureCode) {
+      logEvent("luis_legal_flow_completion_rejected", {
+        leadId: args.leadId,
+        intake_type: "AUTO_ACCIDENT",
+        failure_code: accidentFailureCode,
+      });
+    }
+    return null;
+  }
   const leadUpdate = await args.supabase.from("leads").update({
     full_name: completion.full_name,
     first_name: firstNameFromFlowName(completion.full_name),
@@ -917,6 +981,36 @@ async function buildLuisLegalFlowCompletionResult(args: {
         consent_source: completion.consent_source,
       },
     });
+  } else if (completion.intake_type === "AUTO_ACCIDENT") {
+    // P0 (2026-09): restores the missing referral_service_requests /
+    // referral_assignments wiring for AUTO_ACCIDENT — mirrors the
+    // IMMIGRATION branch above. DUI_CRIMINAL is untouched (no
+    // sharing_consent on that completion type, no canonical request today).
+    await captureLegalFlowRequest({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      channelUserId: args.channelUserId,
+      deliveryKey: args.deliveryKey,
+      completedAt: legalIntake.completed_at,
+      sharingConsent: completion.sharing_consent,
+      consentVersion: completion.consent_version,
+      consentSource: completion.consent_source,
+      fields: completion,
+    });
+  } else if (completion.intake_type === "DUI_CRIMINAL") {
+    await captureDuiCriminalFlowRequest({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      channelUserId: args.channelUserId,
+      deliveryKey: args.deliveryKey,
+      completedAt: legalIntake.completed_at,
+      sharingConsent: completion.sharing_consent,
+      consentVersion: completion.consent_version,
+      consentSource: completion.consent_source,
+      fields: completion,
+    });
   }
   // Preserve the existing staff-side follow-up event, but do not use
   // luisHumanHandoffResult: a completion is not a request for live human
@@ -928,18 +1022,63 @@ async function buildLuisLegalFlowCompletionResult(args: {
     channel: args.channel,
     messagePreview: `Solicitud legal Flow: ${completion.intake_type}`,
   });
+  // Generalized from an IMMIGRATION-only gate so AUTO_ACCIDENT completions
+  // (which now also carry sharing_consent) reach the same approved
+  // messages. Every currently published legal Flow provides sharing consent.
+  const sharingConsent = "sharing_consent" in completion ? completion.sharing_consent : undefined;
   return {
-    reply: completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "DECLINED"
+    reply: sharingConsent === "DECLINED"
       ? "Gracias. Guardamos tu solicitud, pero no compartiremos tu información con un aliado. Si deseas continuar más adelante, puedes volver a escribirnos."
-      : completion.intake_type === "IMMIGRATION" && completion.sharing_consent === "AUTHORIZED"
-      ? "Gracias. Recibimos tu información. En breve uno de nuestros aliados de inmigración se pondrá en contacto contigo."
+      : sharingConsent === "AUTHORIZED"
+      ? "¡Gracias! ✅\n\nRecibimos tu información.\n\nEn breve, alguien de nuestro equipo se comunicará contigo."
       : "Gracias. Recibimos tu solicitud y un integrante del equipo te dará seguimiento por este mismo WhatsApp.",
     statePatch: luisLegalPatch(args.leadState, legalIntake),
     debugNote: `referral_hub:luis_legal_flow_${completion.intake_type.toLowerCase()}_completed`,
   };
 }
 
-function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "LEGAL" | "UNKNOWN"): GenerateReplyResult {
+async function buildLuisFurnitureFlowCompletionResult(args: {
+  supabase: SupabaseClientType;
+  organizationId: string;
+  leadId: string;
+  rawFlowResponse: unknown;
+  channelUserId: string;
+  deliveryKey: string;
+}): Promise<GenerateReplyResult | null> {
+  if (args.organizationId !== "luis-gabriel-referral-hub" || !args.leadId) return null;
+  const completion = parseLuisFurnitureFlowCompletion(args.rawFlowResponse);
+  if (!completion) return null;
+  const leadUpdate = await args.supabase.from("leads").update({
+    full_name: completion.full_name,
+    first_name: firstNameFromFlowName(completion.full_name),
+    updated_at: nowIso(),
+  }).eq("id", args.leadId).eq("organization_id", args.organizationId);
+  if (leadUpdate.error) throw new Error("furniture_flow_lead_update_failed");
+  const completedAt = nowIso();
+  await captureFurnitureFlowRequest({
+    supabase: args.supabase,
+    organizationId: args.organizationId,
+    leadId: args.leadId,
+    channelUserId: args.channelUserId,
+    deliveryKey: args.deliveryKey,
+    completedAt,
+    fullName: completion.full_name,
+    postalCode: completion.postal_code,
+  });
+  return {
+    reply: "¡Listo! Recibimos tu información. Mira la promoción de James Furniture.",
+    statePatch: {
+      lastIntent: "luis_furniture_request",
+      luis_furniture: { postal_code: completion.postal_code, completed_at: completedAt },
+    },
+    outboundMessages: [
+      { type: "image", url: JAMES_FURNITURE.promoImageUrl, altText: "Promoción de James Furniture" },
+    ],
+    debugNote: "referral_hub:luis_furniture_flow_completed",
+  };
+}
+
+function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "FURNITURE" | "LEGAL" | "UNKNOWN"): GenerateReplyResult {
   if (kind === "LEGAL") {
     return {
       reply: "No pudimos validar tu solicitud. Por favor abre el formulario nuevamente e inténtalo otra vez.",
@@ -954,10 +1093,29 @@ function invalidLuisFlowCompletionResult(kind: "BENEFITS" | "LEGAL" | "UNKNOWN")
       debugNote: "referral_hub:benefit_claim_invalid_flow",
     };
   }
+  if (kind === "FURNITURE") {
+    return {
+      reply: "No pudimos validar tu solicitud de muebles. Por favor abre el formulario nuevamente e inténtalo otra vez.",
+      statePatch: {},
+      debugNote: "referral_hub:furniture_request_invalid_flow",
+    };
+  }
   return {
     reply: "No pudimos procesar el formulario. Por favor abre el formulario nuevamente e inténtalo otra vez.",
     statePatch: {},
     debugNote: "referral_hub:unknown_flow_completion_contract",
+  };
+}
+
+// Mercadito owns shopping and checkout. This result creates no order, claim,
+// service request, referral assignment, or partner routing record. The normal
+// message/outbox bookkeeping of the existing WhatsApp transport remains intact.
+function luisMercaditoFlowCompletionResult(): GenerateReplyResult {
+  return {
+    reply: "Compras listas para vos 👇",
+    statePatch: { stage: "DISCOVERY", lastIntent: "luis_mercadito", nextExpected: null },
+    ctaUrl: { displayText: "Ver Mercadito", url: "https://compras.creatyv.io" },
+    debugNote: "referral_hub:luis_mercadito_flow_external_cta",
   };
 }
 
@@ -1117,6 +1275,24 @@ export async function buildLuisConversationResult(args: {
       debugNote: "referral_hub:luis_benefits_clarify",
     };
   }
+  // Hotfix: "Ver beneficios" after a coupon delivery must reopen the same
+  // way "Ver servicios" does (post_benefit_services below) — via
+  // luisUnifiedFlowEntryResult with no custom screen argument, so it opens
+  // SERVICE_SELECT (the only screen WhatsApp accepts as a Flow-trigger's
+  // first screen). Previously "luis benefits another" fell through to the
+  // generic {kind:"benefits"} route, which for a customer with no specific
+  // requestedBenefitKey targets LUIS_UNIFIED_FLOW_BENEFITS_ENTRY_SCREEN
+  // ("BENEFITS_ENTRY") — a screen name that only exists in code as a draft
+  // proposal and was never added to the published Flow, so WhatsApp
+  // rejected the trigger and the button appeared to do nothing. Only the
+  // contextual greeting differs from post_benefit_services, so the
+  // customer knows to tap "Beneficios y cupones" once more inside the menu.
+  if (route.kind === "post_benefit_reopen_benefits") {
+    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
+    const contextualGreeting = `Perfecto${firstName ? `, ${firstName}` : ""}. Elegí "Beneficios y cupones" para ver tus opciones.`;
+    return luisUnifiedFlowEntryResult(args.orgSettings, args.leadState, contextualGreeting) ??
+      luisMainMenuResult(args.leadState, contextualGreeting);
+  }
   if (route.kind === "post_benefit_menu") {
     const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
     const contextualGreeting = `Perfecto${firstName ? `, ${firstName}` : ""}. ¿En qué más te podemos ayudar?`;
@@ -1218,40 +1394,22 @@ export async function buildLuisConversationResult(args: {
       };
     }
 
-    const firstName = firstNameFromFlowName(safeStr((args.leadState as any)?.full_name, ""));
-    const activationText = luisBenefitsActivationText({
-      firstName,
-      benefitDisplayName: LUIS_BENEFITS.SUPERMARKET.displayName,
-      claimCode,
-      partnerName: storeName || null,
-    });
     return {
-      // Same CTA-copy correction as the regular delivery path above -
-      // this is the interactive-button container, not a duplicate of the
-      // activation message sent via outboundMessages below.
-      reply: "¿Te gustaría ver otro beneficio o consultar alguno de nuestros servicios?",
+      reply: "¿Querés ver otro beneficio o servicio?",
       statePatch: { lastIntent: "luis_benefit_claim", collected: clearedCollected },
       interactiveButtons: [
         { id: "luis_benefits:another", title: "Ver beneficios" },
         { id: "luis_benefits:services", title: "Ver servicios" },
         { id: "luis_benefits:finalize", title: "Finalizar" },
       ],
-      // Order (2026-08-27): image only here - the claim is issued
-      // immediately after this image is accepted (see the shared send-
-      // processing gate on this exact debugNote prefix), strictly before
-      // the activation text is sent. activationText moves to
-      // outboundPrelude, sent right after issuance and strictly before
-      // this reply+menu below.
       outboundMessages: [
-        { type: "image", url: mediaUrl, altText: `Beneficio ${LUIS_BENEFITS.SUPERMARKET.displayName}` },
+        { type: "image", url: mediaUrl, text: "🎟️ Guarda este mensaje y presenta tu beneficio.", altText: `Beneficio ${LUIS_BENEFITS.SUPERMARKET.displayName}` },
       ],
-      outboundPrelude: [{ text: activationText }],
       // Reuses the exact same debugNote convention the regular (exact-ZIP)
       // claim-finalization path already uses (see line ~596 above) — the
       // shared send-processing code issues the claim right after this
-      // image is accepted, before activationText/the main reply are ever
-      // sent. If the image send throws, execution never reaches that
-      // point and the claim correctly stays REQUESTED/retryable.
+      // image is accepted, before the menu is sent. If the image send
+      // throws, the claim correctly stays REQUESTED/retryable.
       debugNote: `referral_hub:benefit_claim_delivery:${pendingClaimId}`,
     };
   }
@@ -19311,6 +19469,15 @@ async function processSingleJob(
         rawFlowResponse,
         orgSettings: (clinicSettings ?? {}) as Record<string, unknown>,
       });
+    } else if (completionKind === "FURNITURE") {
+      earlyGeneratedOverride = await buildLuisFurnitureFlowCompletionResult({
+        supabase,
+        organizationId: effectiveOrganizationId,
+        leadId,
+        rawFlowResponse,
+        channelUserId: effectiveRecipientId,
+        deliveryKey: inboundMessageId || jobId,
+      }) ?? invalidLuisFlowCompletionResult("FURNITURE");
     } else if (completionKind === "LEGAL") {
       earlyGeneratedOverride = await buildLuisLegalFlowCompletionResult({
         supabase,
@@ -19346,6 +19513,10 @@ async function processSingleJob(
           },
           debugNote: "referral_hub:luis_unified_flow_handoff_requested",
         })
+        : invalidLuisFlowCompletionResult("UNKNOWN");
+    } else if (completionKind === "MERCADITO") {
+      earlyGeneratedOverride = effectiveOrganizationId === "luis-gabriel-referral-hub"
+        ? luisMercaditoFlowCompletionResult()
         : invalidLuisFlowCompletionResult("UNKNOWN");
     } else {
       earlyGeneratedOverride = invalidLuisFlowCompletionResult("UNKNOWN");
@@ -19592,7 +19763,7 @@ async function processSingleJob(
 
   // 3) send ordered channel-specific messages before the main interactive response
   for (const [index, message] of (generated.outboundMessages ?? []).entries()) {
-    const messageText = message.type === "text"
+    const messageText = message.type === "text" || message.type === "image"
       ? safeStr(message.text, "").trim()
       : "";
     const messageImageUrl = message.type === "image"
@@ -19609,6 +19780,17 @@ async function processSingleJob(
     const failureStage = index === 0
       ? "coupon_image_failed"
       : "coupon_activation_failed";
+    const benefitDelivery = message.type === "image" ? generated.benefitDelivery : undefined;
+    if (benefitDelivery) {
+      logEvent("benefit_media_delivery", {
+        stage: "send_attempt",
+        selected_benefit_key: benefitDelivery.selectedBenefitKey,
+        resolved_campaign: benefitDelivery.campaignKey,
+        resolved_location: benefitDelivery.locationId,
+        zip: benefitDelivery.postalCode,
+        media_url: benefitDelivery.mediaUrl,
+      });
+    }
     const preludeMessageId = await insertOutboundMessage({
       supabase,
       organizationId: effectiveOrganizationId,
@@ -19634,17 +19816,43 @@ async function processSingleJob(
       whatsappAccessToken,
       whatsappPhoneNumberId,
     });
-    if (!preludeResp?.ok) {
+    const providerMessageId = safeStr(
+      preludeResp?.data?.message_id ?? preludeResp?.data?.messages?.[0]?.id,
+      "",
+    ) || null;
+    if (!preludeResp?.ok || !providerMessageId) {
+      if (benefitDelivery) {
+        logEvent("benefit_media_delivery", {
+          stage: "send_failed",
+          selected_benefit_key: benefitDelivery.selectedBenefitKey,
+          resolved_campaign: benefitDelivery.campaignKey,
+          resolved_location: benefitDelivery.locationId,
+          zip: benefitDelivery.postalCode,
+          media_url: benefitDelivery.mediaUrl,
+          media_send_success: false,
+          meta_status: preludeResp?.status ?? null,
+          meta_message_id: providerMessageId,
+        });
+      }
       await deleteMessageIfExists(supabase, preludeMessageId);
-      throw new Error(`${failureStage}:${preludeResp?.status}`);
+      throw new Error(`${failureStage}:${preludeResp?.status ?? "missing_meta_message_id"}`);
+    }
+    if (benefitDelivery) {
+      logEvent("benefit_media_delivery", {
+        stage: "accepted",
+        selected_benefit_key: benefitDelivery.selectedBenefitKey,
+        resolved_campaign: benefitDelivery.campaignKey,
+        resolved_location: benefitDelivery.locationId,
+        zip: benefitDelivery.postalCode,
+        media_url: benefitDelivery.mediaUrl,
+        media_send_success: true,
+        meta_message_id: providerMessageId,
+      });
     }
     await updateOutboundMessageProviderId({
       supabase,
       outboundMessageId: preludeMessageId,
-      outboundProviderMessageId: safeStr(
-        preludeResp?.data?.message_id ?? preludeResp?.data?.messages?.[0]?.id,
-        "",
-      ) || null,
+      outboundProviderMessageId: providerMessageId,
     });
   }
 
@@ -19776,6 +19984,7 @@ async function processSingleJob(
     buttons: interactiveButtons.length > 0 ? interactiveButtons : undefined,
     interactiveList: channel === "whatsapp" ? generatedList : undefined,
     flowCta: flowCtaPayload,
+    ctaUrl: channel === "whatsapp" ? generated.ctaUrl : undefined,
     pageAccessToken,
     whatsappAccessToken,
     whatsappPhoneNumberId,
