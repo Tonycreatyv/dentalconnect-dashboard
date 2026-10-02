@@ -1,4 +1,4 @@
-import { buildIntakeSummary, referralServiceLabel, resolveReferralService, resolveSummaryTopicKey, resolveTopicDisplay, referralTopicLabel, type ReferralService } from "../../referral-partner/referralPresentation";
+import { buildIntakeSummary, referralServiceLabel, resolveReferralService, resolveSummaryTopicKey, resolveTopicDisplay, type ReferralService } from "../../referral-partner/referralPresentation";
 
 export type OpportunityServiceFilter = "all" | ReferralService;
 
