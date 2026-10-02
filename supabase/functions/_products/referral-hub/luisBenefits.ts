@@ -2,7 +2,7 @@ export const LUIS_BENEFITS_FLOW_ACTION = "luis_benefits:complete";
 export const LUIS_BENEFITS_FLOW_SCREEN = "BENEFIT_SELECT";
 export const LUIS_BENEFITS_MARKETING_COPY_VERSION = "luis_benefits_flow_v1";
 
-export type LuisBenefitKey = "SUPERMARKET" | "MEDICAL" | "DENTAL" | "SHIPPING" | "MABLETON_PARRILLADA";
+export type LuisBenefitKey = "SUPERMARKET" | "MEDICAL" | "DENTAL" | "SHIPPING" | "MABLETON_PARRILLADA" | "TAXES";
 
 export type LuisBenefitFlowCompletion = {
   benefit_key: LuisBenefitKey;
@@ -239,6 +239,13 @@ export const LUIS_BENEFITS: Record<LuisBenefitKey, LuisBenefitDefinition> = {
     key: "MABLETON_PARRILLADA",
     campaignKey: "luis_benefit_mableton_parrillada",
     displayName: "La Super Parrillada",
+  },
+  TAXES: {
+    key: "TAXES",
+    campaignKey: "luis_benefit_taxes",
+    displayName: "Beneficio de impuestos Rumba",
+    partnerName: "Rumba Business Services",
+    mediaUrl: "https://referral.creatyv.io/images/coupons/luis/rumba-impuestos-cupon.jpeg",
   },
   MEDICAL: {
     key: "MEDICAL",

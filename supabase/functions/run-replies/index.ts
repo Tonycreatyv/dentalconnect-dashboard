@@ -455,18 +455,11 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
       debugNote: "referral_hub:benefit_claim_invalid_flow",
     };
   }
-  // SUPERMARKET is the only benefit_key the Flow ever submits for a
-  // supermarket-family request — Mableton's own fixed-price offer is
-  // resolved internally here, by postal_code, never exposed as a separate
-  // menu option. Every other benefit_key (MEDICAL/DENTAL/SHIPPING) and
-  // every legal flow is completely untouched by this check.
-  const benefit = completion.benefit_key === "SUPERMARKET"
-    ? resolveSupermarketBenefit(await hasMabletonLocationMatch({
-      supabase: args.supabase,
-      organizationId: args.organizationId,
-      postalCode: completion.postal_code,
-    }))
-    : LUIS_BENEFITS[completion.benefit_key];
+  // The published Meta Flow exposes SUPERMARKET and MABLETON_PARRILLADA
+  // as separate customer choices. Preserve that explicit choice here:
+  // postal code selects a location for the chosen campaign, never a
+  // different benefit/campaign.
+  const benefit = LUIS_BENEFITS[completion.benefit_key];
   const leadUpdate = await args.supabase.from("leads").update({
     full_name: completion.full_name,
     first_name: firstNameFromFlowName(completion.full_name),
