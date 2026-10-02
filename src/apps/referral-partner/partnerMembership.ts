@@ -12,13 +12,13 @@
 export type ActivePartnerContext =
   | { kind: "none" }
   | { kind: "multiple" }
-  | { kind: "single"; partnerId: string; role: string };
+  | { kind: "single"; organizationId: string; partnerId: string; role: string };
 
 export function resolveActivePartnerContext(
-  memberships: readonly { partner_id: string; role: string }[],
+  memberships: readonly { organization_id: string; partner_id: string; role: string }[],
 ): ActivePartnerContext {
   if (memberships.length === 0) return { kind: "none" };
   if (memberships.length > 1) return { kind: "multiple" };
   const [membership] = memberships;
-  return { kind: "single", partnerId: membership.partner_id, role: membership.role };
+  return { kind: "single", organizationId: membership.organization_id, partnerId: membership.partner_id, role: membership.role };
 }
