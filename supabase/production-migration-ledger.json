@@ -63,7 +63,8 @@
   "release_pending": [
     "20261002001000",
     "20261002002000",
-    "20261002003000"
+    "20261002003000",
+    "20261002004000"
   ],
   "deploy_rule": "Do not run blanket supabase db push against production until the migration ledger is reconciled or explicitly repaired after schema verification."
 }
