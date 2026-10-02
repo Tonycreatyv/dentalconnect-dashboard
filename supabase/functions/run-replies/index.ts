@@ -1018,6 +1018,31 @@ async function buildLuisLegalFlowCompletionResult(args: {
       consentSource: completion.consent_source,
       fields: completion,
     });
+  } else if (completion.intake_type === "DUI_CRIMINAL") {
+    const raw = args.rawFlowResponse && typeof args.rawFlowResponse === "object"
+      ? args.rawFlowResponse as Record<string, unknown>
+      : {};
+    const sharingConsent = safeStr(raw.sharing_consent, "");
+    const consentVersion = safeStr(raw.consent_version, "");
+    const consentSource = safeStr(raw.consent_source, "");
+    if (
+      (sharingConsent === "AUTHORIZED" || sharingConsent === "DECLINED") &&
+      consentVersion === "luis_dui_criminal_sharing_v1" &&
+      consentSource === "whatsapp_flow"
+    ) {
+      await captureDuiCriminalFlowRequest({
+        supabase: args.supabase,
+        organizationId: args.organizationId,
+        leadId: args.leadId,
+        channelUserId: args.channelUserId,
+        deliveryKey: args.deliveryKey,
+        completedAt: legalIntake.completed_at,
+        sharingConsent,
+        consentVersion,
+        consentSource,
+        fields: { ...completion, ...raw },
+      });
+    }
   }
   // Preserve the existing staff-side follow-up event, but do not use
   // luisHumanHandoffResult: a completion is not a request for live human
