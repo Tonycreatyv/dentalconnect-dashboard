@@ -150,9 +150,6 @@ import {
 import { renderCouponMessage } from "../_shared/couponMessageTemplate.ts";
 import {
   findSupermarketMatch,
-  formatNearestSupermarketIntroText,
-  formatNearestSupermarketLocation,
-  NEAREST_SUPERMARKET_CONFIRM_QUESTION,
 } from "./domain/referralHub/nearestSupermarket.ts";
 import { createGoogleMapsClient } from "../referral-voice-tools/googleMaps.ts";
 
@@ -340,6 +337,9 @@ async function tryFindNearestSupermarket(args: {
       organizationId: args.organizationId,
       campaignId,
       postalCode: args.postalCode,
+      // Benefits are not geographically eligibility-gated. ZIP is only
+      // used to select the nearest participating location.
+      maxDistanceMiles: Number.MAX_SAFE_INTEGER,
     });
     if (match.status !== "matched") {
       // Sanitized diagnostic only - never the API key, never a customer
@@ -500,64 +500,76 @@ async function buildLuisBenefitsFlowCompletionResult(args: {
     };
   }
   if (row?.requires_location_verification === true) {
-    const verifyingFallback: GenerateReplyResult = {
-      reply: "Estamos verificando cuál de nuestras ubicaciones te corresponde.\n\nTe ayudaremos por este mismo WhatsApp.",
-      statePatch: { lastIntent: "luis_benefit_claim" },
-      debugNote: `referral_hub:benefit_claim_location_verification:${claimId}`,
-    };
-    // Nearest-supermarket proposal: only for SUPERMARKET (the RPC only ever
-    // sets requires_location_verification for that benefit), only when the
-    // already-configured Google Maps key is present, and only ever a
-    // proposal requiring explicit confirmation - never an issuance. Any
-    // failure (missing key, missing campaign row, geocoding/Routes error,
-    // no active location within range) falls back to the exact original
-    // "estamos verificando" behavior, never a guess.
-    const nearestMatch = completion.benefit_key === "SUPERMARKET"
-      ? await tryFindNearestSupermarket({
-        supabase: args.supabase,
-        organizationId: args.organizationId,
-        leadId: args.leadId,
-        campaignKey: benefit.campaignKey,
-        postalCode: completion.postal_code,
-      })
-      : null;
-    if (!nearestMatch) return verifyingFallback;
-    // Native WhatsApp location message (2026-08-27) replaces the raw pasted
-    // Google Maps URL - only ever built from real coordinates a successful
-    // Google geocode already produced (see findSupermarketMatch). If
-    // coordinates are somehow unavailable, this is not a location the
-    // customer can honestly be shown a map for - fall back to the existing
-    // truthful "estamos verificando" text rather than invent one or send a
-    // broken location message. No coupon is issued on this path regardless.
-    const nearestLocation = formatNearestSupermarketLocation(nearestMatch);
-    if (!nearestLocation) return verifyingFallback;
+    // A non-exact ZIP never makes a benefit ineligible. For location-aware
+    // campaigns, use the ZIP only to choose the nearest participating
+    // location, associate that location to the already-created claim, and
+    // deliver its official flyer immediately. No extra confirmation click.
+    const nearestMatch = await tryFindNearestSupermarket({
+      supabase: args.supabase,
+      organizationId: args.organizationId,
+      leadId: args.leadId,
+      campaignKey: benefit.campaignKey,
+      postalCode: completion.postal_code,
+    });
+    if (!nearestMatch) {
+      return {
+        reply: "Estamos verificando cuál de nuestras ubicaciones te corresponde.\n\nTe ayudaremos por este mismo WhatsApp.",
+        statePatch: { lastIntent: "luis_benefit_claim" },
+        debugNote: `referral_hub:benefit_claim_location_verification:${claimId}`,
+      };
+    }
+
+    const locationRow = await args.supabase
+      .from("referral_benefit_campaign_locations")
+      .select("display_name, official_media_url")
+      .eq("organization_id", args.organizationId)
+      .eq("id", nearestMatch.locationId)
+      .eq("active", true)
+      .maybeSingle();
+    const nearestMediaUrl = safeStr((locationRow.data as any)?.official_media_url, "");
+    const nearestStoreName = safeStr((locationRow.data as any)?.display_name, "") || nearestMatch.storeName;
+    if (locationRow.error || !/^https:\/\//.test(nearestMediaUrl)) {
+      return {
+        reply: "Estamos preparando tu beneficio. Te ayudaremos por este mismo WhatsApp.",
+        statePatch: { lastIntent: "luis_benefit_claim" },
+        debugNote: `referral_hub:benefit_claim_media_pending:${claimId}`,
+      };
+    }
+
+    const confirmResult = await args.supabase.rpc("confirm_referral_benefit_claim_location", {
+      p_organization_id: args.organizationId,
+      p_claim_id: claimId,
+      p_location_id: nearestMatch.locationId,
+    });
+    const confirmedClaim = confirmResult.data as { claim_code?: string; status?: string } | null;
+    const nearestClaimCode = safeStr(confirmedClaim?.claim_code, "") || claimCode;
+    if (confirmResult.error || !nearestClaimCode) {
+      return {
+        reply: "No pudimos preparar tu beneficio en este momento. Escribí Menú para intentar de nuevo.",
+        statePatch: { lastIntent: "luis_benefit_claim" },
+        debugNote: "referral_hub:benefit_claim_nearest_auto_assign_failed",
+      };
+    }
+
+    const nearestActivationText = luisBenefitsActivationText({
+      firstName: firstNameFromFlowName(completion.full_name),
+      benefitDisplayName: benefit.displayName,
+      claimCode: nearestClaimCode,
+      partnerName: nearestStoreName || null,
+    });
     return {
-      reply: NEAREST_SUPERMARKET_CONFIRM_QUESTION,
-      statePatch: {
-        lastIntent: "luis_benefit_claim",
-        nextExpected: "luis_nearest_supermarket_confirm",
-        collected: {
-          luis_pending_nearest_supermarket: {
-            claimId,
-            locationId: nearestMatch.locationId,
-            storeName: nearestMatch.storeName,
-            address: nearestMatch.address,
-          },
-        },
-      },
+      reply: "¿Te gustaría ver otro beneficio o consultar alguno de nuestros servicios?",
+      statePatch: { lastIntent: "luis_benefit_claim" },
       interactiveButtons: [
-        { id: "luis_nearest:confirm", title: "Sí, enviar cupón" },
-        { id: "luis_nearest:reject", title: "No, gracias" },
+        { id: "luis_benefits:another", title: "Ver beneficios" },
+        { id: "luis_benefits:services", title: "Ver servicios" },
+        { id: "luis_benefits:finalize", title: "Finalizar" },
       ],
-      // Sent in order, before this main reply+buttons: 1) short intro text
-      // naming the store, 2) a native WhatsApp location message (tappable
-      // map, no raw URL, no external shortener) - see the outboundMessages
-      // send loop, which sends these strictly before the main reply below.
       outboundMessages: [
-        { type: "text", text: formatNearestSupermarketIntroText(nearestMatch) },
-        { type: "location", ...nearestLocation },
+        { type: "image", url: nearestMediaUrl, altText: `Beneficio ${benefit.displayName}` },
       ],
-      debugNote: `referral_hub:benefit_claim_nearest_proposed:${claimId}`,
+      outboundPrelude: [{ text: nearestActivationText }],
+      debugNote: `referral_hub:benefit_claim_delivery:${claimId}`,
     };
   }
   // Rollback-safe DB-driven lookup. Never consulted for a location-aware
@@ -1091,11 +1103,16 @@ async function buildLuisFurnitureFlowCompletionResult(args: {
     postalCode: completion.postal_code,
   });
   return {
-    reply: "¡Listo! Recibimos tu información. Mira la promoción de James Furniture.",
+    reply: "¿Te gustaría ver otro beneficio o consultar alguno de nuestros servicios?",
     statePatch: {
       lastIntent: "luis_furniture_request",
       luis_furniture: { postal_code: completion.postal_code, completed_at: completedAt },
     },
+    interactiveButtons: [
+      { id: "luis_benefits:another", title: "Ver beneficios" },
+      { id: "luis_benefits:services", title: "Ver servicios" },
+      { id: "luis_benefits:finalize", title: "Finalizar" },
+    ],
     outboundMessages: [
       { type: "image", url: JAMES_FURNITURE.promoImageUrl, altText: "Promoción de James Furniture" },
     ],
