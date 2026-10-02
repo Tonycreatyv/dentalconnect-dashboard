@@ -46,9 +46,8 @@ export async function captureImmigrationFlowRequest(args: {
     p_organization_id: args.organizationId,
     p_lead_id: args.leadId,
     p_channel_user_id: args.channelUserId,
-    // One canonical active Immigration request per lead. This is intentionally
-    // stable across Meta retries and later customer resubmissions.
-    p_completion_key: "luis_unified_services:immigration:v1",
+    // Stable across a Meta retry, unique for each new Flow completion.
+    p_completion_key: `luis_unified_services:immigration:${args.deliveryKey}:v2`,
     p_delivery_key: args.deliveryKey,
     p_completed_at: args.completion.completed_at,
     p_intake: intake,
