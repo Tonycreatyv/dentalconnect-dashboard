@@ -60,7 +60,7 @@ const GENERIC_FOLLOW_UP_REASONS: Array<{ id: FollowUpReason; label: string }> = 
   { id: "other", label: "Otro" },
 ];
 
-export function followUpReasonsForService(service: ReferralService): Array<{ id: FollowUpReason; label: string }> {
+export function followUpReasonsForService(service: ReferralService | null): Array<{ id: FollowUpReason; label: string }> {
   if (service === "auto_accident") return [
     { id: "no_answer", label: "No respondió" },
     { id: "missing_police_report", label: "Falta reporte policial" },
