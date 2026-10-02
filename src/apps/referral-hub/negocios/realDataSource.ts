@@ -47,10 +47,8 @@ import type {
 // to guard against here). The one field that is NOT always representable
 // is businessId: it can only be persisted for a business backed by a real
 // referral_partners row (id prefixed "partner:"), since business_id is a
-// real FK to that table — selecting one of the three hardcoded merchant
-// businesses or a supermarket location (no referral_partners row at all)
-// stays a session-local-only selection, same honesty rule as
-// updateBusiness below.
+// real FK to that table. Derived merchant/location businesses remain
+// read-only association targets until they have a canonical partner row.
 //
 // referral_benefit_campaign_locations got a real, deliberately narrow
 // owner/admin write path via docs/proposed-migrations/20260824_draft_C_
@@ -64,10 +62,8 @@ import type {
 // canEditLocationImages is genuinely true now. canUploadImages stays
 // false (no Storage bucket exists yet). The three hardcoded merchant
 // businesses (Médico Urgencias/Dental Now 14/Ultra Cargo, id prefixed
-// "merchant:") still have no referral_partners row to write to at all —
-// editing those still lands in the session-local overlay below, and the
-// UI must check business.id.startsWith("partner:") before trusting
-// capabilities.canEditBusiness for a given business (see BusinessDetail.tsx).
+// "merchant:") still have no referral_partners row to write to at all.
+// They are read-only in the production UI until such a row exists.
 
 const ORGANIZATION_ID = "luis-gabriel-referral-hub";
 
@@ -326,10 +322,8 @@ export class RealNegociosDataSource implements NegociosDataSource {
   // Real write for a business backed by an actual referral_partners row
   // (id prefixed "partner:") — scoped by both organization_id and id, so
   // RLS and this query agree on the same boundary. The three hardcoded
-  // merchant businesses and the three supermarket locations have no
-  // referral_partners row at all (Gate 1-B/1-C territory, not this file)
-  // and keep using the session-local overlay exactly as before — never
-  // silently claiming a persistence path that doesn't exist for them.
+  // merchant businesses and supermarket locations have no referral_partners
+  // row. Reject edits rather than pretending to persist them.
   async updateBusiness(id: string, patch: Partial<BusinessEditInput>): Promise<Business> {
     if (!id.startsWith("partner:")) {
       throw new ReadOnlyError("este negocio no tiene una fila persistible en referral_partners");
@@ -395,10 +389,9 @@ export class RealNegociosDataSource implements NegociosDataSource {
   }
 
   // Real write: referral_coupon_campaigns has owner/admin UPDATE RLS +
-  // GRANT (Gate 1-B, applied 2026-08-24). businessId is the one field that
-  // cannot always be represented as the real business_id FK — see the
-  // class-level comment — so a merchant:/location: selection is kept as a
-  // session-local overlay instead of being written or silently dropped.
+  // GRANT (Gate 1-B, applied 2026-08-24). businessId is only writable when
+  // it maps to a real referral_partners row; derived merchant/location ids
+  // are rejected rather than stored ephemerally.
   async updateCoupon(id: string, patch: Partial<Pick<Coupon, "displayName" | "businessId" | "imageUrl" | "customerCopy" | "termsText" | "active" | "expiresAt" | "deliverySource">>): Promise<Coupon> {
     const columns: Record<string, unknown> = {};
     if (patch.displayName !== undefined) columns.display_name = patch.displayName;
