@@ -516,7 +516,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
       p_correction_reason: correctionReason,
     });
     if (result.error) {
-      reportPartnerOutcomeFailure(result.error);
       setBusy(false);
       setFeedback({ tone: "error", text: "No se pudo corregir el resultado. Intenta de nuevo." });
       return;
