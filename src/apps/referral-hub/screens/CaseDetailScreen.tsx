@@ -149,7 +149,7 @@ export default function CaseDetailScreen() {
     ]);
 
     const assignments = (assignmentsRes.data ?? []) as unknown as CaseAssignment[];
-    const assignment = assignments.find((row) => ["pending_assignment", "assigned", "accepted"].includes(row.status)) ?? assignments[0] ?? null;
+    const assignment = assignments.find((row) => ["pending_assignment", "assigned", "accepted"].includes(row.status)) ?? null;
     const partnerRes = assignment
       ? await supabase.from("referral_partners").select("id,name")
           .eq("id", assignment.partner_id).eq("organization_id", resolvedOrgId).maybeSingle()
