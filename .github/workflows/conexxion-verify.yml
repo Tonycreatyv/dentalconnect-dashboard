@@ -33,7 +33,10 @@ jobs:
           cache: npm
 
       - name: Install locked dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Prepare Vite native dependency
+        run: npm rebuild esbuild
 
       - name: Enforce ConeXXion architecture boundary
         run: npm run check:conexxion
