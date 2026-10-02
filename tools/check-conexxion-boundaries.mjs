@@ -11,6 +11,7 @@ const FORBIDDEN = [
   '.from("partners")',
   ".from('partners')",
   "partner_recomendado",
+  "useReferralData",
 ];
 
 async function walk(path, files = []) {
