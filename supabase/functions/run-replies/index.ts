@@ -78,6 +78,8 @@ import {
 } from "./domain/referralHub/serviceRequestOrchestrator.ts";
 import { captureImmigrationFlowRequest } from "./domain/referralHub/immigrationFlowRequest.ts";
 import { captureLegalFlowRequest } from "./domain/referralHub/legalFlowRequest.ts";
+import { captureDuiCriminalFlowRequest } from "./domain/referralHub/duiCriminalFlowRequest.ts";
+import { captureFurnitureFlowRequest } from "./domain/referralHub/furnitureFlowRequest.ts";
 import {
   clearMetaTestDemoTakeoverState,
   metaTestDemoResetAction,
@@ -110,6 +112,7 @@ import {
   type WhatsAppInteractiveListSpec,
 } from "../_shared/metaMessageAdapter.ts";
 import { handleReferralHubProductTurn } from "../_products/referral-hub/index.ts";
+import { JAMES_FURNITURE } from "../_products/referral-hub/config.ts";
 import {
   LUIS_BENEFITS,
   LUIS_BENEFITS_FLOW_ACTION,
@@ -127,6 +130,7 @@ import {
   luisBenefitsFlowCta,
   luisUnifiedFlowCta,
   parseLuisBenefitFlowCompletion,
+  parseLuisFurnitureFlowCompletion,
   parseLuisLegalFlowCompletion,
   resolveCouponMediaUrl,
   resolveCouponPartnerName,
