@@ -8,6 +8,7 @@ on:
       - "src/referral/**"
       - "supabase/**"
       - "tools/check-conexxion-boundaries.mjs"
+      - "tools/check-supabase-migration-ledger.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/conexxion-verify.yml"
@@ -40,6 +41,9 @@ jobs:
 
       - name: Enforce ConeXXion architecture boundary
         run: npm run check:conexxion
+
+      - name: Verify Supabase migration ledger
+        run: npm run check:migrations
 
       - name: Typecheck
         run: npm run typecheck:conexxion
