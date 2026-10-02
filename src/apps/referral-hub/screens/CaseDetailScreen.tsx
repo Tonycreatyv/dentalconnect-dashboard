@@ -58,7 +58,7 @@ type PartnerRuleRow = {
 };
 type PartnerContactRow = { partner_id: string; service_ids: string[] | null };
 type CaseEvent = { id: string; aggregate_id: string; event_type: string; occurred_at: string; metadata: Record<string, unknown> | null };
-type CaseState = { request: CaseRequest; lead: CaseLead | null; assignment: CaseAssignment | null; partner: CasePartner | null; events: CaseEvent[] };
+type CaseState = { request: CaseRequest; lead: CaseLead | null; assignment: CaseAssignment | null; partner: CasePartner | null; events: CaseEvent[]; requiresAuthorization: boolean };
 
 const STATUS_LABEL: Record<string, string> = {
   new: "Nuevo", prequalified: "Nuevo", qualified: "Nuevo", contacted: "En gestión",
@@ -128,7 +128,7 @@ export default function CaseDetailScreen() {
     }
 
     const request = requestRes.data as unknown as CaseRequest;
-    const [leadRes, assignmentsRes, rulesRes] = await Promise.all([
+    const [leadRes, assignmentsRes, rulesRes, serviceRes] = await Promise.all([
       supabase.from("leads")
         .select("id,full_name,first_name,last_name,phone,channel_user_id")
         .eq("id", request.lead_id).eq("organization_id", resolvedOrgId).maybeSingle(),
@@ -141,6 +141,11 @@ export default function CaseDetailScreen() {
         .eq("organization_id", resolvedOrgId)
         .eq("service_id", request.service_id)
         .eq("active", true),
+      supabase.from("service_configs")
+        .select("requires_authorization")
+        .eq("organization_id", resolvedOrgId)
+        .eq("id", request.service_id)
+        .maybeSingle(),
     ]);
 
     const assignments = (assignmentsRes.data ?? []) as unknown as CaseAssignment[];
@@ -227,6 +232,7 @@ export default function CaseDetailScreen() {
       assignment,
       partner: (partnerRes.data as unknown as CasePartner | null) ?? null,
       events,
+      requiresAuthorization: serviceRes.data?.requires_authorization === true,
     });
     setLoading(false);
   }, [requestId, resolvedOrgId]);
@@ -237,6 +243,8 @@ export default function CaseDetailScreen() {
 
   const hasActiveAssignment = Boolean(state?.assignment && ["pending_assignment", "assigned", "accepted"].includes(state.assignment.status));
   const partnerAccepted = state?.assignment?.status === "accepted";
+  const consentStatus = typeof state?.request.consent?.status === "string" ? state.request.consent.status : "pending_review";
+  const assignmentAuthorized = Boolean(state && (!state.requiresAuthorization || consentStatus === "authorized"));
 
   async function runCaseAction(work: () => Promise<{ error: { message?: string } | null }>) {
     if (actionBusy) return;
@@ -300,6 +308,7 @@ export default function CaseDetailScreen() {
         <div><dt>Servicio</dt><dd>{presentation.serviceLabel || state.request.service_id}</dd></div>
         <div><dt>Responsable</dt><dd>{state.partner?.name || "Sin responsable"}</dd></div>
         <div><dt>ZIP</dt><dd>{state.request.postal_code || "—"}</dd></div>
+        {state.requiresAuthorization ? <div><dt>Autorización para compartir</dt><dd>{consentStatus === "authorized" ? "Autorizada" : consentStatus === "declined" ? "No autorizada" : "Pendiente"}</dd></div> : null}
         <div><dt>Última actividad</dt><dd>{formatDateTime(state.assignment?.updated_at || state.request.updated_at)}</dd></div>
         <div><dt>Próximo paso</dt><dd>{state.assignment?.next_followup_at ? formatDateTime(state.assignment.next_followup_at) : status === "Cerrado" ? "Caso cerrado" : "Falta programar el próximo paso"}</dd></div>
         <div><dt>Intentos de seguimiento</dt><dd>{state.assignment?.follow_up_attempt_count ?? 0}</dd></div>
@@ -311,15 +320,20 @@ export default function CaseDetailScreen() {
         <div className="hub-field">
           <label htmlFor="case-responsible"><strong>Responsable</strong></label>
           <div className="hub-campaign-actions">
-            <select id="case-responsible" className="hub-input" value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)} disabled={actionBusy}>
+            <select id="case-responsible" className="hub-input" value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)} disabled={actionBusy || !assignmentAuthorized}>
               <option value="">Seleccionar aliado</option>
               {partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name}</option>)}
             </select>
-            <button type="button" className="hub-primary" disabled={actionBusy || !selectedPartnerId || selectedPartnerId === state.assignment?.partner_id} onClick={() => void saveResponsible()}>
+            <button type="button" className="hub-primary" disabled={actionBusy || !assignmentAuthorized || !selectedPartnerId || selectedPartnerId === state.assignment?.partner_id} onClick={() => void saveResponsible()}>
               {hasActiveAssignment ? "Cambiar responsable" : "Asignar responsable"}
             </button>
           </div>
         </div>
+        {!assignmentAuthorized ? (
+          <p className="hub-field-hint">Este servicio requiere autorización del cliente antes de compartir el caso con un aliado.</p>
+        ) : partners.length === 0 && !hasActiveAssignment ? (
+          <p className="hub-field-hint">No hay un aliado elegible con regla y contacto activo para este caso.</p>
+        ) : null}
 
         {partnerAccepted && status !== "Cerrado" ? (
           <>
