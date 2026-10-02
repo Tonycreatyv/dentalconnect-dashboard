@@ -320,13 +320,28 @@ export function ClientesScreen() {
 // via useImmigrationInbox). Deliberately does not invent a resolver for
 // other services (see the UX audit's Annex B): this screen only shows what
 // already has a trustworthy operational status.
-type OpportunityStatusFilter = "all" | "por_contactar" | "contactado" | "citas" | "cerrados";
+type OpportunityStatusFilter = "all" | "nuevo" | "en_gestion" | "cita" | "cerrado";
 
 function opportunityStatusBucket(operationalStatus: string): Exclude<OpportunityStatusFilter, "all"> {
-  if (operationalStatus === "Contactado") return "contactado";
-  if (operationalStatus === "Cita programada") return "citas";
-  if (operationalStatus === "Convertido" || operationalStatus === "Cerrado sin conversión") return "cerrados";
-  return "por_contactar";
+  if (operationalStatus === "Cita programada") return "cita";
+  if (operationalStatus === "Convertido" || operationalStatus === "Cerrado sin conversión") return "cerrado";
+  if (operationalStatus === "Contactado" || operationalStatus === "Pendiente de seguimiento") return "en_gestion";
+  return "nuevo";
+}
+
+function opportunityStatusLabel(operationalStatus: string): string {
+  const bucket = opportunityStatusBucket(operationalStatus);
+  if (bucket === "en_gestion") return "En gestión";
+  if (bucket === "cita") return "Cita";
+  if (bucket === "cerrado") return "Cerrado";
+  return "Nuevo";
+}
+
+function opportunityStatusTone(operationalStatus: string): StatusTone {
+  const bucket = opportunityStatusBucket(operationalStatus);
+  if (bucket === "cerrado" || bucket === "cita") return "success";
+  if (bucket === "en_gestion") return "warning";
+  return "neutral";
 }
 
 export function OportunidadesScreen() {
@@ -345,7 +360,7 @@ export function OportunidadesScreen() {
     [opportunities.requests, serviceFilter, statusFilter],
   );
   const counts = useMemo(() => {
-    const base = { por_contactar: 0, contactado: 0, citas: 0, cerrados: 0 };
+    const base = { nuevo: 0, en_gestion: 0, cita: 0, cerrado: 0 };
     for (const request of opportunities.requests) base[opportunityStatusBucket(request.operationalStatus)] += 1;
     return base;
   }, [opportunities.requests]);
@@ -374,10 +389,10 @@ export function OportunidadesScreen() {
         <FilterTabs
           tabs={[
             { id: "all", label: "Todos los estados", count: opportunities.requests.length },
-            { id: "por_contactar", label: "Por contactar", count: counts.por_contactar },
-            { id: "contactado", label: "Contactado", count: counts.contactado },
-            { id: "citas", label: "Citas", count: counts.citas },
-            { id: "cerrados", label: "Cerrados", count: counts.cerrados },
+            { id: "nuevo", label: "Nuevo", count: counts.nuevo },
+            { id: "en_gestion", label: "En gestión", count: counts.en_gestion },
+            { id: "cita", label: "Cita", count: counts.cita },
+            { id: "cerrado", label: "Cerrado", count: counts.cerrado },
           ]}
           activeId={statusFilter}
           onChange={(id) => setStatusFilter(id as OpportunityStatusFilter)}
@@ -407,7 +422,7 @@ export function OportunidadesScreen() {
                 </div>
               </div>
               <div className="hub-opp-card-meta">
-                <StatusBadge tone={immigrationOperationalTone(request.operationalStatus)} label={request.operationalStatus} />
+                <StatusBadge tone={opportunityStatusTone(request.operationalStatus)} label={opportunityStatusLabel(request.operationalStatus)} />
                 <small>{request.assignment?.partnerName ? `Asignado a: ${request.assignment.partnerName}` : "Sin aliado disponible"}</small>
                 <small>Última actividad {formatDateTime(request.lastActivityAt)}</small>
               </div>
