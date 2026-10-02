@@ -919,9 +919,11 @@ export function classifyLuisFlowCompletion(raw: unknown): LuisFlowCompletionKind
     return "LEGAL";
   }
   if (hasBenefitKey) return "BENEFITS";
+  if (!hasIntakeType && !hasBenefitKey && text(value.service_key, 32) === "FURNITURE") return "FURNITURE";
   // Unified Flow HANDOFF_CONFIRM completes with only {service_key: "HANDOFF"} -
   // no benefit_key/intake_type, so it never collides with the branches above.
   if (!hasIntakeType && text(value.service_key, 32) === "HANDOFF") return "HANDOFF";
+  if (!hasIntakeType && !hasBenefitKey && text(value.service_key, 32) === "MERCADITO") return "MERCADITO";
   return "UNKNOWN";
 }
 
