@@ -507,6 +507,8 @@ export function ContactDetailScreen() {
   // requirement extended to the detail screen).
   const pipelineLead = pipeline.leads.find((l) => l.id === lead.id);
   const immigrationRequests = immigrationInbox.requests.filter((request) => request.leadId === lead.id);
+  const canonicalImmigrationRequestIds = new Set(immigrationRequests.map((request) => request.id));
+  const otherServiceRequests = detail.serviceRequests.filter((request) => !canonicalImmigrationRequestIds.has(request.id));
   // The "Consultas profesionales" card below is generic across immigration/
   // accident/DUI intake and has no assignment data of its own — hardcoding
   // "Sin asignar" there contradicted the canonical immigration section's
@@ -648,11 +650,11 @@ export function ContactDetailScreen() {
           submission. */}
       <section className="hub-section">
         <h2>Casos y solicitudes</h2>
-        {detail.serviceRequests.length === 0 ? (
+        {otherServiceRequests.length === 0 ? (
           <EmptyState icon={Users} title="Sin otros casos" />
         ) : (
           <div className="hub-list">
-            {detail.serviceRequests.map((request) => (
+            {otherServiceRequests.map((request) => (
               <div key={request.id} className="hub-list-row">
                 <div>
                   {(() => {
