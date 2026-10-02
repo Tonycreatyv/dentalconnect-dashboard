@@ -9,5 +9,10 @@
   "exclude": [
     "**/*.test.ts",
     "**/*.test.tsx"
-  ]
+  ],
+  "compilerOptions": {
+    "types": [
+      "vite/client"
+    ]
+  }
 }
