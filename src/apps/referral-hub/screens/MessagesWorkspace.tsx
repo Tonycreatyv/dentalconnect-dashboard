@@ -5,14 +5,20 @@ import Avatar from "../ui/Avatar";
 import EmptyState from "../ui/EmptyState";
 import { SkeletonRows } from "../ui/Skeleton";
 import StatusBadge from "../ui/StatusBadge";
-import { useReferralData } from "../../../referral/useReferralData";
 import { useReferralOperations, type FlowResponseRecord, type OperationsMessage } from "../operations/useReferralOperations";
 import { useSilentPolling } from "../../../hooks/useSilentPolling";
 import { describeFlowSubmission, looksLikeUnpersistedCouponImage } from "../operations/flowSubmission";
-import { leadName, leadPhone } from "../../../referral/status";
-import type { ReferralLead } from "../../../referral/types";
+import { useLeadsPipeline, type PipelineLead } from "../operations/useLeadsPipeline";
 
-type LeadWithStatus = ReferralLead & { handoff_to_human?: boolean; last_staff_seen_at?: string | null };
+type LeadWithStatus = PipelineLead;
+
+function leadName(lead: LeadWithStatus): string {
+  return lead.full_name || lead.channel_user_id || "Cliente";
+}
+
+function leadPhone(lead: LeadWithStatus): string {
+  return lead.phone || lead.channel_user_id || "";
+}
 
 const FLOW_COMPLETED_SENTINEL = "__whatsapp_flow_completed__";
 
@@ -31,7 +37,7 @@ function previewText(message: OperationsMessage) {
 
 export default function MessagesWorkspace() {
   const { conversationId } = useParams();
-  const data = useReferralData();
+  const data = useLeadsPipeline();
   const ops = useReferralOperations();
   // Demo-safe live refresh: same load() functions the initial mount already
   // uses, called silently every ~2.5s so new inbound messages/leads show up
@@ -61,7 +67,7 @@ export default function MessagesWorkspace() {
     setNotice("");
     const result = await ops.sendMessage({
       leadId: selectedLead.id,
-      channel: latest?.channel ?? selectedLead.last_channel ?? "messenger",
+      channel: (latest?.channel ?? selectedLead.last_channel ?? selectedLead.channel ?? "messenger") as "messenger" | "whatsapp",
       channelUserId: latest?.channel_user_id ?? selectedLead.channel_user_id,
       content: draft,
     });
