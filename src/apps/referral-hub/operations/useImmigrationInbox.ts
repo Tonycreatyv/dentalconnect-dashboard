@@ -21,7 +21,7 @@ type RequestRow = {
 
 export type OperationalOpportunity = ImmigrationOpportunity & { serviceId: string; intake: Record<string, unknown> };
 const IMMIGRATION_SERVICE_IDS = ["luis_inmigracion"];
-const LEGAL_OPPORTUNITY_SERVICE_IDS = LEGAL_SERVICE_IDS;
+const LEGAL_OPPORTUNITY_SERVICE_IDS = [...LEGAL_SERVICE_IDS, "luis_muebles"] as const;
 
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
