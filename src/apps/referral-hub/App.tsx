@@ -16,11 +16,12 @@ import ReferralQrEntry from "./pages/ReferralQrEntry";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
-import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen, OportunidadesScreen } from "./screens/DashboardScreens";
+import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen } from "./screens/DashboardScreens";
 import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
 import CaseDetailScreen from "./screens/CaseDetailScreen";
+import AdminOperationsScreen from "./screens/AdminOperationsScreen";
 import EmptyState from "./ui/EmptyState";
 import NegociosHub from "./negocios/NegociosScreens";
 import NegociosBusinessDetail from "./negocios/BusinessDetail";
@@ -52,7 +53,7 @@ function ProductRoutes() {
     </Route>
     <Route path="/" element={<RequireAuth><ReferralOrganizationProvider><BoltShell /></ReferralOrganizationProvider></RequireAuth>}>
       <Route index element={<Navigate to="/operacion" replace />} />
-      <Route path="operacion" element={<OportunidadesScreen />} />
+      <Route path="operacion" element={<AdminOperationsScreen />} />
       <Route path="operacion/:requestId" element={<CaseDetailScreen />} />
       <Route path="oportunidades" element={<Navigate to="/operacion" replace />} />
       <Route path="clientes" element={<ClientesScreen />} />
