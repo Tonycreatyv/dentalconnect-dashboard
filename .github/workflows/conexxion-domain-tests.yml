@@ -30,7 +30,7 @@ jobs:
 
       - name: Partner domain tests
         run: |
-          deno test --allow-read             src/apps/referral-partner/partnerActions.test.ts             src/apps/referral-partner/partnerQueue.test.ts             src/apps/referral-partner/partnerReferralVisibility.test.ts             src/apps/referral-partner/referralPresentation.test.ts             src/apps/referral-partner/finalStateCorrection.test.ts             src/apps/referral-partner/partnerMembership.test.ts             src/apps/referral-partner/partnerPortalScoping.test.ts
+          deno test --allow-read             src/apps/referral-partner/partnerActions.test.ts             src/apps/referral-partner/partnerQueue.test.ts             src/apps/referral-partner/partnerExport.test.ts             src/apps/referral-partner/partnerReferralVisibility.test.ts             src/apps/referral-partner/referralPresentation.test.ts             src/apps/referral-partner/finalStateCorrection.test.ts             src/apps/referral-partner/partnerMembership.test.ts             src/apps/referral-partner/partnerPortalScoping.test.ts
 
       - name: Admin operational domain tests
         run: |
