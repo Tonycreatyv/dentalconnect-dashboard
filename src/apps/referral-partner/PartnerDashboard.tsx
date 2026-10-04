@@ -32,6 +32,7 @@ import {
   type ReminderOptionId,
 } from "./partnerQueue";
 import { CORRECTION_REASON_LABEL, canCorrectFinalResult, correctionNoteIsValid, type CorrectionReason } from "./finalStateCorrection";
+import "./partnerWork.css";
 
 // Visual Phase 1B (work-queue redesign) — see PartnerList/PartnerDetail below.
 // Every field used here already exists on ImmigrationOpportunity/AssignmentRow;
@@ -74,14 +75,9 @@ const ACTION_FEEDBACK: Record<PartnerAction, string> = {
   closed_not_converted: "Caso cerrado sin conversión.",
 };
 
-// Canonical status color semantics live entirely in CSS
-// (.partner-status.is-new/is-follow_up/is-approved/is-disqualified/
-// is-overdue) — PartnerQueueStatus's own values are already the class
-// suffix, so no separate tone-mapping table to keep in sync.
 function queueStatusTone(status: PartnerQueueStatus, overdue: boolean): string {
   return overdue ? "overdue" : status;
 }
-
 
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -93,10 +89,6 @@ function formatDate(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? "Sin fecha" : new Intl.DateTimeFormat("es-US", { dateStyle: "medium" }).format(date);
 }
 
-// "Recibido" is an instant (assigned_at), not a date-only value like
-// accident_date/dui_date — showing only the date hides which of several
-// same-day cases came in first. Browser-local time, same as formatRelative
-// below; no organization-timezone architecture introduced here.
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "Sin fecha";
   const date = new Date(value);
@@ -105,8 +97,6 @@ function formatDateTime(value: string | null | undefined): string {
   return `${formatDate(value)} · ${time}`;
 }
 
-// "Asignado hoy, 3:42 p.m." / "ayer, …" / a short date beyond that — purely
-// a presentation choice over the existing assignedAt/createdAt timestamps.
 function formatRelative(value: string | null | undefined): string {
   if (!value) return "Sin fecha";
   const date = new Date(value);
@@ -119,10 +109,19 @@ function formatRelative(value: string | null | undefined): string {
   return new Intl.DateTimeFormat("es-US", { dateStyle: "medium" }).format(date);
 }
 
-// Builds the same canonical ImmigrationOpportunity Admin uses, from a
-// referral_assignments row queried from the partner's side — so both sides
-// of the P0 (Admin Immigration and Partner Dashboard) read the operational
-// status through one shared derivation, never two.
+function formatLeadAge(value: string | null | undefined): string {
+  if (!value) return "—";
+  const created = new Date(value);
+  if (Number.isNaN(created.getTime())) return "—";
+  const elapsed = Math.max(0, Date.now() - created.getTime());
+  const minutes = Math.floor(elapsed / 60000);
+  if (minutes < 60) return minutes <= 1 ? "1 min" : `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1 día" : `${days} días`;
+}
+
 function toOpportunity(row: AssignmentRow): ImmigrationOpportunity | null {
   const request = row.referral_service_requests;
   if (!request) return null;
@@ -154,22 +153,11 @@ function toOpportunity(row: AssignmentRow): ImmigrationOpportunity | null {
   });
 }
 
-// Explicit partner_id filter, not a bare table scan left to RLS alone:
-// referral_assignments' own RLS also grants org owner/admin (see
-// referral_assignments_member_read) — deliberately, for Admin's own
-// organization-wide views — so without this filter a user who is BOTH an
-// org owner and a partner member would see every partner's assignments
-// merged in the Partner Portal. This .eq() is what actually scopes the
-// Partner Portal to the resolved partner, independent of what else RLS
-// would otherwise allow the caller to read.
 function usePartnerReferrals(partnerId: string) {
   const [rows, setRows] = useState<AssignmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // silent=true is used by background polling: never shows the big loading
-  // state, and a failed silent refresh keeps whatever is already on screen
-  // instead of clearing it.
   const load = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
     if (!silent) { setLoading(true); setError(""); }
@@ -194,11 +182,6 @@ function usePartnerReferrals(partnerId: string) {
   return { rows, loading, error, load };
 }
 
-// Resolves the Partner Portal's explicit partner context up front, from the
-// caller's own active referral_partner_memberships rows (RLS already scopes
-// that table to user_id = auth.uid() AND active — see
-// referral_partner_memberships_self_read). Fails closed rather than merging
-// when the membership count isn't exactly one; see resolveActivePartnerContext.
 function useActivePartnerMembership(): { status: "loading" } | { status: "resolved"; context: ActivePartnerContext } {
   const [state, setState] = useState<{ status: "loading" } | { status: "resolved"; context: ActivePartnerContext }>({ status: "loading" });
 
@@ -310,10 +293,6 @@ function referralPresentation(row: AssignmentRow, opportunity: ImmigrationOpport
   return {
     service,
     topic: resolveTopicDisplay(opportunity.topic, service),
-    // Compact incident date stays in the list-card summary (no separate
-    // field there to show it in). sharedInfoSummary is the detail-only
-    // "Información compartida" variant, which omits it once the explicit
-    // incidentDateFact field below is rendered — never stated twice.
     summary: buildIntakeSummary(intake, topicKey),
     sharedInfoSummary: buildIntakeSummary(intake, topicKey, { omitIncidentDate: Boolean(incidentDateFact) }),
     description: intakeDescription(intake) ?? opportunity.description,
@@ -324,47 +303,95 @@ function referralPresentation(row: AssignmentRow, opportunity: ImmigrationOpport
       topicKey,
       intake,
       consentStatus: opportunity.consentStatus,
-      // Already shown as its own labeled fact below when present — never
-      // state the same incident date twice on the same card.
       includeIncidentDate: !incidentDateFact,
     }),
   };
 }
 
-function ReferralCard({ row, opportunity, queueStatus, overdue }: { row: AssignmentRow; opportunity: ImmigrationOpportunity; queueStatus: PartnerQueueStatus; overdue: boolean }) {
-  const tone = queueStatusTone(queueStatus, overdue);
+type PartnerListEntry = {
+  row: AssignmentRow;
+  opportunity: ImmigrationOpportunity;
+  queueStatus: PartnerQueueStatus;
+  overdue: boolean;
+};
+
+function followUpSummary(row: AssignmentRow, overdue: boolean): string {
+  const reason = row.follow_up_reason ? FOLLOW_UP_REASON_LABEL[row.follow_up_reason as FollowUpReason] ?? row.follow_up_reason : "Seguimiento";
+  if (overdue) return `${reason} · Vencido`;
+  return `${reason} · ${formatFollowUpMoment(row.next_followup_at)}`;
+}
+
+function PartnerMobileCard({ row, opportunity, queueStatus, overdue }: PartnerListEntry) {
   const presentation = referralPresentation(row, opportunity);
   const phone = resolvePartnerPhone(row.referral_service_requests?.leads?.phone, row.referral_service_requests?.leads?.channel_user_id);
   const telLink = buildTelLink(phone);
+  const tone = queueStatusTone(queueStatus, overdue);
   return (
-    <Link to={`referrals/${opportunity.assignment!.id}`} className="partner-item">
-      <div className="partner-item-main">
-        <strong>{opportunity.leadName}</strong>
-        <p className="partner-item-meta">{referralServiceLabel(presentation.service)}{presentation.topic ? ` · ${presentation.topic}` : ""}</p>
-        {queueStatus === "follow_up" ? (
-          <p className="partner-item-context">
-            {row.follow_up_reason ? FOLLOW_UP_REASON_LABEL[row.follow_up_reason as FollowUpReason] ?? row.follow_up_reason : null}
-            {row.follow_up_reason ? " · " : ""}
-            {overdue ? "Seguimiento vencido" : `Próximo intento: ${formatFollowUpMoment(row.next_followup_at).toLowerCase()}`}
-          </p>
-        ) : presentation.summary ? <p className="partner-item-context">{presentation.summary}</p> : null}
-        {presentation.description ? <p className="partner-item-summary">{presentation.description}</p> : null}
+    <article className="partner-work-card">
+      <div className="partner-work-card-head">
+        <div className="partner-work-card-title">
+          <strong>{opportunity.leadName}</strong>
+          <small>{referralServiceLabel(presentation.service)}{opportunity.postalCode ? ` · ZIP ${opportunity.postalCode}` : ""}</small>
+        </div>
+        <span className="partner-work-age">{formatLeadAge(opportunity.assignment!.assignedAt)}</span>
       </div>
-      <div className="partner-item-side">
+      <div className="partner-work-card-status">
         <span className={`partner-status is-${tone}`}>{overdue ? "Seguimiento vencido" : QUEUE_STATUS_LABEL[queueStatus]}</span>
-        {overdue && telLink ? (
-          <a
-            className="partner-call-now"
-            href={telLink}
-            onClick={(event) => event.stopPropagation()}
-          >
-            Llamar ahora
-          </a>
-        ) : (
-          <p className="partner-item-time">Recibido {formatRelative(opportunity.assignment!.assignedAt)}</p>
-        )}
+        <small className="partner-work-muted">{formatRelative(opportunity.assignment!.assignedAt)}</small>
       </div>
-    </Link>
+      {queueStatus === "follow_up" ? <p className="partner-work-card-context">{followUpSummary(row, overdue)}</p> : presentation.summary ? <p className="partner-work-card-context">{presentation.summary}</p> : null}
+      <div className="partner-work-card-actions">
+        {telLink ? <a className="partner-work-call" href={telLink}>Llamar</a> : <span />}
+        <Link className="partner-work-open" to={`referrals/${opportunity.assignment!.id}`}>Gestionar</Link>
+      </div>
+    </article>
+  );
+}
+
+function PartnerDesktopTable({ entries }: { entries: PartnerListEntry[] }) {
+  return (
+    <div className="partner-work-table-wrap">
+      <table className="partner-work-table">
+        <thead>
+          <tr>
+            <th>Estado</th>
+            <th>Cliente</th>
+            <th>Servicio</th>
+            <th>Teléfono</th>
+            <th>ZIP</th>
+            <th>Recibido</th>
+            <th>Antigüedad</th>
+            <th>Próximo seguimiento</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(({ row, opportunity, queueStatus, overdue }) => {
+            const presentation = referralPresentation(row, opportunity);
+            const phone = resolvePartnerPhone(row.referral_service_requests?.leads?.phone, row.referral_service_requests?.leads?.channel_user_id);
+            const telLink = buildTelLink(phone);
+            return (
+              <tr key={row.id}>
+                <td><span className={`partner-status is-${queueStatusTone(queueStatus, overdue)}`}>{overdue ? "Vencido" : QUEUE_STATUS_LABEL[queueStatus]}</span></td>
+                <td>
+                  <div className="partner-work-client">
+                    <Link to={`referrals/${opportunity.assignment!.id}`}>{opportunity.leadName}</Link>
+                    <small>{formatRelative(opportunity.assignment!.assignedAt)}</small>
+                  </div>
+                </td>
+                <td>{referralServiceLabel(presentation.service)}</td>
+                <td>{telLink ? <a className="partner-work-phone" href={telLink}>{formatPhoneForDisplay(phone)}</a> : <span className="partner-work-muted">No disponible</span>}</td>
+                <td className="partner-work-muted">{opportunity.postalCode || "—"}</td>
+                <td className="partner-work-muted">{formatDateTime(opportunity.assignment!.assignedAt)}</td>
+                <td><strong>{formatLeadAge(opportunity.assignment!.assignedAt)}</strong></td>
+                <td className="partner-work-followup">{queueStatus === "follow_up" ? followUpSummary(row, overdue) : "—"}</td>
+                <td><Link className="partner-work-action" to={`referrals/${opportunity.assignment!.id}`}>Gestionar</Link></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -386,9 +413,9 @@ function PartnerList({ partnerId }: { partnerId: string }) {
     () => statusFilter === "all" ? entries : entries.filter((entry) => entry.queueStatus === statusFilter),
     [entries, statusFilter],
   );
-  // The secretary must be able to see there's overdue work without opening
-  // the Seguimiento filter chip — a header-level count, always visible.
   const overdueCount = useMemo(() => countOverdueFollowUps(entries), [entries]);
+  const newCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "new").length, [entries]);
+  const followUpCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "follow_up").length, [entries]);
 
   if (loading) return <p className="partner-empty partner-loading">Cargando referencias…</p>;
   if (error) return <p className="partner-empty partner-loading">{error}</p>;
@@ -396,13 +423,14 @@ function PartnerList({ partnerId }: { partnerId: string }) {
   return (
     <div className="partner-view">
       <div className="partner-page-head">
-        <h1>Referencias</h1>
-        <p>Personas que te hemos enviado para contactar.</p>
-        {overdueCount > 0 ? (
-          <p className="partner-overdue-counter" role="status">
-            {overdueCount === 1 ? "1 seguimiento vencido" : `${overdueCount} seguimientos vencidos`}
-          </p>
-        ) : null}
+        <h1>Mi trabajo</h1>
+        <p>Referencias asignadas para contactar y dar seguimiento.</p>
+      </div>
+
+      <div className="partner-work-summary" aria-label="Resumen de trabajo">
+        <span className="partner-work-metric"><strong>{newCount}</strong> Nuevos</span>
+        <span className="partner-work-metric"><strong>{followUpCount}</strong> Seguimientos</span>
+        <span className={`partner-work-metric${overdueCount > 0 ? " is-overdue" : ""}`}><strong>{overdueCount}</strong> Vencidos</span>
       </div>
 
       <div className="partner-service-filter" role="tablist" aria-label="Filtrar por estado">
@@ -426,9 +454,12 @@ function PartnerList({ partnerId }: { partnerId: string }) {
           <p className="partner-empty-sub">Las nuevas referencias aparecerán aquí automáticamente.</p>
         </div>
       ) : (
-        <div className="partner-list">
-          {filtered.map(({ row, opportunity, queueStatus, overdue }) => <ReferralCard key={row.id} row={row} opportunity={opportunity} queueStatus={queueStatus} overdue={overdue} />)}
-        </div>
+        <>
+          <PartnerDesktopTable entries={filtered} />
+          <div className="partner-work-mobile">
+            {filtered.map(({ row, opportunity, queueStatus, overdue }) => <PartnerMobileCard key={row.id} row={row} opportunity={opportunity} queueStatus={queueStatus} overdue={overdue} />)}
+          </div>
+        </>
       )}
     </div>
   );
@@ -527,10 +558,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     await load({ silent: true });
   }, [row, busy, correctionReason, correctionNote, load]);
 
-  // Personalizado has its own combine/validity/preview path — it never goes
-  // through "Sin recordatorio" (that phrase is reserved for the intentional
-  // no-reminder preset) and is never treated as ready until both Fecha and
-  // Hora are set to a moment that hasn't already passed.
   const customCombined = combineCustomDateTime(customDate, customTime);
   const customReady = isCustomFollowUpReady(customCombined);
   const nextFollowupAtPreview = reminderOption === "custom"
@@ -540,9 +567,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
   const runFollowUp = useCallback(async () => {
     if (!row || busy) return;
     if (reminderOption === "custom" && !isCustomFollowUpReady(combineCustomDateTime(customDate, customTime))) return;
-    // Recomputed here (not read from the render-scoped preview above) so a
-    // save triggered right as a minute rolls over still persists a value
-    // consistent with what was just shown, not a stale closure.
     const nextFollowupAt = computeNextFollowupAt(
       reminderOption,
       new Date(),
@@ -608,8 +632,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
 
       {feedback ? <div className={`partner-feedback is-${feedback.tone}`}>{feedback.text}</div> : null}
 
-      {/* The call action is a rail item on wide screens, but CSS moves it
-          before the lead context in the single-column mobile flow. */}
       <div className="partner-detail-columns">
         <div className="partner-detail-col-main">
           <section className="partner-block partner-block--flush"><h2>Resumen de la consulta</h2><p className="partner-summary-text">{presentation.humanSummary}</p></section>
