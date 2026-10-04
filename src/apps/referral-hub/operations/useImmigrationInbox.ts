@@ -19,9 +19,22 @@ type RequestRow = {
   leads: { full_name: string | null; channel_user_id: string | null } | null;
 };
 
+type OperationalAssignmentRow = {
+  id: string;
+  request_id: string;
+  status: string;
+  work_status: string;
+  assigned_at: string;
+  updated_at: string;
+  partner_id: string;
+  next_followup_at: string | null;
+  follow_up_reason: string | null;
+};
+
 export type OperationalOpportunity = ImmigrationOpportunity & { serviceId: string; intake: Record<string, unknown> };
 const IMMIGRATION_SERVICE_IDS = ["luis_inmigracion"];
 const LEGAL_OPPORTUNITY_SERVICE_IDS = [...LEGAL_SERVICE_IDS, "luis_muebles"] as const;
+const ACTIVE_ASSIGNMENT_STATUSES = new Set(["pending_assignment", "assigned", "accepted"]);
 
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -59,17 +72,28 @@ function useOperationalOpportunities(serviceIds: readonly string[]) {
     const requestRows = (result.data ?? []) as unknown as RequestRow[];
     const assignmentResult = requestRows.length ? await supabase
       .from("referral_assignments")
-      .select("id,request_id,status,work_status,assigned_at,updated_at,partner_id")
+      .select("id,request_id,status,work_status,assigned_at,updated_at,partner_id,next_followup_at,follow_up_reason")
       .eq("organization_id", resolvedOrgId)
       .in("request_id", requestRows.map((request) => request.id))
-      .in("status", ["pending_assignment", "assigned", "accepted"])
+      .in("status", ["pending_assignment", "assigned", "accepted", "rejected", "expired"])
       .order("assigned_at", { ascending: false }) : { data: [], error: null };
-    const assignmentRows = (assignmentResult.data ?? []) as Array<{ id:string; request_id:string; status:string; work_status:string; assigned_at:string; updated_at:string; partner_id:string }>;
+    const assignmentRows = (assignmentResult.data ?? []) as OperationalAssignmentRow[];
     const partnerIds = [...new Set(assignmentRows.map((assignment) => assignment.partner_id))];
     const partnerResult = partnerIds.length ? await supabase.from("referral_partners").select("id,name").in("id", partnerIds) : { data: [] as Array<{id:string;name:string}> };
     const partnerNames = new Map(((partnerResult.data ?? []) as Array<{id:string;name:string}>).map((partner) => [partner.id, partner.name]));
-    const assignmentByRequest = new Map<string, typeof assignmentRows[number]>();
-    for (const assignment of assignmentRows) if (!assignmentByRequest.has(assignment.request_id)) assignmentByRequest.set(assignment.request_id, assignment);
+
+    // Prefer the newest active assignment. If none exists, retain the newest
+    // rejected/expired attempt so Admin can see and repair the exception.
+    const activeByRequest = new Map<string, OperationalAssignmentRow>();
+    const fallbackByRequest = new Map<string, OperationalAssignmentRow>();
+    for (const assignment of assignmentRows) {
+      if (ACTIVE_ASSIGNMENT_STATUSES.has(assignment.status)) {
+        if (!activeByRequest.has(assignment.request_id)) activeByRequest.set(assignment.request_id, assignment);
+      } else if (!fallbackByRequest.has(assignment.request_id)) {
+        fallbackByRequest.set(assignment.request_id, assignment);
+      }
+    }
+
     setRequests(requestRows.map((request) => {
       const intake = request.intake ?? {};
       const consent = request.consent ?? {};
@@ -89,11 +113,13 @@ function useOperationalOpportunities(serviceIds: readonly string[]) {
         caseCycle: request.case_cycle ?? 1,
         createdAt: request.created_at,
       };
-      const assignment = assignmentByRequest.get(request.id);
+      const assignment = activeByRequest.get(request.id) ?? fallbackByRequest.get(request.id);
       return { ...resolveImmigrationOpportunity(inboxRow, assignment ? {
         id: assignment.id, status: assignment.status, workStatus: assignment.work_status,
         assignedAt: assignment.assigned_at, updatedAt: assignment.updated_at,
         partnerName: partnerNames.get(assignment.partner_id) ?? null,
+        nextFollowupAt: assignment.next_followup_at,
+        followUpReason: assignment.follow_up_reason,
       } : null), serviceId: request.service_id, intake };
     }));
     if (!silent) setLoading(false);

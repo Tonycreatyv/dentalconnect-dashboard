@@ -7,6 +7,8 @@ export type ImmigrationAssignment = {
   assignedAt: string;
   updatedAt: string;
   partnerName: string | null;
+  nextFollowupAt?: string | null;
+  followUpReason?: string | null;
 };
 
 export type ImmigrationOpportunity = ImmigrationInboxRow & {
@@ -25,7 +27,7 @@ export function resolveImmigrationOpportunity(
   const operationalStatus = !assignment
     ? request.consentStatus === "authorized" ? "Sin aliado disponible" : "En espera de consentimiento"
     : status === "assigned" ? "Nueva asignación"
-    : status === "rejected" ? "Rechazada por aliado"
+    : status === "rejected" || status === "expired" ? "Rechazada por aliado"
     : workStatus === "contacted" ? "Contactado"
     : workStatus === "appointment_scheduled" ? "Cita programada"
     : workStatus === "converted" ? "Convertido"
@@ -33,8 +35,8 @@ export function resolveImmigrationOpportunity(
     : "Pendiente de seguimiento";
   const recommendedAction = !assignment
     ? request.consentStatus === "authorized" ? "Revisar aliado disponible" : "Esperar consentimiento"
-    : status === "assigned" ? "Aliado debe contactar"
-    : status === "rejected" ? "Reasignar o revisar excepción"
+    : status === "assigned" || status === "pending_assignment" ? "Aliado debe contactar"
+    : status === "rejected" || status === "expired" ? "Reasignar o revisar excepción"
     : workStatus === "contacted" ? "Esperar respuesta o registrar cita"
     : workStatus === "appointment_scheduled" ? "Dar seguimiento a la cita"
     : workStatus === "converted" || workStatus === "not_converted" ? "Sin acción pendiente"

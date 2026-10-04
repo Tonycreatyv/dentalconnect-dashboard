@@ -34,7 +34,7 @@ jobs:
 
       - name: Admin operational domain tests
         run: |
-          deno test --allow-read             src/apps/referral-hub/operations/legalIntake.test.ts             src/apps/referral-hub/operations/legalOpportunities.test.ts             src/apps/referral-hub/operations/period.test.ts             src/apps/referral-hub/operations/homeMetrics.test.ts             src/apps/referral-hub/operations/immigrationInbox.test.ts             src/apps/referral-hub/operations/immigrationOpportunities.test.ts             src/apps/referral-hub/operations/leadStage.test.ts
+          deno test --allow-read             src/apps/referral-hub/operations/adminOperationalQueue.test.ts             src/apps/referral-hub/operations/legalIntake.test.ts             src/apps/referral-hub/operations/legalOpportunities.test.ts             src/apps/referral-hub/operations/period.test.ts             src/apps/referral-hub/operations/homeMetrics.test.ts             src/apps/referral-hub/operations/immigrationInbox.test.ts             src/apps/referral-hub/operations/immigrationOpportunities.test.ts             src/apps/referral-hub/operations/leadStage.test.ts
 
       - name: Referral worker parity tests
         run: |
