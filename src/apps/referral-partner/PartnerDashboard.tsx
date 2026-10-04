@@ -5,6 +5,7 @@ import { supabase } from "../../lib/supabaseClient";
 import { normalizeImmigrationConsent, type ImmigrationInboxRow } from "../referral-hub/operations/immigrationInbox";
 import { resolveImmigrationOpportunity, type ImmigrationOpportunity } from "../referral-hub/operations/immigrationOpportunities";
 import { buildTelLink, formatPhoneForDisplay, planFollowUpSteps, planPartnerActionSteps, resolveActionNote, resolvePartnerPhone, type PartnerAction } from "./partnerActions";
+import { buildPartnerCsv, buildPartnerXlsx, type PartnerExportRow } from "./partnerExport";
 import { buildHumanSummary, buildIntakeSummary, intakeDescription, referralServiceLabel, resolveIncidentDateFact, resolveSummaryTopicKey, resolveTopicDisplay } from "./referralPresentation";
 import { resolveActivePartnerContext, type ActivePartnerContext } from "./partnerMembership";
 import { resolvePartnerReferralService } from "./partnerReferralVisibility";
@@ -321,6 +322,45 @@ function followUpSummary(row: AssignmentRow, overdue: boolean): string {
   return `${reason} · ${formatFollowUpMoment(row.next_followup_at)}`;
 }
 
+function partnerExportRows(entries: PartnerListEntry[]): PartnerExportRow[] {
+  return entries.map(({ row, opportunity, queueStatus, overdue }) => {
+    const presentation = referralPresentation(row, opportunity);
+    const phone = resolvePartnerPhone(row.referral_service_requests?.leads?.phone, row.referral_service_requests?.leads?.channel_user_id);
+    return {
+      estado: overdue ? "Seguimiento vencido" : QUEUE_STATUS_LABEL[queueStatus],
+      cliente: opportunity.leadName,
+      servicio: referralServiceLabel(presentation.service),
+      telefono: formatPhoneForDisplay(phone) || "",
+      zip: opportunity.postalCode || "",
+      recibido: formatDateTime(opportunity.assignment!.assignedAt),
+      antiguedad: formatLeadAge(opportunity.assignment!.assignedAt),
+      proximoSeguimiento: queueStatus === "follow_up" ? followUpSummary(row, overdue) : "",
+    };
+  });
+}
+
+function downloadPartnerExport(entries: PartnerListEntry[], format: "csv" | "xlsx"): void {
+  const rows = partnerExportRows(entries);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const fileName = `conexxion-mi-trabajo-${dateStamp}.${format}`;
+  let blob: Blob;
+  if (format === "csv") {
+    blob = new Blob([buildPartnerCsv(rows)], { type: "text/csv;charset=utf-8" });
+  } else {
+    const xlsx = buildPartnerXlsx(rows);
+    const bytes = xlsx.buffer.slice(xlsx.byteOffset, xlsx.byteOffset + xlsx.byteLength) as ArrayBuffer;
+    blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function PartnerMobileCard({ row, opportunity, queueStatus, overdue }: PartnerListEntry) {
   const presentation = referralPresentation(row, opportunity);
   const phone = resolvePartnerPhone(row.referral_service_requests?.leads?.phone, row.referral_service_requests?.leads?.channel_user_id);
@@ -446,6 +486,11 @@ function PartnerList({ partnerId }: { partnerId: string }) {
             {tab.label}
           </button>
         ))}
+      </div>
+
+      <div className="partner-service-filter" aria-label="Exportar referencias filtradas">
+        <button type="button" className="partner-filter-btn" disabled={filtered.length === 0} onClick={() => downloadPartnerExport(filtered, "xlsx")}>Excel (.xlsx)</button>
+        <button type="button" className="partner-filter-btn" disabled={filtered.length === 0} onClick={() => downloadPartnerExport(filtered, "csv")}>CSV</button>
       </div>
 
       {filtered.length === 0 ? (
