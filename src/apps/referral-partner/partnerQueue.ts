@@ -43,13 +43,24 @@ export function sortPartnerQueue<T extends QueueItem>(items: readonly T[], now =
   return [...items].sort((a, b) => {
     const aStatus = resolvePartnerQueueStatus(a);
     const bStatus = resolvePartnerQueueStatus(b);
-    const aOverdue = isFollowUpOverdue(a, now);
-    const bOverdue = isFollowUpOverdue(b, now);
-    if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
     const rank = (status: PartnerQueueStatus) => status === "new" ? 1 : status === "follow_up" ? 2 : 3;
+
+    // New referrals are the commercial intake queue: always keep them above
+    // follow-ups and final outcomes so newly-arrived cases cannot disappear
+    // in the middle of the partner dashboard.
     if (rank(aStatus) !== rank(bStatus)) return rank(aStatus) - rank(bStatus);
-    // Untouched leads intentionally rise by oldest assignment first.
-    if (aStatus === "new" && bStatus === "new") return new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime();
+
+    // Inside Nuevos, the most recently assigned case must be first.
+    if (aStatus === "new" && bStatus === "new") return new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime();
+
+    // Follow-ups keep their urgency semantics inside their own bucket:
+    // overdue before not-yet-due, then most recently updated first.
+    if (aStatus === "follow_up" && bStatus === "follow_up") {
+      const aOverdue = isFollowUpOverdue(a, now);
+      const bOverdue = isFollowUpOverdue(b, now);
+      if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+    }
+
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
   });
 }

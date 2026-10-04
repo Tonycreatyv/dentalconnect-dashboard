@@ -124,21 +124,20 @@ Deno.test("isFollowUpOverdue is true only for a follow_up item whose next_follow
   const now = new Date("2026-09-02T22:00:00.000Z");
   assert(isFollowUpOverdue(item({ id: "a", workStatus: "follow_up", nextFollowupAt: "2026-09-02T21:00:00.000Z" }), now));
   assertEquals(isFollowUpOverdue(item({ id: "b", workStatus: "follow_up", nextFollowupAt: "2026-09-02T23:00:00.000Z" }), now), false);
-  // Not follow_up at all → never overdue, regardless of the timestamp.
   assertEquals(isFollowUpOverdue(item({ id: "c", workStatus: "new", nextFollowupAt: "2026-09-01T00:00:00.000Z" }), now), false);
-  // No reminder set → never overdue.
   assertEquals(isFollowUpOverdue(item({ id: "d", workStatus: "follow_up", nextFollowupAt: null }), now), false);
 });
 
-Deno.test("sortPartnerQueue puts overdue follow-ups at the very top of the queue, ahead of 'new'", () => {
+Deno.test("sortPartnerQueue keeps new referrals above overdue follow-ups and orders new referrals newest first", () => {
   const now = new Date("2026-09-02T22:00:00.000Z");
   const items = [
-    item({ id: "new-1", workStatus: "new", assignedAt: "2026-09-01T00:00:00Z" }),
-    item({ id: "followup-not-due", workStatus: "follow_up", nextFollowupAt: "2026-09-03T00:00:00Z" }),
-    item({ id: "overdue", workStatus: "follow_up", nextFollowupAt: "2026-09-02T20:00:00Z" }),
+    item({ id: "new-older", workStatus: "new", assignedAt: "2026-09-01T12:00:00Z" }),
+    item({ id: "overdue", workStatus: "follow_up", nextFollowupAt: "2026-09-02T20:00:00Z", updatedAt: "2026-09-02T20:00:00Z" }),
+    item({ id: "new-newest", workStatus: "new", assignedAt: "2026-09-02T21:30:00Z" }),
+    item({ id: "followup-not-due", workStatus: "follow_up", nextFollowupAt: "2026-09-03T00:00:00Z", updatedAt: "2026-09-02T21:00:00Z" }),
   ];
   const sorted = sortPartnerQueue(items, now);
-  assertEquals(sorted[0].id, "overdue");
+  assertEquals(sorted.map((entry) => entry.id), ["new-newest", "new-older", "overdue", "followup-not-due"]);
 });
 
 Deno.test("sortPartnerQueue never collapses two separate assignments — e.g. two different case cycles for the same lead stay as two distinct entries", () => {
