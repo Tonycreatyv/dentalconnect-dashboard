@@ -176,7 +176,7 @@ function slugify(name: string): string {
 
 function campaignByServiceId(campaigns: CampaignRow[], serviceId: LuisServiceId): CampaignRow | undefined {
   const key = CAMPAIGN_KEY_BY_SERVICE[serviceId];
-  return campaigns.find((c) => c.campaign_key === key) ?? campaigns.find((c) => c.service_id === serviceId);
+  return campaigns.find((c) => c.campaign_key === key) ?? campaigns.find((c) => c.service_id === serviceId && !c.campaign_key.startsWith("admin_draft_"));
 }
 
 const REAL_CAPABILITIES: NegociosCapabilities = {
@@ -336,6 +336,27 @@ export class RealNegociosDataSource implements NegociosDataSource {
         deliverySource: (campaign.delivery_source === "db" ? "db" : "legacy") as DeliverySource,
       });
     }
+
+    // Administrative drafts are deliberately excluded from the canonical
+    // WhatsApp catalog, but they must remain visible/editable in Admin.
+    // They are identified by the isolated key created by admin-coupon-management.
+    const canonicalIds = new Set(coupons.map((coupon) => coupon.id));
+    for (const campaign of campaigns) {
+      if (canonicalIds.has(campaign.id) || !campaign.campaign_key.startsWith("admin_draft_")) continue;
+      coupons.push({
+        id: campaign.id,
+        businessId: campaign.business_id ? `partner:${campaign.business_id}` : "",
+        campaignKey: campaign.campaign_key,
+        displayName: campaign.display_name,
+        imageUrl: campaign.image_url || "",
+        customerCopy: campaign.customer_copy ?? "",
+        termsText: campaign.terms_text ?? "",
+        active: false,
+        expiresAt: campaign.expires_at,
+        deliverySource: (campaign.delivery_source === "db" ? "db" : "legacy") as DeliverySource,
+      });
+    }
+
     return coupons;
   }
 
