@@ -193,7 +193,8 @@ export default function CouponEditor() {
   const customMessageBlocked = coupon.deliverySource === "db" && !coupon.businessId.startsWith("partner:");
 
   async function saveCoupon() {
-    if (!dirty || customMessageBlocked) return;
+    if (!coupon || !dirty || customMessageBlocked) return;
+    const currentCoupon = coupon;
     setSaving(true);
     setNotice("");
     try {
@@ -201,14 +202,14 @@ export default function CouponEditor() {
         action: "update",
         coupon_id: couponId,
         patch: {
-          display_name: coupon.displayName.trim(),
-          business_id: coupon.businessId.startsWith("partner:") ? coupon.businessId.slice("partner:".length) : null,
-          image_url: coupon.imageUrl.trim() || null,
+          display_name: currentCoupon.displayName.trim(),
+          business_id: currentCoupon.businessId.startsWith("partner:") ? currentCoupon.businessId.slice("partner:".length) : null,
+          image_url: currentCoupon.imageUrl.trim() || null,
           customer_copy: toStoredText(copyDisplay).trim() || null,
-          terms_text: coupon.termsText.trim() || null,
-          active: coupon.active,
-          expires_at: coupon.expiresAt,
-          delivery_source: coupon.deliverySource,
+          terms_text: currentCoupon.termsText.trim() || null,
+          active: currentCoupon.active,
+          expires_at: currentCoupon.expiresAt,
+          delivery_source: currentCoupon.deliverySource,
         },
       });
       const refreshed = await dataSource.getCoupon(couponId);
@@ -261,9 +262,7 @@ export default function CouponEditor() {
         </button>
       </div>
 
-      {isLocationBasedCoupon ? (
-        <p className="hub-field-hint">Este beneficio usa ubicaciones reales. Elegí una para revisar su imagen exacta.</p>
-      ) : null}
+      {isLocationBasedCoupon ? <p className="hub-field-hint">Este beneficio usa ubicaciones reales. Elegí una para revisar su imagen exacta.</p> : null}
 
       <MessagePreview coupon={coupon} customerCopy={isLocationBasedCoupon ? "" : toStoredText(copyDisplay)} businessName={previewBusinessName} imageUrl={previewImageUrl} onOpenImage={() => setLightboxOpen(true)} />
       {lightboxOpen && previewImageUrl ? <ImageLightbox src={previewImageUrl} alt={previewBusinessName || coupon.displayName} onClose={() => setLightboxOpen(false)} /> : null}
