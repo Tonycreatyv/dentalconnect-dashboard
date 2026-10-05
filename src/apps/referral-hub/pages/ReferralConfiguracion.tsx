@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { supabase } from "../../../lib/supabaseClient";
 import PageHeader from "../ui/PageHeader";
+import PushNotificationSettings from "../ui/PushNotificationSettings";
 import StatusBadge from "../ui/StatusBadge";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
 import { profileDisplayName, profilePhone, useProfileEditor } from "../operations/useProfileEditor";
@@ -61,7 +62,6 @@ export default function ReferralConfiguracion() {
     if (!resolvedOrgId) { setLoading(false); return; }
     setLoading(true);
     setOrgName(resolvedOrgName);
-    // Only safe, non-secret columns — never tokens, never the raw Meta payload.
     supabase.from("org_settings")
       .select("whatsapp_enabled,whatsapp_phone_number,whatsapp_display_name,whatsapp_registered,whatsapp_webhooks_subscribed,bot_enabled,automation_enabled,timezone")
       .eq("organization_id", resolvedOrgId)
@@ -176,7 +176,8 @@ export default function ReferralConfiguracion() {
 
       <section className="hub-section">
         <h2><Bell size={16} />Notificaciones</h2>
-        <p className="hub-field-hint">Todavía no hay notificaciones configurables desde aquí — cada solicitud, mensaje y ubicación pendiente ya aparece en Inicio y Mensajes en tiempo real, pero no existe hoy un envío de alertas independiente (push, email o WhatsApp interno) para activar o desactivar.</p>
+        <p className="hub-field-hint">Recibe alertas operativas en tus dispositivos sin depender de tener el dashboard abierto.</p>
+        <PushNotificationSettings />
       </section>
 
       <section className="hub-section">
@@ -184,7 +185,7 @@ export default function ReferralConfiguracion() {
         <dl className="hub-facts">
           <div><dt>Zona horaria</dt><dd>{whatsapp?.timezone || "America/Tegucigalpa"}</dd></div>
         </dl>
-        <p className="hub-field-hint">Los horarios de silencio y seguimiento automático todavía no están configurables desde aquí.</p>
+        <p className="hub-field-hint">Los horarios de silencio para push se administran arriba. El horario del motor de seguimiento automático se mantiene separado.</p>
       </section>
 
       <section className="hub-section">
