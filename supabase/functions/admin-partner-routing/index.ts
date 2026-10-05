@@ -157,7 +157,7 @@ Deno.serve(async (req) => {
       aggregate_type: "partner_service_rule",
       aggregate_id: saved.id,
       event_type: "admin_partner_service_rule_updated",
-      actor_type: "admin",
+      actor_type: "user",
       actor_id: userId,
       source: "admin_operator_mode",
       previous_state: previous.data ?? {},
