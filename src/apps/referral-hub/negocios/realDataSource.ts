@@ -23,13 +23,12 @@ import type {
 // The real operational data source — reads exclusively from tables that
 // exist and are populated TODAY (no draft migration required):
 // referral_coupon_campaigns, referral_benefit_campaign_locations,
-// referral_partners (filtered to partnership_status='active' — every row
-// today is 'demo_reference', so this genuinely returns none until a real
-// partnership is confirmed, rather than showing the grocery-delivery demo
-// rows as if they were real participating businesses), referral_benefit_claims
-// for real request counts, and the hardcoded LuisServiceId catalog for the
-// three merchants (Médico Urgencias/Dental Now 14/Ultra Cargo) that are
-// real and live in the WhatsApp send path but have no referral_partners row.
+// referral_partners (restricted to partnership_status='active', while
+// intentionally keeping both enabled and paused partners visible so an
+// administrator can reactivate them), referral_benefit_claims for real
+// request counts, and the hardcoded LuisServiceId catalog for the three
+// merchants (Médico Urgencias/Dental Now 14/Ultra Cargo) that are real and
+// live in the WhatsApp send path but have no referral_partners row.
 //
 // Server persistence: referral_partners got real owner/admin write RLS +
 // GRANT via docs/proposed-migrations/20260824_draft_A_business_identity_editing.sql
@@ -140,12 +139,11 @@ async function loadClaimCounts(): Promise<{ byCampaign: Map<string, number>; byL
   return { byCampaign, byLocation };
 }
 
-async function loadActivePartners(): Promise<PartnerRow[]> {
+async function loadConfirmedPartners(): Promise<PartnerRow[]> {
   const result = await supabase.from("referral_partners")
     .select("id,name,partnership_status,active,category_service_id,contact_name,phone,address_text,postal_code,image_url,hours,faqs,offers_coupon,receives_service_requests")
     .eq("organization_id", ORGANIZATION_ID)
-    .eq("partnership_status", "active")
-    .eq("active", true);
+    .eq("partnership_status", "active");
   if (result.error) return [];
   return (result.data ?? []) as PartnerRow[];
 }
@@ -230,7 +228,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
   readonly capabilities = REAL_CAPABILITIES;
 
   async listBusinesses(): Promise<Business[]> {
-    const [campaigns, locations, partners, claimCounts] = await Promise.all([loadCampaigns(), loadLocations(), loadActivePartners(), loadClaimCounts()]);
+    const [campaigns, locations, partners, claimCounts] = await Promise.all([loadCampaigns(), loadLocations(), loadConfirmedPartners(), loadClaimCounts()]);
     const businesses: Business[] = [];
 
     for (const serviceId of ["luis_benefit_medical", "luis_benefit_dental", "luis_benefit_shipping"] as LuisServiceId[]) {
@@ -298,7 +296,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
   // (Gate 1-A, applied 2026-08-24). partnership_status is set to 'active'
   // explicitly — a business created through this form is a real confirmed
   // partner, not a 'demo_reference' row, so it appears immediately in
-  // listBusinesses() (which only reads partnership_status='active' rows).
+  // listBusinesses() and remains visible even when later paused.
   async createBusiness(input: NewBusinessInput): Promise<Business> {
     const result = await supabase.from("referral_partners")
       .insert({
