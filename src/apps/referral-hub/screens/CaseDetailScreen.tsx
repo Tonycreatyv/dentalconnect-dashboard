@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Clock, UserRound } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Clock, MessageCircle, Phone, StickyNote, UserRound } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
 import PageHeader from "../ui/PageHeader";
@@ -66,6 +66,18 @@ const STATUS_LABEL: Record<string, string> = {
   not_converted: "Cerrado", closed: "Cerrado",
 };
 
+const EVENT_LABEL: Record<string, string> = {
+  partner_note: "Nota interna",
+  partner_contacted: "Cliente contactado",
+  partner_follow_up: "Seguimiento programado",
+  partner_appointment_scheduled: "Cita registrada",
+  partner_converted: "Caso cerrado · convertido",
+  partner_closed_not_converted: "Caso cerrado · no convertido",
+  legal_assignment_created: "Responsable asignado",
+  immigration_assignment_created: "Responsable asignado",
+  dui_criminal_assignment_created: "Responsable asignado",
+};
+
 function displayStatus(request: CaseRequest, assignment: CaseAssignment | null): string {
   if (request.status === "closed" || ["converted", "not_converted", "closed"].includes(assignment?.work_status ?? "")) return "Cerrado";
   if (assignment?.work_status === "appointment_scheduled") return "Cita";
@@ -91,6 +103,16 @@ function intakeSummary(request: CaseRequest): string | null {
   const presentation = legalOpportunityPresentation(request.service_id, request.intake ?? {}, topic);
   return presentation.summary || presentation.description || null;
 }
+function contactDigits(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\D/g, "");
+}
+function eventLabel(eventType: string): string {
+  return EVENT_LABEL[eventType] ?? eventType.replace(/_/g, " ");
+}
+function eventNote(event: CaseEvent): string | null {
+  const value = event.metadata?.note;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 export default function CaseDetailScreen() {
   const { requestId = "" } = useParams();
@@ -101,8 +123,10 @@ export default function CaseDetailScreen() {
   const [partners, setPartners] = useState<PartnerOption[]>([]);
   const [selectedPartnerId, setSelectedPartnerId] = useState("");
   const [nextFollowupLocal, setNextFollowupLocal] = useState("");
+  const [noteText, setNoteText] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [actionNotice, setActionNotice] = useState("");
 
   const load = useCallback(async () => {
     if (!resolvedOrgId || !requestId) {
@@ -246,17 +270,20 @@ export default function CaseDetailScreen() {
   const consentStatus = typeof state?.request.consent?.status === "string" ? state.request.consent.status : "pending_review";
   const assignmentAuthorized = Boolean(state && (!state.requiresAuthorization || consentStatus === "authorized"));
 
-  async function runCaseAction(work: () => Promise<{ error: { message?: string } | null }>) {
-    if (actionBusy) return;
+  async function runCaseAction(work: () => Promise<{ error: { message?: string } | null }>, successMessage?: string): Promise<boolean> {
+    if (actionBusy) return false;
     setActionBusy(true);
     setActionError("");
+    setActionNotice("");
     const result = await work();
     setActionBusy(false);
     if (result.error) {
       setActionError(result.error.message || "No se pudo guardar el cambio.");
-      return;
+      return false;
     }
+    if (successMessage) setActionNotice(successMessage);
     await load();
+    return true;
   }
 
   async function saveResponsible() {
@@ -266,7 +293,7 @@ export default function CaseDetailScreen() {
       requestId: state.request.id,
       partnerId: selectedPartnerId,
       hasActiveAssignment,
-    }) as Promise<{ error: { message?: string } | null }>);
+    }) as Promise<{ error: { message?: string } | null }>, hasActiveAssignment ? "Responsable actualizado." : "Responsable asignado.");
   }
 
   async function saveFollowUp() {
@@ -276,12 +303,24 @@ export default function CaseDetailScreen() {
       setActionError("Selecciona una fecha y hora válida.");
       return;
     }
-    await runCaseAction(() => updateAdminCase({
+    const ok = await runCaseAction(() => updateAdminCase({
       requestId: state.request.id,
       action: "follow_up",
       followUpReason: "other",
       nextFollowupAt: parsed.toISOString(),
-    }) as Promise<{ error: { message?: string } | null }>);
+    }) as Promise<{ error: { message?: string } | null }>, "Próximo seguimiento guardado.");
+    if (ok) setNextFollowupLocal("");
+  }
+
+  async function saveNote() {
+    if (!state || !hasActiveAssignment || !noteText.trim()) return;
+    const note = noteText.trim();
+    const ok = await runCaseAction(() => updateAdminCase({
+      requestId: state.request.id,
+      action: "note",
+      note,
+    }) as Promise<{ error: { message?: string } | null }>, "Nota agregada al historial.");
+    if (ok) setNoteText("");
   }
 
   if (loading) return <div className="hub-page"><Link className="hub-back" to="/operacion"><ArrowLeft />Volver</Link><SkeletonRows count={4} /></div>;
@@ -293,9 +332,11 @@ export default function CaseDetailScreen() {
     typeof state.request.intake?.topic === "string" ? state.request.intake.topic : null,
   );
   const summary = intakeSummary(state.request);
+  const phoneDigits = contactDigits(state.lead?.phone);
+  const whatsappDigits = contactDigits(state.lead?.channel_user_id || state.lead?.phone);
 
   return (
-    <div className="hub-page hub-page--wide">
+    <div className="hub-page hub-page--wide hub-case-page">
       <Link className="hub-back" to="/operacion"><ArrowLeft />Volver a Operación</Link>
       <PageHeader
         eyebrow="Caso"
@@ -304,7 +345,13 @@ export default function CaseDetailScreen() {
         meta={<StatusBadge tone={toneForStatus(status)} label={status} />}
       />
 
-      <dl className="hub-facts">
+      <div className="hub-case-quick-actions" aria-label="Acciones rápidas del cliente">
+        {phoneDigits ? <a className="hub-secondary" href={`tel:${phoneDigits}`}><Phone size={16} />Llamar</a> : null}
+        {whatsappDigits ? <a className="hub-primary" href={`https://wa.me/${whatsappDigits}`} target="_blank" rel="noreferrer"><MessageCircle size={16} />WhatsApp</a> : null}
+        {state.lead ? <Link className="hub-secondary" to={`/clientes/${state.lead.id}?request=${state.request.id}`}><UserRound size={16} />Ver cliente</Link> : null}
+      </div>
+
+      <dl className="hub-facts hub-case-facts">
         <div><dt>Servicio</dt><dd>{presentation.serviceLabel || state.request.service_id}</dd></div>
         <div><dt>Responsable</dt><dd>{state.partner?.name || "Sin responsable"}</dd></div>
         <div><dt>ZIP</dt><dd>{state.request.postal_code || "—"}</dd></div>
@@ -314,12 +361,14 @@ export default function CaseDetailScreen() {
         <div><dt>Intentos de seguimiento</dt><dd>{state.assignment?.follow_up_attempt_count ?? 0}</dd></div>
       </dl>
 
-      <section className="hub-section">
-        <h2>Gestión</h2>
+      <section className="hub-section hub-case-management">
+        <div className="hub-section-head"><h2>Gestión</h2>{actionBusy ? <span className="hub-field-hint">Guardando…</span> : null}</div>
         {actionError ? <p className="partner-feedback is-error" role="alert">{actionError}</p> : null}
+        {actionNotice ? <p className="hub-account-success" role="status"><CheckCircle2 size={14} />{actionNotice}</p> : null}
+
         <div className="hub-field">
           <label htmlFor="case-responsible"><strong>Responsable</strong></label>
-          <div className="hub-campaign-actions">
+          <div className="hub-case-control-row">
             <select id="case-responsible" className="hub-input" value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)} disabled={actionBusy || !assignmentAuthorized}>
               <option value="">Seleccionar aliado</option>
               {partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name}</option>)}
@@ -335,28 +384,35 @@ export default function CaseDetailScreen() {
           <p className="hub-field-hint">No hay un aliado elegible con regla y contacto activo para este caso.</p>
         ) : null}
 
+        <div className="hub-field hub-case-note-field">
+          <label htmlFor="case-note"><strong><StickyNote size={14} />Nota interna</strong></label>
+          <textarea id="case-note" className="hub-textarea" value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder="Ej. Cliente pidió que lo llamemos después de las 4 PM." disabled={actionBusy || !hasActiveAssignment} />
+          <button type="button" className="hub-secondary" disabled={actionBusy || !hasActiveAssignment || !noteText.trim()} onClick={() => void saveNote()}>Agregar nota al historial</button>
+          {!hasActiveAssignment ? <p className="hub-field-hint">Asigná un responsable antes de agregar notas de gestión.</p> : null}
+        </div>
+
         {partnerAccepted && status !== "Cerrado" ? (
           <>
-            <div className="hub-campaign-actions">
-              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "contacted" }) as Promise<{ error: { message?: string } | null }>)}>Registrar contactado</button>
-              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "appointment_scheduled" }) as Promise<{ error: { message?: string } | null }>)}>Registrar cita</button>
+            <div className="hub-case-action-grid">
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "contacted" }) as Promise<{ error: { message?: string } | null }>, "Contacto registrado.")}>Registrar contactado</button>
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "appointment_scheduled" }) as Promise<{ error: { message?: string } | null }>, "Cita registrada.")}>Registrar cita</button>
             </div>
             <div className="hub-field">
               <label htmlFor="case-followup"><strong>Próximo seguimiento</strong></label>
-              <div className="hub-campaign-actions">
+              <div className="hub-case-control-row">
                 <input id="case-followup" className="hub-input" type="datetime-local" value={nextFollowupLocal} onChange={(event) => setNextFollowupLocal(event.target.value)} />
                 <button type="button" className="hub-primary" disabled={actionBusy || !nextFollowupLocal} onClick={() => void saveFollowUp()}>Guardar próximo paso</button>
               </div>
             </div>
-            <div className="hub-campaign-actions">
-              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "converted" }) as Promise<{ error: { message?: string } | null }>)}>Cerrar · convertido</button>
-              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "closed_not_converted" }) as Promise<{ error: { message?: string } | null }>)}>Cerrar · no convertido</button>
+            <div className="hub-case-action-grid hub-case-close-actions">
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "converted" }) as Promise<{ error: { message?: string } | null }>, "Caso cerrado como convertido.")}>Cerrar · convertido</button>
+              <button type="button" className="hub-secondary" disabled={actionBusy} onClick={() => void runCaseAction(() => updateAdminCase({ requestId: state.request.id, action: "closed_not_converted" }) as Promise<{ error: { message?: string } | null }>, "Caso cerrado como no convertido.")}>Cerrar · no convertido</button>
             </div>
           </>
         ) : status === "Cerrado" ? (
           <p className="hub-field-hint">Este caso está cerrado. El historial permanece disponible.</p>
         ) : hasActiveAssignment ? (
-          <p className="hub-field-hint">El aliado todavía no ha aceptado la asignación. Podés cambiar responsable, pero no registrar gestión en su nombre.</p>
+          <p className="hub-field-hint">El aliado todavía no ha aceptado la asignación. Podés cambiar responsable y agregar notas, pero no registrar gestión en su nombre.</p>
         ) : (
           <p className="hub-field-hint">Asigná un responsable para iniciar la gestión.</p>
         )}
@@ -376,18 +432,21 @@ export default function CaseDetailScreen() {
         </dl>
       </section>
 
-      <section className="hub-section">
+      <section className="hub-section hub-case-activity">
         <h2>Actividad</h2>
         {state.events.length === 0 ? (
           <EmptyState icon={Clock} title="Sin eventos registrados para este caso" />
         ) : (
           <div className="hub-list">
-            {state.events.slice(0, 20).map((event) => (
-              <div key={event.id} className="hub-list-row">
-                <div><strong>{event.event_type.replace(/_/g, " ")}</strong><small>{formatDateTime(event.occurred_at)}</small></div>
-                <CheckCircle2 size={18} />
-              </div>
-            ))}
+            {state.events.slice(0, 20).map((event) => {
+              const note = eventNote(event);
+              return (
+                <div key={event.id} className="hub-list-row hub-case-event-row">
+                  <div><strong>{eventLabel(event.event_type)}</strong>{note ? <span className="hub-case-event-note">{note}</span> : null}<small>{formatDateTime(event.occurred_at)}</small></div>
+                  {event.event_type === "partner_note" ? <StickyNote size={18} /> : <CheckCircle2 size={18} />}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
