@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       return json(req, 413, { success: false, error: "request_too_large" });
     }
     const body = JSON.parse(raw) as Record<string, unknown>;
-    const action = text(body.action, 30);
+    const action = text(body.action, 40);
     const couponId = text(body.coupon_id, 100);
     if (!action || !couponId) return json(req, 400, { success: false, error: "invalid_request" });
 
@@ -105,6 +105,46 @@ Deno.serve(async (req) => {
         success: true,
         events: (events.data ?? []).map((event: any) => ({ ...event, actor_email: event.actor_id ? emails.get(event.actor_id) ?? null : null })),
       });
+    }
+
+    if (action === "update_location_image") {
+      const locationId = text(body.location_id, 100);
+      const imageUrl = text(body.image_url, 1_500);
+      if (!locationId || !imageUrl || !/^https:\/\//i.test(imageUrl)) {
+        return json(req, 400, { success: false, error: "invalid_location_image" });
+      }
+      const currentLocation = await admin.from("referral_benefit_campaign_locations")
+        .select("id,campaign_id,location_key,display_name,official_media_url")
+        .eq("organization_id", ORGANIZATION_ID)
+        .eq("campaign_id", couponId)
+        .eq("id", locationId)
+        .maybeSingle();
+      if (!currentLocation.data) return json(req, 404, { success: false, error: "location_not_found" });
+
+      const updatedLocation = await admin.from("referral_benefit_campaign_locations")
+        .update({ official_media_url: imageUrl })
+        .eq("organization_id", ORGANIZATION_ID)
+        .eq("campaign_id", couponId)
+        .eq("id", locationId)
+        .select("id,campaign_id,location_key,display_name,official_media_url")
+        .single();
+      if (updatedLocation.error) throw updatedLocation.error;
+
+      const event = await admin.from("referral_operational_events").insert({
+        organization_id: ORGANIZATION_ID,
+        aggregate_type: "coupon_campaign",
+        aggregate_id: couponId,
+        event_type: "coupon_location_image_updated",
+        actor_type: "user",
+        actor_id: user.id,
+        source: "admin_operator_mode",
+        previous_state: currentLocation.data,
+        new_state: updatedLocation.data,
+        metadata: { location_id: locationId, changed_fields: ["official_media_url"] },
+      });
+      if (event.error) throw event.error;
+
+      return json(req, 200, { success: true, location: updatedLocation.data });
     }
 
     if (action !== "update") return json(req, 400, { success: false, error: "unsupported_action" });
