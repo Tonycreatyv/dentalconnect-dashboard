@@ -1,15 +1,11 @@
-import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 import { SERVICE_LABELS, type LuisServiceId } from "../operations/luisCatalog";
 
 const ORGANIZATION_ID = "luis-gabriel-referral-hub";
 
-type ServiceOption = {
-  id: string;
-  name: string;
-};
-
+type ServiceOption = { id: string; name: string };
 type PartnerRule = {
   id: string;
   service_id: string;
@@ -25,6 +21,14 @@ type PartnerRule = {
   starts_at: string | null;
   expires_at: string | null;
   workspace_config: Record<string, unknown>;
+};
+
+type RuleDraft = {
+  priority: string;
+  capacity: string;
+  sla: string;
+  postalCodes: string;
+  cities: string;
 };
 
 function normalizeRule(row: Partial<PartnerRule> & { id: string; service_id: string }): PartnerRule {
@@ -46,9 +50,24 @@ function normalizeRule(row: Partial<PartnerRule> & { id: string; service_id: str
   };
 }
 
+function draftFromRule(rule?: PartnerRule): RuleDraft {
+  return {
+    priority: String(rule?.assignment_priority ?? 10),
+    capacity: rule?.capacity_limit ? String(rule.capacity_limit) : "",
+    sla: String(rule?.acceptance_sla_minutes ?? 120),
+    postalCodes: (rule?.postal_codes ?? []).join(", "),
+    cities: (rule?.cities ?? []).join(", "),
+  };
+}
+
+function splitList(value: string) {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
 export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: string }) {
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [rules, setRules] = useState<PartnerRule[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, RuleDraft>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [savingServiceId, setSavingServiceId] = useState<string | null>(null);
@@ -58,39 +77,30 @@ export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: str
     setLoading(true);
     setError("");
     const [serviceResult, ruleResult] = await Promise.all([
-      supabase
-        .from("referral_organization_services")
+      supabase.from("referral_organization_services")
         .select("service_id,enabled")
         .eq("organization_id", ORGANIZATION_ID)
         .eq("enabled", true),
-      supabase
-        .from("referral_partner_service_rules")
+      supabase.from("referral_partner_service_rules")
         .select("id,service_id,active,assignment_priority,partner_location_id,postal_codes,cities,languages,specialties,capacity_limit,acceptance_sla_minutes,starts_at,expires_at,workspace_config")
         .eq("organization_id", ORGANIZATION_ID)
         .eq("partner_id", partnerId),
     ]);
 
-    if (serviceResult.error) {
-      setError(serviceResult.error.message);
-      setLoading(false);
-      return;
-    }
-    if (ruleResult.error) {
-      setError(ruleResult.error.message);
+    if (serviceResult.error || ruleResult.error) {
+      setError(serviceResult.error?.message || ruleResult.error?.message || "No se pudieron cargar las reglas.");
       setLoading(false);
       return;
     }
 
     const serviceRows = (serviceResult.data ?? []) as Array<{ service_id: string; enabled: boolean }>;
-    setServices(
-      serviceRows
-        .map((service) => ({
-          id: service.service_id,
-          name: SERVICE_LABELS[service.service_id as LuisServiceId] ?? service.service_id,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name, "es")),
-    );
-    setRules(((ruleResult.data ?? []) as Array<Partial<PartnerRule> & { id: string; service_id: string }>).map(normalizeRule));
+    const normalizedRules = ((ruleResult.data ?? []) as Array<Partial<PartnerRule> & { id: string; service_id: string }>).map(normalizeRule);
+    const nextServices = serviceRows
+      .map((service) => ({ id: service.service_id, name: SERVICE_LABELS[service.service_id as LuisServiceId] ?? service.service_id }))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+    setServices(nextServices);
+    setRules(normalizedRules);
+    setDrafts(Object.fromEntries(nextServices.map((service) => [service.id, draftFromRule(normalizedRules.find((rule) => rule.service_id === service.id))])));
     setLoading(false);
   }
 
@@ -98,7 +108,7 @@ export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: str
 
   const ruleByService = useMemo(() => new Map(rules.map((rule) => [rule.service_id, rule])), [rules]);
 
-  async function saveRule(service: ServiceOption, patch: Partial<PartnerRule>) {
+  async function saveRule(service: ServiceOption, patch: Partial<PartnerRule>, successMessage?: string) {
     const current = ruleByService.get(service.id);
     const next: PartnerRule = {
       id: current?.id ?? "",
@@ -121,37 +131,58 @@ export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: str
     setSavingServiceId(service.id);
     setError("");
     setNotice("");
-    const { data, error: rpcError } = await supabase.rpc("admin_save_referral_partner_service_rule", {
-      p_organization_id: ORGANIZATION_ID,
-      p_rule_id: current?.id ?? null,
-      p_partner_id: partnerId,
-      p_service_id: service.id,
-      p_active: next.active,
-      p_assignment_priority: next.assignment_priority,
-      p_partner_location_id: next.partner_location_id,
-      p_postal_codes: next.postal_codes,
-      p_cities: next.cities,
-      p_languages: next.languages,
-      p_specialties: next.specialties,
-      p_capacity_limit: next.capacity_limit,
-      p_acceptance_sla_minutes: next.acceptance_sla_minutes,
-      p_starts_at: next.starts_at,
-      p_expires_at: next.expires_at,
-      p_workspace_config: next.workspace_config,
+    const result = await supabase.functions.invoke("admin-partner-routing", {
+      body: {
+        organization_id: ORGANIZATION_ID,
+        partner_id: partnerId,
+        service_id: service.id,
+        rule_id: current?.id ?? null,
+        active: next.active,
+        assignment_priority: next.assignment_priority,
+        postal_codes: next.postal_codes,
+        cities: next.cities,
+        languages: next.languages,
+        specialties: next.specialties,
+        capacity_limit: next.capacity_limit,
+        acceptance_sla_minutes: next.acceptance_sla_minutes,
+      },
     });
     setSavingServiceId(null);
 
-    if (rpcError) {
-      setError(rpcError.message);
+    const payload = result.data as { success?: boolean; rule?: PartnerRule; error?: string } | null;
+    if (result.error || !payload?.success || !payload.rule) {
+      setError(result.error?.message || payload?.error || "No se pudo guardar la configuración.");
       return;
     }
 
-    const saved = normalizeRule(data as Partial<PartnerRule> & { id: string; service_id: string });
-    setRules((previous) => {
-      const exists = previous.some((rule) => rule.service_id === service.id);
-      return exists ? previous.map((rule) => rule.service_id === service.id ? saved : rule) : [...previous, saved];
+    const saved = normalizeRule(payload.rule);
+    setRules((previous) => previous.some((rule) => rule.service_id === service.id)
+      ? previous.map((rule) => rule.service_id === service.id ? saved : rule)
+      : [...previous, saved]);
+    setDrafts((previous) => ({ ...previous, [service.id]: draftFromRule(saved) }));
+    setNotice(successMessage ?? `${service.name}: configuración actualizada.`);
+  }
+
+  async function saveAdvanced(service: ServiceOption) {
+    const draft = drafts[service.id] ?? draftFromRule(ruleByService.get(service.id));
+    const priority = Number(draft.priority);
+    const capacity = draft.capacity.trim() ? Number(draft.capacity) : null;
+    const sla = Number(draft.sla);
+    const zips = splitList(draft.postalCodes);
+    const invalidZip = zips.find((zip) => !/^\d{5}$/.test(zip));
+
+    if (!Number.isInteger(priority) || priority < 0) { setError("La prioridad debe ser un número entero de 0 o más."); return; }
+    if (capacity !== null && (!Number.isInteger(capacity) || capacity < 1)) { setError("La capacidad debe ser un entero mayor que 0 o quedar vacía."); return; }
+    if (!Number.isInteger(sla) || sla < 1) { setError("El SLA debe ser de al menos 1 minuto."); return; }
+    if (invalidZip) { setError(`ZIP inválido: ${invalidZip}. Usa códigos de 5 dígitos.`); return; }
+
+    await saveRule(service, {
+      assignment_priority: priority,
+      capacity_limit: capacity,
+      acceptance_sla_minutes: sla,
+      postal_codes: zips,
+      cities: splitList(draft.cities),
     });
-    setNotice(`${service.name}: ${saved.active ? "recibiendo solicitudes" : "pausado"}.`);
   }
 
   if (loading) {
@@ -163,7 +194,7 @@ export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: str
       <div className="hub-section-heading">
         <div>
           <h2>Servicios que puede recibir</h2>
-          <p className="hub-field-hint">Controla qué tipos de leads pueden asignarse a este partner.</p>
+          <p className="hub-field-hint">Controla qué tipos de leads recibe este partner y bajo qué condiciones.</p>
         </div>
       </div>
 
@@ -175,29 +206,65 @@ export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: str
           const rule = ruleByService.get(service.id);
           const enabled = Boolean(rule?.active);
           const saving = savingServiceId === service.id;
+          const draft = drafts[service.id] ?? draftFromRule(rule);
           return (
-            <div className="hub-list-row" key={service.id}>
-              <div>
-                <strong>{service.name}</strong>
-                <small>{enabled ? "Puede recibir nuevos leads" : "No recibe nuevos leads"}</small>
+            <div className="hub-list-row" key={service.id} style={{ alignItems: "stretch", flexDirection: "column", gap: ".65rem" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: ".8rem" }}>
+                <div>
+                  <strong>{service.name}</strong>
+                  <small>{enabled ? "Puede recibir nuevos leads" : "No recibe nuevos leads"}</small>
+                </div>
+                <label className="hub-delivery-toggle" style={{ margin: 0 }}>
+                  <span className="sr-only">{service.name}</span>
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    disabled={saving}
+                    onChange={(event) => void saveRule(service, { active: event.target.checked }, `${service.name}: ${event.target.checked ? "activado" : "pausado"}.`)}
+                  />
+                </label>
               </div>
-              <label className="hub-delivery-toggle" style={{ margin: 0 }}>
-                <span className="sr-only">{service.name}</span>
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  disabled={saving}
-                  onChange={(event) => void saveRule(service, { active: event.target.checked })}
-                />
-              </label>
+
+              <details>
+                <summary className="hub-chip-btn" style={{ width: "fit-content", cursor: "pointer" }}>
+                  <ChevronDown size={14} /> Configurar routing
+                </summary>
+                <div className="hub-field-group" style={{ marginTop: ".7rem" }}>
+                  <div className="hub-field">
+                    <label>Prioridad</label>
+                    <input inputMode="numeric" value={draft.priority} onChange={(e) => setDrafts((prev) => ({ ...prev, [service.id]: { ...draft, priority: e.target.value } }))} />
+                    <p className="hub-field-hint">Menor número = mayor prioridad.</p>
+                  </div>
+                  <div className="hub-field">
+                    <label>Capacidad de casos activos</label>
+                    <input inputMode="numeric" placeholder="Sin límite" value={draft.capacity} onChange={(e) => setDrafts((prev) => ({ ...prev, [service.id]: { ...draft, capacity: e.target.value } }))} />
+                  </div>
+                  <div className="hub-field">
+                    <label>SLA de aceptación (minutos)</label>
+                    <input inputMode="numeric" value={draft.sla} onChange={(e) => setDrafts((prev) => ({ ...prev, [service.id]: { ...draft, sla: e.target.value } }))} />
+                  </div>
+                  <div className="hub-field">
+                    <label>ZIPs permitidos</label>
+                    <input placeholder="30071, 30341" value={draft.postalCodes} onChange={(e) => setDrafts((prev) => ({ ...prev, [service.id]: { ...draft, postalCodes: e.target.value } }))} />
+                    <p className="hub-field-hint">Vacío = sin restricción por ZIP.</p>
+                  </div>
+                  <div className="hub-field">
+                    <label>Ciudades permitidas</label>
+                    <input placeholder="Atlanta, Norcross" value={draft.cities} onChange={(e) => setDrafts((prev) => ({ ...prev, [service.id]: { ...draft, cities: e.target.value } }))} />
+                    <p className="hub-field-hint">Vacío = sin restricción por ciudad.</p>
+                  </div>
+                </div>
+                <button type="button" className="hub-primary" disabled={saving} onClick={() => void saveAdvanced(service)}>
+                  <Save size={14} /> {saving ? "Guardando…" : "Guardar routing"}
+                </button>
+              </details>
             </div>
           );
         })}
       </div>
 
       {services.length === 0 ? <p className="hub-field-hint">No hay servicios operativos configurados.</p> : null}
-
-      <p className="hub-field-hint">Los cambios se guardan inmediatamente en las reglas reales de asignación del partner.</p>
+      <p className="hub-field-hint">Cada cambio se guarda en las reglas reales del partner y queda registrado en el historial operativo.</p>
     </section>
   );
 }
