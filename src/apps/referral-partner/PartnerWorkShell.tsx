@@ -240,7 +240,7 @@ function referralPresentation(row: AssignmentRow, opportunity: ImmigrationOpport
       service,
       topicKey,
       intake,
-      consentStatus: opportunity.consentStatus,
+      consentStatus: null,
       includeIncidentDate: false,
     }),
   };
