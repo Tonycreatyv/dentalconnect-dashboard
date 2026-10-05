@@ -5,6 +5,7 @@ import { useReferralOrganization } from "../organizations/ReferralOrganizationCo
 import AccountMenu from "./AccountMenu";
 import AdminActionPalette from "./AdminActionPalette";
 import ConexxionWordmark from "./ConexxionWordmark";
+import "./operatorMobile.css";
 
 // Points at the new business-centered /negocios tree (see
 // src/apps/referral-hub/negocios/). The old /campanas* tree stays fully
