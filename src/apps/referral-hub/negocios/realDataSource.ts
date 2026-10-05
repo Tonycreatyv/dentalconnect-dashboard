@@ -5,6 +5,7 @@ import {
   BENEFIT_SERVICE_IDS,
   BENEFIT_STATIC_IMAGE,
   CAMPAIGN_KEY_BY_SERVICE,
+  SERVICE_BY_CAMPAIGN_KEY,
   SERVICE_LABELS,
   type LuisServiceId,
 } from "../operations/luisCatalog";
@@ -26,9 +27,8 @@ import type {
 // referral_partners (restricted to partnership_status='active', while
 // intentionally keeping both enabled and paused partners visible so an
 // administrator can reactivate them), referral_benefit_claims for real
-// request counts, and the hardcoded LuisServiceId catalog for the three
-// merchants (Médico Urgencias/Dental Now 14/Ultra Cargo) that are real and
-// live in the WhatsApp send path but have no referral_partners row.
+// request counts, and the live LuisServiceId catalog for merchant-backed
+// and location-backed benefits used by the production WhatsApp path.
 //
 // Server persistence: referral_partners got real owner/admin write RLS +
 // GRANT via docs/proposed-migrations/20260824_draft_A_business_identity_editing.sql
@@ -56,13 +56,11 @@ import type {
 // restricted to official_media_url ONLY (every other column — address_
 // text, postal_code, display_name, campaign_id — stays SELECT-only at the
 // database level, so even a future frontend bug cannot write them), plus
-// an owner/admin RLS UPDATE policy. No INSERT policy exists — the 3 real
+// an owner/admin RLS UPDATE policy. No INSERT policy exists — the real
 // location rows already exist and are never created through this app.
 // canEditLocationImages is genuinely true now. canUploadImages stays
-// false (no Storage bucket exists yet). The three hardcoded merchant
-// businesses (Médico Urgencias/Dental Now 14/Ultra Cargo, id prefixed
-// "merchant:") still have no referral_partners row to write to at all.
-// They are read-only in the production UI until such a row exists.
+// false (no Storage bucket exists yet). Derived merchant/location
+// businesses still have no referral_partners row to write to directly.
 
 const ORGANIZATION_ID = "luis-gabriel-referral-hub";
 
@@ -173,10 +171,6 @@ function slugify(name: string): string {
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "") || "negocio";
-  // Uniqueness is enforced by the real UNIQUE(organization_id, slug)
-  // constraint — this suffix only reduces the odds of a collision the
-  // caller would otherwise have to retry on; the constraint is the real
-  // guarantee, not this.
   return `${base}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -185,24 +179,6 @@ function campaignByServiceId(campaigns: CampaignRow[], serviceId: LuisServiceId)
   return campaigns.find((c) => c.campaign_key === key) ?? campaigns.find((c) => c.service_id === serviceId);
 }
 
-// canEditBusiness/canCreateBusiness are genuinely true (Gate 1-A applied
-// 2026-08-24: referral_partners has real owner/admin write RLS + GRANT
-// now). Callers must still check business.id.startsWith("partner:") before
-// trusting canEditBusiness for a SPECIFIC business — the merchant:/
-// location: derived businesses have no referral_partners row to write to
-// (see the class-level comment above).
-//
-// canEditCoupon is genuinely true (Gate 1-B applied 2026-08-24:
-// referral_coupon_campaigns has real owner/admin write RLS + GRANT now) —
-// no id-prefix check is needed for coupons the way there is for
-// businesses, since every coupon id is already a real row.
-//
-// canEditLocationImages is genuinely true (Gate 1-C applied 2026-08-24:
-// referral_benefit_campaign_locations has a real owner/admin UPDATE path,
-// column-restricted to official_media_url — see the class-level comment).
-// canUploadImages stays honestly false: no Storage bucket exists yet (see
-// docs/proposed-migrations/20260822_draft_coupon_media_storage_BLOCKED.sql) —
-// the location editor still only accepts a pasted HTTPS URL, no file picker.
 const REAL_CAPABILITIES: NegociosCapabilities = {
   canEditBusiness: true,
   canCreateBusiness: true,
@@ -231,7 +207,7 @@ export class RealNegociosDataSource implements NegociosDataSource {
     const [campaigns, locations, partners, claimCounts] = await Promise.all([loadCampaigns(), loadLocations(), loadConfirmedPartners(), loadClaimCounts()]);
     const businesses: Business[] = [];
 
-    for (const serviceId of ["luis_benefit_medical", "luis_benefit_dental", "luis_benefit_shipping"] as LuisServiceId[]) {
+    for (const serviceId of ["luis_benefit_medical", "luis_benefit_dental", "luis_benefit_shipping", "luis_benefit_taxes"] as LuisServiceId[]) {
       const name = BENEFIT_MERCHANT_NAME[serviceId];
       if (!name) continue;
       const campaign = campaignByServiceId(campaigns, serviceId);
@@ -254,18 +230,16 @@ export class RealNegociosDataSource implements NegociosDataSource {
       });
     }
 
-    // Each active supermarket location is its own business — never merged
-    // into a single generic "Supermercado" card.
     for (const location of locations) {
+      const campaign = campaigns.find((item) => item.id === location.campaign_id);
+      const categoryServiceId = campaign
+        ? (SERVICE_BY_CAMPAIGN_KEY[campaign.campaign_key] ?? "luis_benefit_supermarket")
+        : "luis_benefit_supermarket";
       businesses.push({
-        // Suffixed with the real location_key (not the raw uuid) so this id
-        // is directly usable as the /negocios/solicitudes?location= filter —
-        // that's the same key referral_benefit_claims/useCouponDemand
-        // already group by, avoiding a second lookup just to link correctly.
         id: `location:${location.location_key}`,
         name: location.display_name,
-        categoryServiceId: "luis_benefit_supermarket",
-        categoryLabel: SERVICE_LABELS.luis_benefit_supermarket,
+        categoryServiceId,
+        categoryLabel: SERVICE_LABELS[categoryServiceId],
         contactName: null,
         phone: null,
         addressText: location.address_text || null,
@@ -292,11 +266,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
     return all.find((b) => b.id === id) ?? null;
   }
 
-  // Real write: referral_partners has owner/admin INSERT RLS + GRANT
-  // (Gate 1-A, applied 2026-08-24). partnership_status is set to 'active'
-  // explicitly — a business created through this form is a real confirmed
-  // partner, not a 'demo_reference' row, so it appears immediately in
-  // listBusinesses() and remains visible even when later paused.
   async createBusiness(input: NewBusinessInput): Promise<Business> {
     const result = await supabase.from("referral_partners")
       .insert({
@@ -317,11 +286,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
     return partnerRowToBusiness(result.data as PartnerRow);
   }
 
-  // Real write for a business backed by an actual referral_partners row
-  // (id prefixed "partner:") — scoped by both organization_id and id, so
-  // RLS and this query agree on the same boundary. The three hardcoded
-  // merchant businesses and supermarket locations have no referral_partners
-  // row. Reject edits rather than pretending to persist them.
   async updateBusiness(id: string, patch: Partial<BusinessEditInput>): Promise<Business> {
     if (!id.startsWith("partner:")) {
       throw new ReadOnlyError("este negocio no tiene una fila persistible en referral_partners");
@@ -356,16 +320,10 @@ export class RealNegociosDataSource implements NegociosDataSource {
     for (const serviceId of BENEFIT_SERVICE_IDS) {
       const campaign = campaignByServiceId(campaigns, serviceId);
       if (!campaign) continue;
-      const isSupermarket = serviceId === "luis_benefit_supermarket";
+      const isLocationBased = serviceId === "luis_benefit_supermarket" || serviceId === "luis_benefit_mableton_parrillada";
       coupons.push({
         id: campaign.id,
-        // Supermarket has no single business — it is genuinely
-        // multi-location (see referral_benefit_campaign_locations) — left
-        // empty rather than arbitrarily pointing at one location. For
-        // every other coupon, a real linked referral_partners row (set via
-        // updateCoupon) wins; otherwise fall back to the hardcoded merchant
-        // pseudo-business exactly as before this row was ever linkable.
-        businessId: isSupermarket
+        businessId: isLocationBased
           ? ""
           : (campaign.business_id ? `partner:${campaign.business_id}` : `merchant:${serviceId}`),
         campaignKey: campaign.campaign_key,
@@ -386,10 +344,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
     return all.find((c) => c.id === id) ?? null;
   }
 
-  // Real write: referral_coupon_campaigns has owner/admin UPDATE RLS +
-  // GRANT (Gate 1-B, applied 2026-08-24). businessId is only writable when
-  // it maps to a real referral_partners row; derived merchant/location ids
-  // are rejected rather than stored ephemerally.
   async updateCoupon(id: string, patch: Partial<Pick<Coupon, "displayName" | "businessId" | "imageUrl" | "customerCopy" | "termsText" | "active" | "expiresAt" | "deliverySource">>): Promise<Coupon> {
     const columns: Record<string, unknown> = {};
     if (patch.displayName !== undefined) columns.display_name = patch.displayName;
@@ -437,30 +391,14 @@ export class RealNegociosDataSource implements NegociosDataSource {
           ? { kind: "service" as const, serviceId: row.service_id }
           : { kind: "menu" as const },
       active: row.active,
-      // Attribution is heuristic (see round-3/4 notes: derived from the
-      // lead's most recently scanned QR at claim time, not a durable FK) —
-      // reported honestly as 0 rather than computed with a misleading
-      // precision this adapter cannot actually back up in one query.
       requestsCount: 0,
     }));
   }
 
   async createCampaign(): Promise<Campaign> {
-    // referral_qr_entries does have real owner/admin write RLS (established
-    // in an earlier round) — this is NOT a schema/RLS limitation like the
-    // other ReadOnlyErrors above. It is intentionally disabled for this
-    // session specifically because this round's mission constraints say
-    // "do not create or mutate production records" without separate
-    // approval, and creating a campaign here would do exactly that against
-    // the real organization. Re-enabling this is a one-line change once
-    // that approval is given.
     throw new ReadOnlyError("crear campañas está deshabilitado en esta sesión de auditoría — la política de escritura de referral_qr_entries es real, pero mutar producción no está aprobado para esta tarea");
   }
 
-  // Real, active locations behind the shared supermarket coupon campaign —
-  // never a single global image. campaignKey scopes this to the actual
-  // referral_coupon_campaigns row (so a future second location-based
-  // campaign, if it ever existed, could never bleed into this one).
   async listSupermarketLocations(campaignKey: string): Promise<SupermarketLocation[]> {
     const [campaigns, locations] = await Promise.all([loadCampaigns(), loadLocations()]);
     const campaign = campaigns.find((c) => c.campaign_key === campaignKey);
@@ -470,16 +408,6 @@ export class RealNegociosDataSource implements NegociosDataSource {
       .map(toSupermarketLocation);
   }
 
-  // Real write: referral_benefit_campaign_locations has an owner/admin
-  // UPDATE RLS policy + a column-level GRANT restricted to
-  // official_media_url (Gate 1-C, applied 2026-08-24) — so this is the
-  // only field this method (or the database) will ever accept here, which
-  // matches this method's own type signature. Scoped to ONE location's
-  // real id AND this organization, so an edit here can never leak into
-  // another store's image or another organization's row, and never
-  // touches referral_coupon_campaigns.image_url (the shared campaign
-  // fallback for non-location benefits) — the supermarket benefit never
-  // reads that column at all (see couponImagePrecedence.test.ts).
   async updateSupermarketLocation(id: string, patch: Partial<Pick<SupermarketLocation, "officialMediaUrl">>): Promise<SupermarketLocation> {
     if (patch.officialMediaUrl === undefined) {
       const locations = await loadLocations();
@@ -506,22 +434,6 @@ export type RealServiceRow = {
   hasCustomerFacingRoute: boolean;
 };
 
-// The canonical, real service catalog (matches src/apps/referral-hub/operations/luisCatalog.ts
-// exactly — the same file the live WhatsApp send path is built from) with
-// real request counts. "luis_representante" (generic "talk to our team")
-// is intentionally excluded — it is a handoff destination, not a service
-// customers request by category.
-//
-// Professional-service counts (immigration/accident) are NOT read from
-// referral_service_requests: that table/RPC path is only reachable from
-// the older, no-longer-primary conversational text menu — the real,
-// published Unified Services WhatsApp Flow persists a completed intake
-// directly on leads.state.collected.luis_legal_last_completed instead (see
-// buildLuisLegalFlowCompletionResult in run-replies/index.ts, and
-// operations/legalIntake.ts, the shared parser also used by
-// useContactDetail.ts for the lead detail screen). Using
-// referral_service_requests here would show 0 forever for any real Flow
-// submission even though the dashboard's own lead detail page shows it.
 export async function loadRealServiceRows(): Promise<RealServiceRow[]> {
   const [campaigns, claims, leadsWithState] = await Promise.all([
     loadCampaigns(),
