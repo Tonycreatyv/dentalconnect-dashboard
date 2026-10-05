@@ -16,12 +16,14 @@ import ReferralQrEntry from "./pages/ReferralQrEntry";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
-import { ClientesScreen, ContactDetailScreen, CouponRequestsScreen } from "./screens/DashboardScreens";
+import { ClientesScreen, CouponRequestsScreen } from "./screens/DashboardScreens";
 import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
-import CaseDetailScreen from "./screens/CaseDetailScreen";
 import AdminOperationsScreen from "./screens/AdminOperationsScreen";
+import ClientEditScreen from "./screens/ClientEditScreen";
+import CaseEditScreen from "./screens/CaseEditScreen";
+import { AdminCaseDetailRoute, AdminClientDetailRoute } from "./screens/AdminDetailRoutes";
 import EmptyState from "./ui/EmptyState";
 import NegociosHub from "./negocios/NegociosScreens";
 import NegociosBusinessDetail from "./negocios/BusinessDetail";
@@ -54,10 +56,12 @@ function ProductRoutes() {
     <Route path="/" element={<RequireAuth><ReferralOrganizationProvider><BoltShell /></ReferralOrganizationProvider></RequireAuth>}>
       <Route index element={<Navigate to="/operacion" replace />} />
       <Route path="operacion" element={<AdminOperationsScreen />} />
-      <Route path="operacion/:requestId" element={<CaseDetailScreen />} />
+      <Route path="operacion/:requestId" element={<AdminCaseDetailRoute />} />
+      <Route path="operacion/:requestId/editar" element={<CaseEditScreen />} />
       <Route path="oportunidades" element={<Navigate to="/operacion" replace />} />
       <Route path="clientes" element={<ClientesScreen />} />
-      <Route path="clientes/:leadId" element={<ContactDetailScreen />} />
+      <Route path="clientes/:leadId" element={<AdminClientDetailRoute />} />
+      <Route path="clientes/:leadId/editar" element={<ClientEditScreen />} />
       <Route path="messages" element={<MessagesWorkspace />} />
       <Route path="messages/:conversationId" element={<MessagesWorkspace />} />
       <Route path="campanas" element={<CampaignsHub />} />
