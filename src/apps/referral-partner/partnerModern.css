@@ -165,19 +165,19 @@
   .partner-modern-detail-age{justify-content:start;justify-items:start;text-align:left}
 }
 
-/* Desktop case-detail refinement: reduce dead space by pairing story + management on the left,
-   and visually merging key facts + call action into one compact case-summary rail on the right. */
+/* Desktop case-detail refinement: the left rail explains the case and keeps contact/context together;
+   the right rail starts the management decision immediately, eliminating the dead vertical gap. */
 @media(min-width:900px){
-  .partner-modern-detail{grid-template-columns:minmax(0,1.48fr) minmax(320px,.52fr);align-items:start;column-gap:.72rem;row-gap:.68rem}
+  .partner-modern-detail{grid-template-columns:minmax(0,1.15fr) minmax(420px,.85fr);align-items:start;column-gap:.72rem;row-gap:.68rem}
   .partner-modern-detail>.partner-back,.partner-modern-detail>.partner-modern-detail-hero,.partner-modern-detail>.partner-feedback{grid-column:1/-1}
-  .partner-modern-detail-grid{display:contents}
-  .partner-modern-story{grid-column:1;grid-row:auto}
-  .partner-modern-keyfacts{grid-column:2;grid-row:auto;border-radius:14px 14px 0 0;border-bottom-color:#252b31;padding-bottom:.72rem}
+  .partner-modern-detail-grid{grid-column:1;display:grid;grid-template-columns:1fr;gap:.62rem;align-self:start}
+  .partner-modern-story{grid-column:1}
+  .partner-modern-keyfacts{grid-column:1;border-radius:14px 14px 0 0;border-bottom-color:#252b31;padding-bottom:.72rem}
   .partner-modern-keyfacts .partner-modern-section-label{font-size:0;margin-bottom:.42rem}
   .partner-modern-keyfacts .partner-modern-section-label::after{content:"Resumen del caso";color:#727d87;font-size:.6rem;font-weight:780;letter-spacing:.075em;text-transform:uppercase}
-  .partner-modern-management{grid-column:1;align-self:start;margin-top:0}
-  .partner-modern-call-panel{grid-column:2;align-self:start;margin-top:-.69rem;border-color:#2b3137;border-top-color:#252b31;border-radius:0 0 14px 14px;background:#15191e;padding:.78rem .92rem}
+  .partner-modern-call-panel{grid-column:1;align-self:start;margin-top:-.69rem;border-color:#2b3137;border-top-color:#252b31;border-radius:0 0 14px 14px;background:#15191e;padding:.78rem .92rem}
   .partner-modern-call-panel>a{min-width:112px}
-  .partner-modern-story,.partner-modern-management{width:100%}
-  .partner-modern-keyfacts,.partner-modern-call-panel{width:100%}
+  .partner-modern-management{grid-column:2;grid-row:3 / span 2;align-self:start;margin-top:0;min-height:100%}
+  .partner-modern-detail>.partner-feedback ~ .partner-modern-management{grid-row:4 / span 2}
+  .partner-modern-story,.partner-modern-keyfacts,.partner-modern-call-panel,.partner-modern-management{width:100%}
 }
