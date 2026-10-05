@@ -1,0 +1,164 @@
+/* Modern Partner work UI. Scoped to .partner-modern-app so the legacy token portal and Admin stay untouched. */
+.partner-modern-app{background:#0d1014}
+.partner-modern-app .partner-shell{width:min(100%,1320px)}
+.partner-modern-app .partner-content{padding-top:1.35rem}
+.partner-modern-view{gap:1rem}
+
+.partner-modern-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+.partner-modern-page-head h1{margin:0;color:#f7f9fb;font-size:1.65rem;font-weight:780;letter-spacing:-.035em}
+.partner-modern-page-head p{margin:.22rem 0 0;color:#8f98a2;font-size:.82rem}
+
+.partner-modern-export{position:relative;flex:none}
+.partner-modern-export summary{display:inline-flex;min-height:38px;align-items:center;justify-content:center;border:1px solid #30363d;border-radius:10px;background:#171b20;padding:0 .8rem;color:#cbd2d9;font-size:.72rem;font-weight:700;cursor:pointer;list-style:none}
+.partner-modern-export summary::-webkit-details-marker{display:none}
+.partner-modern-export[open] summary{border-color:#3a7664;color:#7be0bd}
+.partner-modern-export>div{position:absolute;right:0;top:calc(100% + .4rem);z-index:20;display:grid;min-width:150px;overflow:hidden;border:1px solid #30363d;border-radius:11px;background:#171b20;box-shadow:0 18px 45px rgba(0,0,0,.35)}
+.partner-modern-export button{min-height:40px;padding:0 .8rem;text-align:left;color:#d9dfe5;font-size:.72rem;font-weight:650}
+.partner-modern-export button+button{border-top:1px solid #2b3036}
+.partner-modern-export button:hover{background:#20252b}
+.partner-modern-export button:disabled{opacity:.4}
+
+.partner-modern-summary{display:grid;grid-template-columns:repeat(3,minmax(0,150px));gap:.55rem}
+.partner-modern-summary>div{display:grid;grid-template-columns:auto 1fr;align-items:baseline;column-gap:.45rem;min-height:48px;border:1px solid #2a3036;border-radius:12px;background:#15191e;padding:.65rem .75rem}
+.partner-modern-summary strong{color:#f4f7f9;font-size:1rem;font-variant-numeric:tabular-nums}
+.partner-modern-summary span{color:#8e98a2;font-size:.7rem;font-weight:650}
+.partner-modern-summary .is-overdue{border-color:rgba(232,130,61,.42);background:rgba(232,130,61,.08)}
+.partner-modern-summary .is-overdue strong,.partner-modern-summary .is-overdue span{color:#f1a166}
+
+.partner-modern-toolbar{display:flex;align-items:end;justify-content:space-between;gap:1rem;border-top:1px solid #242a30;padding-top:.2rem}
+.partner-modern-status-scroll{display:flex;min-width:0;gap:.4rem;overflow-x:auto;padding:.65rem 0 .2rem;scrollbar-width:none}
+.partner-modern-status-scroll::-webkit-scrollbar{display:none}
+.partner-modern-service-filter{display:grid;flex:none;gap:.22rem;min-width:190px}
+.partner-modern-service-filter>span{color:#737e89;font-size:.62rem;font-weight:750;letter-spacing:.06em;text-transform:uppercase}
+.partner-modern-service-filter select{min-height:38px;border:1px solid #30363d;border-radius:10px;background:#171b20;padding:0 2rem 0 .7rem;color:#e6ebef;font-size:.72rem;font-weight:650;outline:none}
+.partner-modern-service-filter select:focus{border-color:#3b7f69}
+.partner-modern-result-bar{display:flex;min-height:30px;align-items:center;justify-content:space-between;gap:1rem;color:#78838d;font-size:.7rem}
+.partner-modern-result-bar strong{color:#cdd4da}
+.partner-modern-result-bar button{color:#6fd8b0;font-weight:700}
+
+.partner-modern-table-wrap{display:none}
+.partner-modern-mobile{display:grid;gap:.65rem}
+.partner-modern-card{display:grid;gap:.75rem;border:1px solid #2b3137;border-radius:16px;background:linear-gradient(180deg,#171b20 0%,#14181d 100%);padding:.9rem;box-shadow:0 10px 26px rgba(0,0,0,.1);cursor:pointer;transition:border-color 140ms ease,transform 140ms ease,background 140ms ease}
+.partner-modern-card:hover{border-color:#3a444d;background:#191e24}
+.partner-modern-card:active{transform:scale(.995)}
+.partner-modern-card:focus-visible{outline:2px solid #5eead0;outline-offset:2px}
+.partner-modern-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem}
+.partner-modern-card-identity{display:grid;min-width:0;gap:.45rem}
+.partner-modern-card-identity>strong{overflow-wrap:anywhere;color:#f6f8fa;font-size:1rem;font-weight:760;letter-spacing:-.015em}
+.partner-modern-badge-row{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem}
+.partner-modern-service{display:inline-flex;min-height:25px;align-items:center;gap:.35rem;border:1px solid #343b43;border-radius:999px;background:#1d2329;padding:0 .55rem;color:#dce3e8;font-size:.64rem;font-weight:700;white-space:nowrap}
+.partner-modern-service>span{font-size:.76rem;line-height:1}
+.partner-modern-service.is-auto_accident{border-color:rgba(91,140,255,.24);background:rgba(91,140,255,.08);color:#b8caff}
+.partner-modern-service.is-immigration{border-color:rgba(94,234,208,.2);background:rgba(94,234,208,.07);color:#9cebd5}
+.partner-modern-service.is-dui,.partner-modern-service.is-criminal{border-color:rgba(196,181,253,.22);background:rgba(196,181,253,.07);color:#d5cbff}
+.partner-modern-age{display:grid;flex:none;justify-items:end;gap:.02rem}
+.partner-modern-age strong{color:#f1f4f7;font-size:.78rem;font-variant-numeric:tabular-nums}
+.partner-modern-age span{color:#707b85;font-size:.58rem;text-transform:uppercase;letter-spacing:.05em}
+.partner-modern-card-times{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem;border-top:1px solid #252b31;border-bottom:1px solid #252b31;padding:.6rem 0}
+.partner-modern-card-times>div{display:grid;gap:.12rem;min-width:0}
+.partner-modern-card-times span{color:#76818b;font-size:.61rem;font-weight:700}
+.partner-modern-card-times strong{overflow-wrap:anywhere;color:#d7dde2;font-size:.7rem;font-weight:650;line-height:1.35}
+.partner-modern-card-summary{margin:0;color:#aeb7bf;font-size:.73rem;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.partner-modern-card-footer{display:flex;align-items:center;justify-content:space-between;gap:.6rem}
+.partner-modern-call{position:relative;z-index:2;display:inline-flex;min-height:36px;min-width:96px;align-items:center;justify-content:center;border:1px solid rgba(63,207,126,.28);border-radius:10px;background:rgba(63,207,126,.08);padding:0 .75rem;color:#89e7ae;font-size:.72rem;font-weight:750;text-decoration:none}
+.partner-modern-no-phone{color:#68727c;font-size:.68rem}
+.partner-modern-open{color:#bac2c9;font-size:.7rem;font-weight:700}
+
+.partner-modern-detail{gap:.9rem}
+.partner-modern-detail-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;border:1px solid #2b3137;border-radius:18px;background:linear-gradient(145deg,#191e24,#15191e);padding:1rem 1.05rem}
+.partner-modern-detail-main{display:grid;min-width:0;gap:.5rem}
+.partner-modern-detail-main h1{margin:0;color:#f7f9fb;font-size:1.6rem;font-weight:790;letter-spacing:-.035em}
+.partner-modern-detail-main p{margin:0;color:#8e98a2;font-size:.78rem}
+.partner-modern-detail-age{display:grid;flex:none;justify-items:end;gap:.08rem;text-align:right}
+.partner-modern-detail-age>span{color:#747f89;font-size:.6rem;font-weight:750;letter-spacing:.055em;text-transform:uppercase}
+.partner-modern-detail-age strong{color:#f2f5f7;font-size:1.05rem}
+.partner-modern-detail-age small{max-width:160px;color:#89939c;font-size:.65rem;line-height:1.35}
+.partner-modern-detail-grid{display:grid;gap:.7rem}
+.partner-modern-panel{border:1px solid #2b3137;border-radius:16px;background:#15191e;padding:1rem}
+.partner-modern-section-label{margin-bottom:.5rem;color:#727d87;font-size:.62rem;font-weight:780;letter-spacing:.075em;text-transform:uppercase}
+.partner-modern-story>p{margin:0;color:#e3e8ec;font-size:.85rem;line-height:1.58}
+.partner-modern-followup-banner{margin-top:.8rem;border:1px solid rgba(232,130,61,.2);border-radius:10px;background:rgba(232,130,61,.06);padding:.55rem .65rem;color:#eaa16f;font-size:.7rem;font-weight:700}
+.partner-modern-followup-banner.is-overdue{border-color:rgba(232,130,61,.42);background:rgba(232,130,61,.11);color:#ffb279}
+.partner-modern-keyfacts dl{display:grid;margin:0}
+.partner-modern-keyfacts dl>div{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:.55rem 0;border-bottom:1px solid #252b31}
+.partner-modern-keyfacts dl>div:last-child{border-bottom:0}
+.partner-modern-keyfacts dt{color:#77828c;font-size:.68rem}
+.partner-modern-keyfacts dd{max-width:62%;margin:0;color:#e1e6ea;font-size:.72rem;font-weight:650;text-align:right;overflow-wrap:anywhere}
+.partner-modern-call-panel{display:flex;align-items:center;justify-content:space-between;gap:1rem;border:1px solid rgba(63,207,126,.2);border-radius:16px;background:rgba(63,207,126,.055);padding:.8rem 1rem}
+.partner-modern-call-panel>div{display:grid;gap:.1rem;min-width:0}
+.partner-modern-call-panel strong{color:#e8edf0;font-size:.78rem}
+.partner-modern-call-panel span{overflow-wrap:anywhere;color:#8d989f;font-size:.68rem}
+.partner-modern-call-panel>a{display:inline-flex;min-height:40px;min-width:110px;align-items:center;justify-content:center;border-radius:10px;background:#39c87a;padding:0 .9rem;color:#07170f;font-size:.74rem;font-weight:800;text-decoration:none}
+.partner-modern-call-panel>a[aria-disabled="true"]{pointer-events:none;opacity:.4}
+.partner-modern-management{padding:1rem}
+.partner-modern-management-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:.8rem}
+.partner-modern-management h2{margin:0;color:#f0f3f5;font-size:1rem;font-weight:740;letter-spacing:-.015em}
+.partner-modern-outcome-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.55rem}
+.partner-modern-app .partner-modern-outcome-grid .partner-action-btn{min-width:0;min-height:44px}
+.partner-modern-followup-editor{margin-top:.65rem;border-top:1px solid #292f35;padding-top:.1rem}
+.partner-modern-save-row{margin-top:.8rem}
+.partner-modern-closed-note{margin:0 0 .8rem;color:#9ba5ad;font-size:.78rem}
+
+@media(min-width:900px){
+  .partner-modern-mobile{display:none}
+  .partner-modern-table-wrap{display:block;overflow:auto;border:1px solid #2b3137;border-radius:14px;background:#15191e}
+  .partner-modern-table{width:100%;min-width:1180px;border-collapse:separate;border-spacing:0;font-size:.72rem}
+  .partner-modern-table th{position:sticky;top:0;z-index:2;border-bottom:1px solid #2a3036;background:#171b20;padding:.65rem .7rem;color:#7f8992;font-size:.61rem;font-weight:780;letter-spacing:.055em;text-align:left;text-transform:uppercase;white-space:nowrap}
+  .partner-modern-table td{border-bottom:1px solid #252b31;padding:.72rem .7rem;color:#d8dee3;vertical-align:middle}
+  .partner-modern-table tbody tr:last-child td{border-bottom:0}
+  .partner-modern-table tbody tr{cursor:pointer;transition:background 120ms ease}
+  .partner-modern-table tbody tr:hover{background:#1a1f25}
+  .partner-modern-table tbody tr:focus-visible{outline:2px solid #5eead0;outline-offset:-2px}
+  .partner-modern-client{color:#f1f4f6;font-size:.78rem;font-weight:720}
+  .partner-modern-muted{color:#929ca5;white-space:nowrap}
+  .partner-modern-incident{color:#dce2e7;font-weight:650;white-space:nowrap}
+  .partner-modern-phone{position:relative;z-index:2;color:#d8e2e6;text-decoration:none;white-space:nowrap}
+  .partner-modern-phone:hover{color:#7ce0b8;text-decoration:underline}
+  .partner-modern-followup{max-width:185px;color:#aeb7bf;line-height:1.35}
+  .partner-modern-chevron{width:28px;color:#66717b;font-size:1rem;text-align:right}
+  .partner-modern-detail-grid{grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);align-items:start}
+}
+
+@media(max-width:899px){
+  .partner-modern-app .partner-content{padding:1rem}
+  .partner-modern-page-head h1{font-size:1.45rem}
+  .partner-modern-toolbar{display:grid;gap:.65rem}
+  .partner-modern-status-scroll{margin:0 -1rem;padding:.55rem 1rem .15rem}
+  .partner-modern-service-filter{width:100%;min-width:0}
+  .partner-modern-service-filter select{width:100%}
+  .partner-modern-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .partner-modern-summary>div{grid-template-columns:1fr;align-content:center;gap:.08rem;min-height:52px;padding:.55rem .65rem}
+  .partner-modern-summary strong{font-size:.95rem}
+  .partner-modern-summary span{font-size:.62rem}
+  .partner-modern-export summary{min-height:36px}
+  .partner-modern-detail-hero{padding:.9rem}
+  .partner-modern-detail-main h1{font-size:1.4rem}
+  .partner-modern-call-panel{position:sticky;bottom:.65rem;z-index:8;box-shadow:0 12px 30px rgba(0,0,0,.32);backdrop-filter:blur(12px)}
+}
+
+@media(max-width:640px){
+  .partner-modern-topbar .partner-user-email{display:none}
+  .partner-modern-topbar{min-height:56px;padding:.75rem 1rem}
+  .partner-modern-app .partner-content{padding:.9rem}
+  .partner-modern-page-head{align-items:center}
+  .partner-modern-page-head p{font-size:.74rem;line-height:1.4}
+  .partner-modern-status-scroll{margin:0 -.9rem;padding-left:.9rem;padding-right:.9rem}
+  .partner-modern-card-times{grid-template-columns:1fr}
+  .partner-modern-detail-hero{display:grid;gap:.8rem}
+  .partner-modern-detail-age{justify-items:start;text-align:left}
+  .partner-modern-detail-age small{max-width:none}
+  .partner-modern-outcome-grid{grid-template-columns:1fr 1fr}
+  .partner-modern-outcome-grid .is-disqualify{grid-column:1/-1}
+  .partner-modern-call-panel{padding:.7rem .8rem}
+  .partner-modern-call-panel>a{min-width:92px}
+}
+
+@media(max-width:420px){
+  .partner-modern-page-head p{max-width:230px}
+  .partner-modern-summary{gap:.4rem}
+  .partner-modern-summary>div{padding:.5rem}
+  .partner-modern-card{border-radius:14px;padding:.8rem}
+  .partner-modern-card-footer{align-items:stretch}
+  .partner-modern-call{min-width:90px}
+  .partner-modern-open{align-self:center}
+}
