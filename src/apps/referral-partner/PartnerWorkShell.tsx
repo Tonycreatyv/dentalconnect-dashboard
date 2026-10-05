@@ -12,7 +12,6 @@ import { resolveActivePartnerContext, type ActivePartnerContext } from "./partne
 import {
   combineCustomDateTime,
   computeNextFollowupAt,
-  countOverdueFollowUps,
   defaultReminderOptionForReason,
   FOLLOW_UP_REASON_LABEL,
   followUpReasonsForService,
@@ -421,7 +420,7 @@ function PartnerList({ partnerId }: { partnerId: string }) {
     return statusMatches && serviceMatches;
   }), [entries, statusFilter, serviceFilter]);
 
-  const overdueCount = useMemo(() => countOverdueFollowUps(entries), [entries]);
+  const overdueCount = useMemo(() => entries.filter((entry) => entry.overdue).length, [entries]);
   const newCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "new").length, [entries]);
   const followUpCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "follow_up").length, [entries]);
   const hasFilters = statusFilter !== "all" || serviceFilter !== "all";
