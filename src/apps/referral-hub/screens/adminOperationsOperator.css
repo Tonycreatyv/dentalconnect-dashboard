@@ -1,3 +1,4 @@
+/* Verification branch: actionable Admin Operacion mobile console. */
 .hub-operator-page{padding-bottom:calc(6rem + env(safe-area-inset-bottom,0px))}
 .hub-operator-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem;margin:0 0 1rem}
 .hub-operator-summary>div{display:flex;flex-direction:column;gap:.2rem;padding:1rem;border:1px solid var(--hub-border);border-radius:18px;background:var(--hub-surface);box-shadow:var(--hub-card-shadow)}
