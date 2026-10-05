@@ -9,6 +9,7 @@ import { getActiveNegociosDataSource } from "./dataSource";
 import { resolveBusinessImageUrl } from "./businessImage";
 import ImageLightbox from "./ImageLightbox";
 import BusinessEditDrawer from "./BusinessEditDrawer";
+import PartnerServiceRulesPanel from "./PartnerServiceRulesPanel";
 import type { Business, BusinessHours, Coupon } from "./types";
 
 const dataSource = getActiveNegociosDataSource();
@@ -38,9 +39,6 @@ export default function BusinessDetail() {
     Promise.all([dataSource.getBusiness(businessId), dataSource.listCoupons()])
       .then(([businessRow, allCoupons]) => {
         setBusiness(businessRow);
-        // Supermarket locations share ONE coupon campaign (no single
-        // business_id — see realDataSource.ts) — matched by category
-        // instead of a direct id, so each real location still shows it.
         setCoupons(allCoupons.filter((c) => c.businessId === businessId
           || (businessRow?.categoryServiceId === "luis_benefit_supermarket" && c.campaignKey.includes("supermarket"))));
         setError(businessRow ? "" : "Negocio no encontrado.");
@@ -56,6 +54,9 @@ export default function BusinessDetail() {
 
   if (loading) return <div className="hub-page"><Link className="hub-back" to={backTo}><ArrowLeft />Volver</Link><EmptyState icon={Building2} title="Cargando negocio…" /></div>;
   if (error || !business) return <div className="hub-page"><Link className="hub-back" to={backTo}><ArrowLeft />Volver</Link><EmptyState tone="error" icon={AlertTriangle} title="No se pudo cargar el negocio" description={error} /></div>;
+
+  const isPersistedPartner = business.id.startsWith("partner:");
+  const partnerId = isPersistedPartner ? business.id.slice("partner:".length) : null;
 
   return (
     <div className="hub-page">
@@ -73,7 +74,7 @@ export default function BusinessDetail() {
         <div className="hub-hero-image-empty"><Building2 size={22} /><span>Sin imagen todavía</span></div>
       )}
       {lightboxOpen && heroImage ? <ImageLightbox src={heroImage} alt={business.name} onClose={() => setLightboxOpen(false)} /> : null}
-      {dataSource.capabilities.canEditBusiness && business.id.startsWith("partner:") ? <button type="button" className="hub-secondary" onClick={() => setEditing(true)}><Pencil size={15} />Editar negocio</button> : null}
+      {dataSource.capabilities.canEditBusiness && isPersistedPartner ? <button type="button" className="hub-secondary" onClick={() => setEditing(true)}><Pencil size={15} />Editar negocio</button> : null}
       <dl className="hub-facts">
         <div><dt>Categoría</dt><dd>{SERVICE_LABELS[business.categoryServiceId as LuisServiceId] || business.categoryLabel}</dd></div>
         <div><dt>Contacto</dt><dd>{business.contactName || "Pendiente"}</dd></div>
@@ -85,6 +86,9 @@ export default function BusinessDetail() {
         <div><dt>Recibe consultas</dt><dd>{business.receivesServiceRequests ? "Sí" : "No"}</dd></div>
         {business.offersCoupon ? <div><dt>Cupones pedidos</dt><dd>{business.requestCount}</dd></div> : null}
       </dl>
+
+      {partnerId && business.receivesServiceRequests ? <PartnerServiceRulesPanel partnerId={partnerId} /> : null}
+
       {Object.keys(business.hours).length > 0 ? (
         <section className="hub-section">
           <h2>Horarios</h2>
@@ -105,12 +109,6 @@ export default function BusinessDetail() {
           </div>
         </section>
       ) : null}
-      {/* period=all: this card's Cupones pedidos count above is all-time
-          (realDataSource.ts never filters claims by date), so the
-          drill-down must open at the same all-time scope — a bare link
-          here would silently land on CouponRequestsScreen's "today"
-          default and could show 0 while this card truthfully shows a
-          higher all-time number for the exact same claims. */}
       {business.categoryServiceId === "luis_benefit_supermarket" && business.id.startsWith("location:") ? (
         <Link className="hub-secondary" to={`/negocios/solicitudes?period=all&location=${business.id.slice("location:".length)}`} state={{ from: `/negocios/negocio/${business.id}` }}>
           Ver cupones pedidos de esta ubicación
@@ -136,7 +134,7 @@ export default function BusinessDetail() {
           )}
         </section>
       ) : null}
-      {editing && dataSource.capabilities.canEditBusiness && business.id.startsWith("partner:") ? (
+      {editing && dataSource.capabilities.canEditBusiness && isPersistedPartner ? (
         <BusinessEditDrawer
           business={business}
           canPersist={true}
