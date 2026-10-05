@@ -36,11 +36,13 @@ const DEFAULT_PREFERENCES: PushPreferences = {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
 };
 
-function urlBase64ToUint8Array(value: string): Uint8Array {
+function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
   const raw = window.atob(base64);
-  return Uint8Array.from([...raw].map((char) => char.charCodeAt(0)));
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
 function deviceLabel() {
@@ -115,7 +117,7 @@ export default function PushNotificationSettings() {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(status.vapid_public_key),
+        applicationServerKey: urlBase64ToArrayBuffer(status.vapid_public_key),
       });
       const serialized = subscription.toJSON();
       if (!serialized.endpoint || !serialized.keys?.p256dh || !serialized.keys?.auth) throw new Error("La suscripción del dispositivo está incompleta.");
