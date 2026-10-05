@@ -38,6 +38,14 @@ function text(value: unknown, max = 2_000): string {
   return typeof value === "string" && value.trim().length <= max ? value.trim() : "";
 }
 
+function slug(value: string): string {
+  return value.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 48) || "beneficio";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   if (req.method !== "POST") return json(req, 405, { success: false, error: "method_not_allowed" });
@@ -77,7 +85,7 @@ Deno.serve(async (req) => {
     }
 
     const existing = await admin.from("referral_coupon_campaigns")
-      .select("id,campaign_key,service_id,display_name,business_id,image_url,customer_copy,terms_text,active,starts_at,expires_at,delivery_source,updated_at")
+      .select("id,campaign_key,service_id,display_name,offer_terms,business_id,image_url,customer_copy,terms_text,active,starts_at,expires_at,delivery_source,updated_at")
       .eq("organization_id", ORGANIZATION_ID)
       .eq("id", couponId)
       .maybeSingle();
@@ -105,6 +113,46 @@ Deno.serve(async (req) => {
         success: true,
         events: (events.data ?? []).map((event: any) => ({ ...event, actor_email: event.actor_id ? emails.get(event.actor_id) ?? null : null })),
       });
+    }
+
+    if (action === "duplicate_draft") {
+      const displayName = text(body.display_name, 160) || `${existing.data.display_name} (borrador)`;
+      const campaignKey = `admin_draft_${slug(displayName)}_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+      const created = await admin.from("referral_coupon_campaigns")
+        .insert({
+          organization_id: ORGANIZATION_ID,
+          campaign_key: campaignKey,
+          service_id: existing.data.service_id,
+          display_name: displayName,
+          offer_terms: existing.data.offer_terms ?? {},
+          business_id: existing.data.business_id,
+          image_url: existing.data.image_url,
+          customer_copy: existing.data.customer_copy,
+          terms_text: existing.data.terms_text,
+          active: false,
+          starts_at: null,
+          expires_at: null,
+          delivery_source: "legacy",
+        })
+        .select("id,campaign_key,service_id,display_name,business_id,image_url,customer_copy,terms_text,active,starts_at,expires_at,delivery_source,updated_at")
+        .single();
+      if (created.error) throw created.error;
+
+      const event = await admin.from("referral_operational_events").insert({
+        organization_id: ORGANIZATION_ID,
+        aggregate_type: "coupon_campaign",
+        aggregate_id: created.data.id,
+        event_type: "coupon_admin_created_from_template",
+        actor_type: "user",
+        actor_id: user.id,
+        source: "admin_operator_mode",
+        previous_state: null,
+        new_state: created.data,
+        metadata: { source_coupon_id: couponId, source_campaign_key: existing.data.campaign_key },
+      });
+      if (event.error) throw event.error;
+
+      return json(req, 200, { success: true, coupon: created.data });
     }
 
     if (action === "update_location_image") {
