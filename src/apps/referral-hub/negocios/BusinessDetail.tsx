@@ -9,6 +9,7 @@ import { getActiveNegociosDataSource } from "./dataSource";
 import { resolveBusinessImageUrl } from "./businessImage";
 import ImageLightbox from "./ImageLightbox";
 import BusinessEditDrawer from "./BusinessEditDrawer";
+import PartnerAccessPanel from "./PartnerAccessPanel";
 import PartnerServiceRulesPanel from "./PartnerServiceRulesPanel";
 import type { Business, BusinessHours, Coupon } from "./types";
 
@@ -88,6 +89,7 @@ export default function BusinessDetail() {
       </dl>
 
       {partnerId && business.receivesServiceRequests ? <PartnerServiceRulesPanel partnerId={partnerId} /> : null}
+      {partnerId ? <PartnerAccessPanel partnerId={partnerId} /> : null}
 
       {Object.keys(business.hours).length > 0 ? (
         <section className="hub-section">
