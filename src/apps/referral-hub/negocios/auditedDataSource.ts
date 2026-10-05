@@ -58,7 +58,7 @@ export const auditedNegociosDataSource: NegociosDataSource = {
   getCoupon: (id) => realNegociosDataSource.getCoupon(id),
   updateCoupon: (id, patch) => realNegociosDataSource.updateCoupon(id, patch),
   listCampaigns: () => realNegociosDataSource.listCampaigns(),
-  createCampaign: (input) => realNegociosDataSource.createCampaign(input),
+  createCampaign: () => realNegociosDataSource.createCampaign(),
   listSupermarketLocations: (campaignKey) => realNegociosDataSource.listSupermarketLocations(campaignKey),
   updateSupermarketLocation: (id, patch) => realNegociosDataSource.updateSupermarketLocation(id, patch),
 };
