@@ -3,6 +3,7 @@ import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
 import AccountMenu from "./AccountMenu";
+import AdminActionPalette from "./AdminActionPalette";
 import ConexxionWordmark from "./ConexxionWordmark";
 
 // Points at the new business-centered /negocios tree (see
@@ -62,6 +63,7 @@ export default function BoltShell() {
       </header>
       <div className={isFlush ? "bolt-rh-content is-flush" : "bolt-rh-content"}><Outlet /></div>
     </div>
+    {!isChatOpen ? <AdminActionPalette /> : null}
     <nav className={isChatOpen ? "bolt-rh-bottom is-hidden" : "bolt-rh-bottom"} aria-label="Navegación móvil">{mobileNav.map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end}><Icon /><span>{label}</span></NavLink>)}</nav>
   </div>;
 }
