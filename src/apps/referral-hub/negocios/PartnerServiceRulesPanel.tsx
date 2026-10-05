@@ -1,13 +1,13 @@
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
+import { SERVICE_LABELS, type LuisServiceId } from "../operations/luisCatalog";
 
 const ORGANIZATION_ID = "luis-gabriel-referral-hub";
 
 type ServiceOption = {
   id: string;
   name: string;
-  type: string;
 };
 
 type PartnerRule = {
@@ -59,10 +59,10 @@ export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: str
     setError("");
     const [serviceResult, ruleResult] = await Promise.all([
       supabase
-        .from("service_configs")
-        .select("id,nombre,tipo,activo")
+        .from("referral_organization_services")
+        .select("service_id,enabled")
         .eq("organization_id", ORGANIZATION_ID)
-        .eq("activo", true),
+        .eq("enabled", true),
       supabase
         .from("referral_partner_service_rules")
         .select("id,service_id,active,assignment_priority,partner_location_id,postal_codes,cities,languages,specialties,capacity_limit,acceptance_sla_minutes,starts_at,expires_at,workspace_config")
@@ -81,11 +81,13 @@ export default function PartnerServiceRulesPanel({ partnerId }: { partnerId: str
       return;
     }
 
-    const serviceRows = (serviceResult.data ?? []) as Array<{ id: string; nombre: string; tipo: string; activo: boolean }>;
+    const serviceRows = (serviceResult.data ?? []) as Array<{ service_id: string; enabled: boolean }>;
     setServices(
       serviceRows
-        .filter((service) => service.tipo === "intake" || service.tipo === "transfer")
-        .map((service) => ({ id: service.id, name: service.nombre, type: service.tipo }))
+        .map((service) => ({
+          id: service.service_id,
+          name: SERVICE_LABELS[service.service_id as LuisServiceId] ?? service.service_id,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name, "es")),
     );
     setRules(((ruleResult.data ?? []) as Array<Partial<PartnerRule> & { id: string; service_id: string }>).map(normalizeRule));
