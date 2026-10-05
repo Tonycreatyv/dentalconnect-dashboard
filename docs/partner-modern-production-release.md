@@ -1,0 +1,1 @@
+Isolated production release note for the vetted modern Partner Portal UI. Runtime changes are limited to PartnerWorkShell.tsx, partnerModern.css, and the Partner shell import in Referral Hub App.tsx.
