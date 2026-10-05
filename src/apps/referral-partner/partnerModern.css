@@ -181,3 +181,32 @@
   .partner-modern-detail>.partner-feedback ~ .partner-modern-management{grid-row:4 / span 2}
   .partner-modern-story,.partner-modern-keyfacts,.partner-modern-call-panel,.partner-modern-management{width:100%}
 }
+
+/* Case-detail action hierarchy: explain first, call second, context third, then record the outcome. */
+.partner-modern-detail{display:grid}
+.partner-modern-detail-grid{display:contents}
+.partner-modern-story{order:10}
+.partner-modern-call-panel{order:20}
+.partner-modern-keyfacts{order:30}
+.partner-modern-management{order:40}
+
+@media(max-width:899px){
+  .partner-modern-call-panel{position:static;bottom:auto;z-index:auto;box-shadow:none;backdrop-filter:none;border-color:rgba(63,207,126,.28);background:rgba(63,207,126,.07);padding:.72rem .82rem}
+  .partner-modern-call-panel>a{min-height:42px;min-width:104px;font-size:.75rem}
+}
+
+@media(min-width:900px){
+  .partner-modern-detail{grid-template-columns:minmax(0,1.15fr) minmax(420px,.85fr);column-gap:.72rem;row-gap:.68rem}
+  .partner-modern-detail>.partner-back{grid-column:1/-1;grid-row:1}
+  .partner-modern-detail>.partner-modern-detail-hero{grid-column:1/-1;grid-row:2}
+  .partner-modern-detail>.partner-feedback{grid-column:1/-1;grid-row:3}
+  .partner-modern-story{grid-column:1;grid-row:3}
+  .partner-modern-call-panel{grid-column:1;grid-row:4;margin-top:0;border-radius:14px;background:rgba(63,207,126,.07);border-color:rgba(63,207,126,.24);padding:.72rem .92rem}
+  .partner-modern-call-panel>a{min-height:42px;min-width:126px;font-size:.75rem}
+  .partner-modern-keyfacts{grid-column:1;grid-row:5;border-radius:14px;border:1px solid #2b3137;padding:.82rem .92rem}
+  .partner-modern-management{grid-column:2;grid-row:3 / span 3;align-self:start;min-height:0}
+  .partner-modern-detail:has(> .partner-feedback) .partner-modern-story{grid-row:4}
+  .partner-modern-detail:has(> .partner-feedback) .partner-modern-call-panel{grid-row:5}
+  .partner-modern-detail:has(> .partner-feedback) .partner-modern-keyfacts{grid-row:6}
+  .partner-modern-detail:has(> .partner-feedback) .partner-modern-management{grid-row:4 / span 3}
+}
