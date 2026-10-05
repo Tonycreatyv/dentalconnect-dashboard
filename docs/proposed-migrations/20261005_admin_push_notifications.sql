@@ -130,3 +130,15 @@ create policy referral_admin_notification_outbox_recipient_read
 
 -- Inserts/updates to the outbox should be service-role only. No authenticated
 -- INSERT/UPDATE policy is intentionally created here.
+
+-- Collector cursor. Service-role only by design: the first collector run seeds
+-- this cursor to "now" so enabling push never backfills historical alerts.
+create table if not exists public.referral_admin_notification_cursor (
+  organization_id text primary key,
+  last_event_at timestamptz not null,
+  last_exception_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.referral_admin_notification_cursor enable row level security;
+-- No authenticated policies: only trusted server-side collector code may read/write.
