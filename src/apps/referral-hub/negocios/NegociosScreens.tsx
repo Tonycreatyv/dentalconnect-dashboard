@@ -64,8 +64,6 @@ function useCouponsList() {
   return { coupons, loading };
 }
 
-// Real, active locations behind each shared supermarket coupon campaign —
-// keyed by campaignKey so a card never shows another campaign's locations.
 function useSupermarketLocationsByCampaignKey(campaignKeys: string[]) {
   const [byKey, setByKey] = useState<Map<string, SupermarketLocation[]>>(new Map());
   const key = campaignKeys.join(",");
@@ -188,47 +186,87 @@ function ServiciosSegment() {
   );
 }
 
+type CouponView = "published" | "drafts" | "paused";
+const COUPON_VIEWS = [
+  { id: "published", label: "Publicados" },
+  { id: "drafts", label: "Borradores" },
+  { id: "paused", label: "Pausados" },
+] as const;
+
 function CuponesSegment() {
   const { businesses } = useBusinessesList();
   const { coupons, loading } = useCouponsList();
+  const [couponView, setCouponView] = useState<CouponView>("published");
   const businessById = useMemo(() => new Map(businesses.map((b) => [b.id, b])), [businesses]);
+  const visibleCoupons = useMemo(() => coupons.filter((coupon) => {
+    const isDraft = coupon.campaignKey.startsWith("admin_draft_");
+    if (couponView === "drafts") return isDraft;
+    if (couponView === "paused") return !isDraft && !coupon.active;
+    return !isDraft && coupon.active;
+  }), [coupons, couponView]);
+  const counts = useMemo(() => ({
+    published: coupons.filter((coupon) => !coupon.campaignKey.startsWith("admin_draft_") && coupon.active).length,
+    drafts: coupons.filter((coupon) => coupon.campaignKey.startsWith("admin_draft_")).length,
+    paused: coupons.filter((coupon) => !coupon.campaignKey.startsWith("admin_draft_") && !coupon.active).length,
+  }), [coupons]);
   const supermarketCampaignKeys = useMemo(
-    () => coupons.filter((c) => isSupermarketCampaignKey(c.campaignKey)).map((c) => c.campaignKey),
-    [coupons],
+    () => visibleCoupons.filter((c) => isSupermarketCampaignKey(c.campaignKey)).map((c) => c.campaignKey),
+    [visibleCoupons],
   );
   const locationsByCampaignKey = useSupermarketLocationsByCampaignKey(supermarketCampaignKeys);
   if (loading) return <SkeletonRows count={3} />;
-  if (coupons.length === 0) return <EmptyState icon={Tag} title="Sin cupones activos" description="Todavía no hay cupones configurados para esta organización." />;
+  if (coupons.length === 0) return <EmptyState icon={Tag} title="Sin beneficios" description="Todavía no hay beneficios configurados para esta organización." />;
   return (
-    <section className="hub-campaign-grid">
-      {coupons.map((coupon) => {
-        const isSupermarket = isSupermarketCampaignKey(coupon.campaignKey);
-        const locations = isSupermarket ? (locationsByCampaignKey.get(coupon.campaignKey) ?? []) : [];
-        const thumbnails = activeLocationThumbnails(locations);
-        const extra = extraLocationCount(locations);
-        const business = businessById.get(coupon.businessId);
-        return (
-          <Link key={coupon.id} className="hub-campaign-card" to={`/negocios/cupon/${coupon.id}`} state={{ from: "/negocios?view=cupones" }}>
-            {isSupermarket ? (
-              thumbnails.length > 0 ? (
-                <div className="hub-campaign-image hub-campaign-collage">
-                  {thumbnails.map((url, index) => <img key={url + index} src={url} alt="" />)}
-                  {extra > 0 ? <span className="hub-campaign-collage-extra">+{extra}</span> : null}
+    <section>
+      <div style={{ marginBottom: 14 }}>
+        <SegmentedControl
+          segments={COUPON_VIEWS.map((item) => ({ ...item, label: `${item.label} (${counts[item.id]})` }))}
+          activeId={couponView}
+          onChange={(id) => setCouponView(id as CouponView)}
+        />
+      </div>
+      {couponView === "drafts" ? (
+        <p className="hub-field-hint">Los borradores existen en Supabase pero no forman parte del catálogo canónico de WhatsApp. Podés editarlos con seguridad antes de decidir cómo publicarlos.</p>
+      ) : null}
+      {visibleCoupons.length === 0 ? (
+        <EmptyState
+          icon={Tag}
+          title={couponView === "drafts" ? "Sin borradores" : couponView === "paused" ? "Sin beneficios pausados" : "Sin beneficios publicados"}
+          description={couponView === "drafts" ? "Los beneficios duplicados como borrador aparecerán aquí." : undefined}
+        />
+      ) : (
+        <div className="hub-campaign-grid">
+          {visibleCoupons.map((coupon) => {
+            const isDraft = coupon.campaignKey.startsWith("admin_draft_");
+            const isSupermarket = isSupermarketCampaignKey(coupon.campaignKey);
+            const locations = isSupermarket ? (locationsByCampaignKey.get(coupon.campaignKey) ?? []) : [];
+            const thumbnails = activeLocationThumbnails(locations);
+            const extra = extraLocationCount(locations);
+            const business = businessById.get(coupon.businessId);
+            return (
+              <Link key={coupon.id} className="hub-campaign-card" to={`/negocios/cupon/${coupon.id}`} state={{ from: "/negocios?view=cupones" }}>
+                {isSupermarket ? (
+                  thumbnails.length > 0 ? (
+                    <div className="hub-campaign-image hub-campaign-collage">
+                      {thumbnails.map((url, index) => <img key={url + index} src={url} alt="" />)}
+                      {extra > 0 ? <span className="hub-campaign-collage-extra">+{extra}</span> : null}
+                    </div>
+                  ) : <div className="hub-campaign-image-placeholder">Sin imagen</div>
+                ) : (
+                  coupon.imageUrl ? <img className="hub-campaign-image" src={coupon.imageUrl} alt="" /> : <div className="hub-campaign-image-placeholder">Sin imagen</div>
+                )}
+                <div className="hub-campaign-body">
+                  <div className="hub-campaign-body-head">
+                    <strong>{coupon.displayName}</strong>
+                    <StatusBadge tone={isDraft ? "warning" : coupon.active ? "success" : "neutral"} label={isDraft ? "Borrador" : coupon.active ? "Publicado" : "Pausado"} />
+                  </div>
+                  <p className="hub-campaign-meta">{isDraft ? "No conectado al catálogo de WhatsApp" : isSupermarket ? supermarketAvailabilityLabel(locations.length) : (business?.name ?? "Sin negocio")}</p>
                 </div>
-              ) : <div className="hub-campaign-image-placeholder">Sin imagen</div>
-            ) : (
-              coupon.imageUrl ? <img className="hub-campaign-image" src={coupon.imageUrl} alt="" /> : <div className="hub-campaign-image-placeholder">Sin imagen</div>
-            )}
-            <div className="hub-campaign-body">
-              <div className="hub-campaign-body-head">
-                <strong>{coupon.displayName}</strong>
-                <StatusBadge tone={coupon.active ? "success" : "neutral"} label={coupon.active ? "Activo" : "Pausado"} />
-              </div>
-              <p className="hub-campaign-meta">{isSupermarket ? supermarketAvailabilityLabel(locations.length) : (business?.name ?? "Sin negocio")}</p>
-            </div>
-          </Link>
-        );
-      })}
+              </Link>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
