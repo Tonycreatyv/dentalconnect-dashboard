@@ -24,9 +24,9 @@ import type {
 // The real operational data source — reads exclusively from tables that
 // exist and are populated TODAY (no draft migration required):
 // referral_coupon_campaigns, referral_benefit_campaign_locations,
-// referral_partners (restricted to partnership_status='active', while
-// intentionally keeping both enabled and paused partners visible so an
-// administrator can reactivate them), referral_benefit_claims for real
+// referral_partners (restricted to confirmed active/paused partnership
+// states, while intentionally keeping disabled or paused partners visible
+// so an administrator can reactivate them), referral_benefit_claims for real
 // request counts, and the live LuisServiceId catalog for merchant-backed
 // and location-backed benefits used by the production WhatsApp path.
 //
@@ -141,7 +141,7 @@ async function loadConfirmedPartners(): Promise<PartnerRow[]> {
   const result = await supabase.from("referral_partners")
     .select("id,name,partnership_status,active,category_service_id,contact_name,phone,address_text,postal_code,image_url,hours,faqs,offers_coupon,receives_service_requests")
     .eq("organization_id", ORGANIZATION_ID)
-    .eq("partnership_status", "active");
+    .in("partnership_status", ["active", "paused"]);
   if (result.error) return [];
   return (result.data ?? []) as PartnerRow[];
 }
@@ -160,7 +160,7 @@ function partnerRowToBusiness(partner: PartnerRow): Business {
     hours: partner.hours ?? {},
     offersCoupon: partner.offers_coupon,
     receivesServiceRequests: partner.receives_service_requests,
-    active: partner.active,
+    active: partner.partnership_status === "active" && partner.active,
     requestCount: 0,
     faqs: partner.faqs ?? [],
   };
