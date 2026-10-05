@@ -1,6 +1,7 @@
-import { Building2, ClipboardList, Command, MessageCircle, Plus, Search, Settings, Tag, Users, X } from "lucide-react";
+import { Building2, ClipboardList, Command, CopyPlus, MessageCircle, Plus, Search, Settings, Tag, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { supabase } from "../../../lib/supabaseClient";
 import NewBusinessDrawer from "../negocios/NewBusinessDrawer";
 import { getActiveNegociosDataSource } from "../negocios/dataSource";
 import "./adminActionPalette.css";
@@ -18,9 +19,11 @@ type PaletteAction = {
 
 export default function AdminActionPalette() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [creatingPartner, setCreatingPartner] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -41,64 +44,102 @@ export default function AdminActionPalette() {
     navigate(to);
   }
 
-  const actions = useMemo<PaletteAction[]>(() => [
-    {
-      id: "find-client",
-      label: "Buscar cliente",
-      description: "Abrir Clientes para localizar una persona o caso.",
-      keywords: "buscar cliente lead persona telefono",
-      icon: Users,
-      run: () => go("/clientes"),
-    },
-    {
-      id: "create-partner",
-      label: "Agregar partner",
-      description: "Crear un aliado y después configurar servicios y acceso.",
-      keywords: "crear agregar partner aliado clinica abogado negocio red",
-      icon: Building2,
-      run: () => { setOpen(false); setCreatingPartner(true); },
-    },
-    {
-      id: "benefits",
-      label: "Administrar beneficios y cupones",
-      description: "Editar, activar o pausar beneficios existentes.",
-      keywords: "crear beneficio cupon coupon promocion editar",
-      icon: Tag,
-      run: () => go("/negocios?view=cupones"),
-    },
-    {
-      id: "operations",
-      label: "Resolver casos",
-      description: "Abrir la cola operativa para asignar o corregir casos.",
-      keywords: "asignar caso sin responsable excepcion operacion",
-      icon: ClipboardList,
-      run: () => go("/operacion"),
-    },
-    {
-      id: "messages",
-      label: "Abrir mensajes",
-      description: "Ir al workspace de conversaciones.",
-      keywords: "mensajes whatsapp conversacion",
-      icon: MessageCircle,
-      run: () => go("/messages"),
-    },
-    {
-      id: "network",
-      label: "Administrar Red",
-      description: "Partners, negocios, servicios aceptados y accesos.",
-      keywords: "red partner negocio aliado servicio acceso",
-      icon: Building2,
-      run: () => go("/negocios"),
-    },
-    {
-      id: "settings",
-      label: "Configuración",
-      description: "Organización, equipo e integraciones.",
-      keywords: "configuracion settings equipo permisos",
-      icon: Settings,
-      run: () => go("/configuracion"),
-    },
-  ], [navigate]);
+  const currentCouponId = /^\/negocios\/cupon\/([^/]+)$/.exec(location.pathname)?.[1] ?? null;
+
+  async function duplicateCurrentBenefit() {
+    if (!currentCouponId || busy) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await supabase.functions.invoke("admin-coupon-management", {
+        body: { action: "duplicate_draft", coupon_id: currentCouponId },
+      });
+      if (result.error) throw new Error(result.error.message);
+      const createdId = result.data?.coupon?.id as string | undefined;
+      if (!result.data?.success || !createdId) throw new Error(result.data?.error || "No se pudo crear el borrador.");
+      setOpen(false);
+      setQuery("");
+      setNotice("Borrador creado. No está conectado a WhatsApp.");
+      navigate(`/negocios/cupon/${createdId}`, { state: { from: "/negocios?view=cupones&status=draft" } });
+    } catch (reason) {
+      setNotice(`No se pudo duplicar: ${String((reason as Error)?.message || reason)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const actions = useMemo<PaletteAction[]>(() => {
+    const base: PaletteAction[] = [
+      {
+        id: "find-client",
+        label: "Buscar cliente",
+        description: "Abrir Clientes para localizar una persona o caso.",
+        keywords: "buscar cliente lead persona telefono",
+        icon: Users,
+        run: () => go("/clientes"),
+      },
+      {
+        id: "create-partner",
+        label: "Agregar partner",
+        description: "Crear un aliado y después configurar servicios y acceso.",
+        keywords: "crear agregar partner aliado clinica abogado negocio red",
+        icon: Building2,
+        run: () => { setOpen(false); setCreatingPartner(true); },
+      },
+      {
+        id: "benefits",
+        label: "Administrar beneficios y cupones",
+        description: "Editar, activar o pausar beneficios existentes.",
+        keywords: "crear beneficio cupon coupon promocion editar",
+        icon: Tag,
+        run: () => go("/negocios?view=cupones"),
+      },
+      {
+        id: "operations",
+        label: "Resolver casos",
+        description: "Abrir la cola operativa para asignar o corregir casos.",
+        keywords: "asignar caso sin responsable excepcion operacion",
+        icon: ClipboardList,
+        run: () => go("/operacion"),
+      },
+      {
+        id: "messages",
+        label: "Abrir mensajes",
+        description: "Ir al workspace de conversaciones.",
+        keywords: "mensajes whatsapp conversacion",
+        icon: MessageCircle,
+        run: () => go("/messages"),
+      },
+      {
+        id: "network",
+        label: "Administrar Red",
+        description: "Partners, negocios, servicios aceptados y accesos.",
+        keywords: "red partner negocio aliado servicio acceso",
+        icon: Building2,
+        run: () => go("/negocios"),
+      },
+      {
+        id: "settings",
+        label: "Configuración",
+        description: "Organización, equipo e integraciones.",
+        keywords: "configuracion settings equipo permisos",
+        icon: Settings,
+        run: () => go("/configuracion"),
+      },
+    ];
+
+    if (currentCouponId) {
+      base.splice(3, 0, {
+        id: "duplicate-benefit-draft",
+        label: busy ? "Creando borrador…" : "Duplicar beneficio como borrador",
+        description: "Crea una copia pausada y aislada; no se conecta al Flow de WhatsApp.",
+        keywords: "duplicar beneficio borrador draft copia cupon",
+        icon: CopyPlus,
+        run: () => { void duplicateCurrentBenefit(); },
+      });
+    }
+    return base;
+  }, [currentCouponId, busy, navigate]);
 
   const normalized = query.trim().toLowerCase();
   const visible = normalized
@@ -131,7 +172,7 @@ export default function AdminActionPalette() {
               {visible.map((action) => {
                 const Icon = action.icon;
                 return (
-                  <button key={action.id} type="button" className="admin-action-item" onClick={action.run}>
+                  <button key={action.id} type="button" className="admin-action-item" onClick={action.run} disabled={busy && action.id === "duplicate-benefit-draft"}>
                     <span className="admin-action-icon"><Icon size={18} /></span>
                     <span><strong>{action.label}</strong><small>{action.description}</small></span>
                   </button>
