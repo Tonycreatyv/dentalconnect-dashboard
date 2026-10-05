@@ -29,7 +29,7 @@ export async function assignAdminCase(input: {
 
 export async function updateAdminCase(input: {
   requestId: string;
-  action: "contacted" | "appointment_scheduled" | "converted" | "closed_not_converted" | "follow_up";
+  action: "contacted" | "appointment_scheduled" | "converted" | "closed_not_converted" | "follow_up" | "note";
   note?: string | null;
   followUpReason?: "no_answer" | "missing_police_report" | "missing_document" | "missing_information" | "other" | null;
   nextFollowupAt?: string | null;
