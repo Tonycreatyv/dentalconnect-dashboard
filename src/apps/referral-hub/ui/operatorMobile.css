@@ -1,0 +1,173 @@
+/* Operator Mode mobile ergonomics. Scoped to the Referral Hub shell so Partner Portal
+   and public WhatsApp-facing routes remain untouched. */
+@media (max-width: 899px) {
+  .bolt-rh-shell {
+    min-height: 100dvh;
+    background: #f5f7f8;
+  }
+
+  .bolt-rh-workspace {
+    min-width: 0;
+    min-height: 100dvh;
+  }
+
+  .bolt-rh-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 55;
+    min-height: 56px;
+    padding-top: env(safe-area-inset-top, 0px);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .bolt-rh-content:not(.is-flush) {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .bolt-rh-content:not(.is-flush) .hub-page {
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-top: 14px;
+    padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .bolt-rh-content .hub-page--wide {
+    max-width: none;
+  }
+
+  .bolt-rh-content .hub-page-header,
+  .bolt-rh-content .hub-section-head {
+    gap: 10px;
+  }
+
+  .bolt-rh-content .hub-section,
+  .bolt-rh-content .hub-campaign-card,
+  .bolt-rh-content .hub-negocio-card,
+  .bolt-rh-content .hub-stat-card {
+    border-radius: 16px;
+  }
+
+  .bolt-rh-content .hub-section {
+    padding: 16px;
+  }
+
+  .bolt-rh-content .hub-campaign-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .bolt-rh-content .hub-list {
+    gap: 8px;
+  }
+
+  .bolt-rh-content .hub-list-row {
+    min-width: 0;
+    min-height: 58px;
+    border-radius: 14px;
+  }
+
+  .bolt-rh-content .hub-list-row > div,
+  .bolt-rh-content .hub-campaign-body,
+  .bolt-rh-content .hub-negocio-card-head > div {
+    min-width: 0;
+  }
+
+  .bolt-rh-content .hub-field input,
+  .bolt-rh-content .hub-field select,
+  .bolt-rh-content .hub-field textarea,
+  .bolt-rh-content .hub-textarea {
+    width: 100%;
+    min-height: 46px;
+    font-size: 16px;
+    border-radius: 12px;
+  }
+
+  .bolt-rh-content .hub-primary,
+  .bolt-rh-content .hub-secondary {
+    min-height: 44px;
+    border-radius: 12px;
+    touch-action: manipulation;
+  }
+
+  .bolt-rh-content .hub-delivery-toggle {
+    min-height: 54px;
+    gap: 12px;
+    border-radius: 14px;
+  }
+
+  .bolt-rh-content .hub-delivery-toggle input[type="checkbox"] {
+    min-width: 22px;
+    min-height: 22px;
+  }
+
+  .hub-drawer {
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: min(88dvh, 760px);
+    border-radius: 22px 22px 0 0 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .hub-drawer-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: inherit;
+  }
+
+  .hub-drawer-body {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .hub-drawer-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
+    background: inherit;
+  }
+
+  .bolt-rh-bottom {
+    padding-bottom: max(6px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .bolt-rh-bottom a {
+    min-height: 54px;
+    touch-action: manipulation;
+  }
+
+  .admin-action-fab {
+    right: max(14px, env(safe-area-inset-right, 0px));
+    bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+    width: 52px;
+    height: 52px;
+    justify-content: center;
+    padding: 0;
+    box-shadow: 0 14px 34px rgba(0,0,0,.30), inset 0 0 0 1px rgba(255,255,255,.12);
+  }
+
+  .admin-action-panel {
+    max-height: min(86dvh, 760px);
+    border-radius: 24px 24px 0 0;
+  }
+
+  .admin-action-item {
+    min-height: 60px;
+  }
+}
+
+@media (min-width: 900px) {
+  .bolt-rh-content:not(.is-flush) .hub-page {
+    padding-bottom: 48px;
+  }
+}
