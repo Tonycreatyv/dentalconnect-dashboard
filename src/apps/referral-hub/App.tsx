@@ -23,6 +23,7 @@ import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from 
 import MessagesWorkspace from "./screens/MessagesWorkspace";
 import AdminOperationsScreen from "./screens/AdminOperationsScreen";
 import CasesWorkspace from "./screens/CasesWorkspace";
+import BenefitsWorkspace from "./screens/BenefitsWorkspace";
 import ClientEditScreen from "./screens/ClientEditScreen";
 import CaseEditScreen from "./screens/CaseEditScreen";
 import { AdminCaseDetailRoute, AdminClientDetailRoute } from "./screens/AdminDetailRoutes";
@@ -62,6 +63,7 @@ function ProductRoutes() {
       <Route path="clientes/:leadId/editar" element={<ClientEditScreen />} />
       <Route path="messages" element={<MessagesWorkspace />} />
       <Route path="messages/:conversationId" element={<MessagesWorkspace />} />
+      <Route path="beneficios" element={<BenefitsWorkspace />} />
       <Route path="campanas" element={<CampaignsHub />} />
       <Route path="campanas/campana/:campaignId" element={<CampaignDetailScreen />} />
       <Route path="campanas/servicio/:serviceId" element={<ServiceDetailScreen />} />
@@ -82,25 +84,25 @@ function ProductRoutes() {
       <Route path="baskets/:locationId" element={<BasketsGate><BasketLocationScreen /></BasketsGate>} />
       <Route path="baskets/:locationId/:offerId" element={<BasketsGate><BasketOfferScreen /></BasketsGate>} />
       <Route path="benefits/claims" element={<RedirectWithSearch to="/clientes" />} />
-      <Route path="coupons" element={<RedirectWithSearch to="/campanas" />} />
+      <Route path="coupons" element={<RedirectWithSearch to="/beneficios" />} />
       <Route path="coupons/:couponId" element={<CouponDetailScreen />} />
       <Route path="coupons/validate" element={<CouponValidator />} />
       <Route path="validate-coupon/:publicToken" element={<CouponValidator />} />
-      <Route path="coverage" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
-      <Route path="coverage/:locationId" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
+      <Route path="coverage" element={<RedirectWithSearch to="/network/stores" />} />
+      <Route path="coverage/:locationId" element={<RedirectWithSearch to="/network/stores" />} />
       <Route path="catalog" element={<CatalogScreen />} />
       <Route path="integrations" element={<ReferralIntegrations />} />
-      <Route path="qr-campaigns" element={<RedirectWithSearch to="/campanas" />} />
+      <Route path="qr-campaigns" element={<RedirectWithSearch to="/beneficios" />} />
       <Route path="settings" element={<ReferralConfiguracion />} />
 
       <Route path="leads" element={<RedirectWithSearch to="/clientes" />} />
-      <Route path="cupones" element={<RedirectWithSearch to="/campanas" />} />
-      <Route path="services" element={<RedirectWithSearch to="/campanas?view=servicios" />} />
+      <Route path="cupones" element={<RedirectWithSearch to="/beneficios" />} />
+      <Route path="services" element={<RedirectWithSearch to="/beneficios" />} />
       <Route path="services/:serviceId" element={<ServicesGate detail />} />
       <Route path="settings/services" element={<ServicesGate />} />
-      <Route path="network" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
-      <Route path="network/allies" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
-      <Route path="network/allies/:allyId" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
+      <Route path="network" element={<RedirectWithSearch to="/negocios" />} />
+      <Route path="network/allies" element={<RedirectWithSearch to="/negocios" />} />
+      <Route path="network/allies/:allyId" element={<RedirectWithSearch to="/negocios" />} />
       <Route path="network/stores" element={<StoresScreen />} />
       <Route path="network/stores/:locationId" element={<StoreWorkspaceScreen />} />
       <Route path="network/stores/:locationId/baskets" element={<StoreWorkspaceScreen section="baskets" />} />
@@ -110,9 +112,9 @@ function ProductRoutes() {
       <Route path="attention" element={<Navigate to="/operacion" replace />} />
       <Route path="opportunities" element={<Navigate to="/operacion" replace />} />
       <Route path="assignments" element={<Navigate to="/operacion" replace />} />
-      <Route path="partners" element={<Navigate to="/campanas?view=negocios" replace />} />
-      <Route path="partner-contacts" element={<Navigate to="/campanas?view=negocios" replace />} />
-      <Route path="supermarkets" element={<Navigate to="/campanas?view=negocios" replace />} />
+      <Route path="partners" element={<Navigate to="/negocios" replace />} />
+      <Route path="partner-contacts" element={<Navigate to="/negocios" replace />} />
+      <Route path="supermarkets" element={<Navigate to="/network/stores" replace />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>;

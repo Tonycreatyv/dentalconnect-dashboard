@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowLeft, FileCheck2, ImageOff, MessageCircle, Paperclip, Search, Send } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Avatar from "../ui/Avatar";
 import EmptyState from "../ui/EmptyState";
@@ -39,15 +39,15 @@ export default function MessagesWorkspace() {
   const { conversationId } = useParams();
   const data = useLeadsPipeline();
   const ops = useReferralOperations();
-  // Demo-safe live refresh: same load() functions the initial mount already
-  // uses, called silently every ~2.5s so new inbound messages/leads show up
-  // without a manual refresh. Never touches send/draft state.
   useSilentPolling(() => Promise.all([data.load({ silent: true }), ops.load({ silent: true })]), 2500);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
+  const threadScrollRef = useRef<HTMLDivElement | null>(null);
+  const lastConversationRef = useRef<string | undefined>(undefined);
+  const previousRowCountRef = useRef(0);
 
   const conversations = useMemo(() => data.leads
     .map((lead) => { const rows = ops.byLead.get(lead.id) ?? []; return { lead, latest: lastMessage(rows) }; })
@@ -61,6 +61,19 @@ export default function MessagesWorkspace() {
   const loading = ops.loading || data.loading;
   const failure = ops.error || data.error;
 
+  useEffect(() => {
+    const node = threadScrollRef.current;
+    if (!conversationId || loading || !node) return;
+    const conversationChanged = lastConversationRef.current !== conversationId;
+    const newMessageArrived = rows.length > previousRowCountRef.current;
+    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 180;
+    if (conversationChanged || (newMessageArrived && nearBottom)) {
+      requestAnimationFrame(() => { node.scrollTop = node.scrollHeight; });
+    }
+    lastConversationRef.current = conversationId;
+    previousRowCountRef.current = rows.length;
+  }, [conversationId, loading, rows.length]);
+
   async function send() {
     if (!selectedLead || !draft.trim()) return;
     setSending(true);
@@ -72,8 +85,14 @@ export default function MessagesWorkspace() {
       content: draft,
     });
     setSending(false);
-    if (result.ok) { setDraft(""); setNotice("Mensaje en cola de entrega."); }
-    else setNotice(result.message ?? "No se pudo enviar.");
+    if (result.ok) {
+      setDraft("");
+      setNotice("Mensaje en cola de entrega.");
+      requestAnimationFrame(() => {
+        const node = threadScrollRef.current;
+        if (node) node.scrollTop = node.scrollHeight;
+      });
+    } else setNotice(result.message ?? "No se pudo enviar.");
   }
 
   return (
@@ -129,7 +148,7 @@ export default function MessagesWorkspace() {
               <div><strong>{leadName(selectedLead)}</strong><small>{leadPhone(selectedLead) || "Sin teléfono"}</small></div>
               <StatusBadge tone={selectedLead.handoff_to_human ? "warning" : "success"} label={selectedLead.handoff_to_human ? "Humano activo" : "Bot activo"} />
             </header>
-            <div className="hub-messages-thread-scroll">
+            <div className="hub-messages-thread-scroll" ref={threadScrollRef}>
               {rows.length === 0 ? (
                 <p style={{ color: "var(--hub-muted)", fontSize: ".82rem" }}>Todavía no hay mensajes.</p>
               ) : (
@@ -146,15 +165,7 @@ export default function MessagesWorkspace() {
                         <FileCheck2 size={15} />
                         <div>
                           <strong>{submission?.title ?? "Formulario completado"}</strong>
-                          {submission ? (
-                            <ul>
-                              {submission.lines.map((line) => <li key={line}>{line}</li>)}
-                            </ul>
-                          ) : (
-                            <p className="hub-flow-event-gap">
-                              Detalle no disponible: no se encontró el envío original de reply_outbox para este mensaje.
-                            </p>
-                          )}
+                          {submission ? <ul>{submission.lines.map((line) => <li key={line}>{line}</li>)}</ul> : <p className="hub-flow-event-gap">Detalle no disponible: no se encontró el envío original de reply_outbox para este mensaje.</p>}
                           <time>{formatTime(message.created_at)}</time>
                         </div>
                       </article>
@@ -167,11 +178,7 @@ export default function MessagesWorkspace() {
                         <ImageOff size={15} />
                         <div>
                           <strong>{message.content}</strong>
-                          <p className="hub-flow-event-gap">
-                            {message.provider_message_id
-                              ? "Imagen aceptada por Meta (esta base de datos no guarda la URL de la imagen enviada, así que no se puede mostrar una vista previa real)."
-                              : "No hay confirmación de envío a Meta para esta imagen."}
-                          </p>
+                          <p className="hub-flow-event-gap">{message.provider_message_id ? "Imagen aceptada por Meta (esta base de datos no guarda la URL de la imagen enviada, así que no se puede mostrar una vista previa real)." : "No hay confirmación de envío a Meta para esta imagen."}</p>
                           <time>{formatTime(message.created_at)}</time>
                         </div>
                       </article>
@@ -187,20 +194,11 @@ export default function MessagesWorkspace() {
                 })
               )}
             </div>
-            <p className="hub-flow-event-gap hub-messages-gap-note">
-              Los botones interactivos que se envían junto a algunos mensajes no se guardan en esta base de datos, así que no se pueden mostrar aquí para conversaciones pasadas.
-            </p>
+            <p className="hub-flow-event-gap hub-messages-gap-note">Los botones interactivos que se envían junto a algunos mensajes no se guardan en esta base de datos, así que no se pueden mostrar aquí para conversaciones pasadas.</p>
             {notice ? <p className="hub-messages-notice" role="status">{notice}</p> : null}
             <footer className="hub-messages-composer">
               <button type="button" className="hub-composer-icon-btn" disabled title="Adjuntar imagen — próximamente"><Paperclip size={17} /></button>
-              <textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                rows={1}
-                placeholder="Escribe una respuesta manual…"
-                aria-label="Mensaje"
-                onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }}
-              />
+              <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={1} placeholder="Escribe una respuesta manual…" aria-label="Mensaje" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} />
               <button type="button" className="hub-composer-send" disabled={sending || !draft.trim()} onClick={() => void send()} aria-label="Enviar"><Send size={17} /></button>
             </footer>
           </>
