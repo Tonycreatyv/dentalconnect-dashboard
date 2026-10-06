@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, ChevronDown, Gift, X } from "lucide-react";
+import { Briefcase, ChevronDown, Gift, X } from "lucide-react";
 import { useState } from "react";
 import "./workspaceSwitcher.css";
 
@@ -8,7 +8,7 @@ const WORKSPACES = {
   referrals: {
     label: "Referrals",
     description: "Casos, intake, partners y seguimiento",
-    icon: BriefcaseBusiness,
+    icon: Briefcase,
   },
   benefits: {
     label: "Benefits",
