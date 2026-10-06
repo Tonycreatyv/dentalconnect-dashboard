@@ -22,6 +22,8 @@ import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
 import AdminOperationsScreen from "./screens/AdminOperationsScreen";
+import CasesWorkspace from "./screens/CasesWorkspace";
+import BenefitsWorkspace from "./screens/BenefitsWorkspace";
 import ClientEditScreen from "./screens/ClientEditScreen";
 import CaseEditScreen from "./screens/CaseEditScreen";
 import { AdminCaseDetailRoute, AdminClientDetailRoute } from "./screens/AdminDetailRoutes";
@@ -45,11 +47,6 @@ function ProductRoutes() {
     <Route path="/coupon/:publicToken" element={<PublicCoupon />} />
     <Route path="/q/:publicCode" element={<ReferralQrEntry />} />
     <Route path="/partner/:token" element={<PartnerPortal />} />
-    {/* Nested under /partner (not two flat sibling routes, and not a bare
-        /partner/* route) so the static "login"/"app" segments always outrank
-        the dynamic :token route above for those exact paths — React Router
-        ranks a bare /partner/* splat BELOW /partner/:token, which would
-        silently route the dashboard through PartnerPortal instead. */}
     <Route path="/partner">
       <Route path="login" element={<PartnerLogin />} />
       <Route path="app/*" element={<RequirePartner><PartnerShell /></RequirePartner>} />
@@ -57,6 +54,7 @@ function ProductRoutes() {
     <Route path="/" element={<RequireAuth><ReferralOrganizationProvider><BoltShell /></ReferralOrganizationProvider></RequireAuth>}>
       <Route index element={<Navigate to="/operacion" replace />} />
       <Route path="operacion" element={<AdminOperationsScreen />} />
+      <Route path="casos" element={<CasesWorkspace />} />
       <Route path="operacion/:requestId" element={<AdminCaseDetailRoute />} />
       <Route path="operacion/:requestId/editar" element={<CaseEditScreen />} />
       <Route path="oportunidades" element={<Navigate to="/operacion" replace />} />
@@ -65,54 +63,46 @@ function ProductRoutes() {
       <Route path="clientes/:leadId/editar" element={<ClientEditScreen />} />
       <Route path="messages" element={<MessagesWorkspace />} />
       <Route path="messages/:conversationId" element={<MessagesWorkspace />} />
+      <Route path="beneficios" element={<BenefitsWorkspace />} />
       <Route path="campanas" element={<CampaignsHub />} />
       <Route path="campanas/campana/:campaignId" element={<CampaignDetailScreen />} />
       <Route path="campanas/servicio/:serviceId" element={<ServiceDetailScreen />} />
       <Route path="campanas/negocio/:businessId" element={<BusinessDetailScreen />} />
 
-      {/* Business-centered network workspace. Its active data source reads
-          production Supabase data; only capabilities backed by persistent
-          writes are exposed in the UI. */}
       <Route path="negocios" element={<NegociosHub />} />
       <Route path="negocios/negocio/:businessId" element={<NegociosBusinessDetail />} />
       <Route path="negocios/cupon/:couponId" element={<NegociosCouponEditor />} />
       <Route path="negocios/solicitudes" element={<CouponRequestsScreen />} />
 
-      {/* Legacy routes preserved and functional, reachable from Perfil (not primary nav). */}
       <Route path="work" element={<WorkScreen />} />
       <Route path="work/:itemId" element={<Navigate to="/work" replace />} />
       <Route path="orders" element={<OrdersGate />} />
       <Route path="orders/:orderId" element={<OrdersGate detail />} />
-      {/* /more was a near-duplicate, profile-only page — replaced by
-          Configuración (now directly reachable from primary nav), so it
-          redirects (history "replace", not "push") to preserve back
-          behavior instead of leaving a dead end or a back-button loop. */}
       <Route path="more" element={<RedirectWithSearch to="/configuracion" />} />
       <Route path="configuracion" element={<ReferralConfiguracion />} />
       <Route path="baskets" element={<BasketsGate><BasketsScreen /></BasketsGate>} />
       <Route path="baskets/:locationId" element={<BasketsGate><BasketLocationScreen /></BasketsGate>} />
       <Route path="baskets/:locationId/:offerId" element={<BasketsGate><BasketOfferScreen /></BasketsGate>} />
       <Route path="benefits/claims" element={<RedirectWithSearch to="/clientes" />} />
-      <Route path="coupons" element={<RedirectWithSearch to="/campanas" />} />
+      <Route path="coupons" element={<RedirectWithSearch to="/beneficios" />} />
       <Route path="coupons/:couponId" element={<CouponDetailScreen />} />
       <Route path="coupons/validate" element={<CouponValidator />} />
       <Route path="validate-coupon/:publicToken" element={<CouponValidator />} />
-      <Route path="coverage" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
-      <Route path="coverage/:locationId" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
+      <Route path="coverage" element={<RedirectWithSearch to="/network/stores" />} />
+      <Route path="coverage/:locationId" element={<RedirectWithSearch to="/network/stores" />} />
       <Route path="catalog" element={<CatalogScreen />} />
       <Route path="integrations" element={<ReferralIntegrations />} />
-      <Route path="qr-campaigns" element={<RedirectWithSearch to="/campanas" />} />
+      <Route path="qr-campaigns" element={<RedirectWithSearch to="/beneficios" />} />
       <Route path="settings" element={<ReferralConfiguracion />} />
 
-      {/* Explicitly moved per the new information architecture. */}
       <Route path="leads" element={<RedirectWithSearch to="/clientes" />} />
-      <Route path="cupones" element={<RedirectWithSearch to="/campanas" />} />
-      <Route path="services" element={<RedirectWithSearch to="/campanas?view=servicios" />} />
+      <Route path="cupones" element={<RedirectWithSearch to="/beneficios" />} />
+      <Route path="services" element={<RedirectWithSearch to="/beneficios" />} />
       <Route path="services/:serviceId" element={<ServicesGate detail />} />
       <Route path="settings/services" element={<ServicesGate />} />
-      <Route path="network" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
-      <Route path="network/allies" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
-      <Route path="network/allies/:allyId" element={<RedirectWithSearch to="/campanas?view=negocios" />} />
+      <Route path="network" element={<RedirectWithSearch to="/negocios" />} />
+      <Route path="network/allies" element={<RedirectWithSearch to="/negocios" />} />
+      <Route path="network/allies/:allyId" element={<RedirectWithSearch to="/negocios" />} />
       <Route path="network/stores" element={<StoresScreen />} />
       <Route path="network/stores/:locationId" element={<StoreWorkspaceScreen />} />
       <Route path="network/stores/:locationId/baskets" element={<StoreWorkspaceScreen section="baskets" />} />
@@ -122,9 +112,9 @@ function ProductRoutes() {
       <Route path="attention" element={<Navigate to="/operacion" replace />} />
       <Route path="opportunities" element={<Navigate to="/operacion" replace />} />
       <Route path="assignments" element={<Navigate to="/operacion" replace />} />
-      <Route path="partners" element={<Navigate to="/campanas?view=negocios" replace />} />
-      <Route path="partner-contacts" element={<Navigate to="/campanas?view=negocios" replace />} />
-      <Route path="supermarkets" element={<Navigate to="/campanas?view=negocios" replace />} />
+      <Route path="partners" element={<Navigate to="/negocios" replace />} />
+      <Route path="partner-contacts" element={<Navigate to="/negocios" replace />} />
+      <Route path="supermarkets" element={<Navigate to="/network/stores" replace />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>;
