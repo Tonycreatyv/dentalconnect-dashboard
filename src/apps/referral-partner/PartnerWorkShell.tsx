@@ -42,6 +42,7 @@ import {
   type ReferralService,
 } from "./referralPresentation";
 import "./partnerModern.css";
+import "./partnerMobileFilters.css";
 
 type AssignmentRequestRow = {
   id: string;
@@ -81,6 +82,14 @@ const SERVICE_OPTIONS: Array<{ id: ServiceFilter; label: string }> = [
   { id: "immigration", label: "Inmigración" },
   { id: "dui", label: "DUI" },
   { id: "criminal", label: "Criminal" },
+];
+
+const STATUS_OPTIONS: Array<{ id: PartnerStatusFilter; label: string }> = [
+  { id: "all", label: "Todos los estados" },
+  { id: "new", label: "Nuevos" },
+  { id: "follow_up", label: "Seguimiento" },
+  { id: "approved", label: "Aprobados" },
+  { id: "disqualified", label: "No calificó" },
 ];
 
 const SERVICE_ICON: Record<LegalService, string> = {
@@ -140,6 +149,16 @@ function formatLeadAge(value: string | null | undefined): string {
   if (hours < 24) return `${hours} h`;
   const days = Math.floor(hours / 24);
   return days === 1 ? "1 día" : `${days} días`;
+}
+
+function localDateKey(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function queueStatusTone(status: PartnerQueueStatus, overdue: boolean): string {
@@ -397,6 +416,8 @@ function PartnerList({ partnerId }: { partnerId: string }) {
   const { rows, loading, error } = usePartnerReferrals(partnerId);
   const [statusFilter, setStatusFilter] = useState<PartnerStatusFilter>("all");
   const [serviceFilter, setServiceFilter] = useState<ServiceFilter>("all");
+  const [receivedDateFilter, setReceivedDateFilter] = useState("");
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   const entries = useMemo(() => {
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -417,13 +438,37 @@ function PartnerList({ partnerId }: { partnerId: string }) {
   const filtered = useMemo(() => entries.filter((entry) => {
     const statusMatches = statusFilter === "all" || entry.queueStatus === statusFilter;
     const serviceMatches = serviceFilter === "all" || entry.service === serviceFilter;
-    return statusMatches && serviceMatches;
-  }), [entries, statusFilter, serviceFilter]);
+    const dateMatches = !receivedDateFilter || localDateKey(entry.opportunity.assignment!.assignedAt) === receivedDateFilter;
+    const overdueMatches = !overdueOnly || entry.overdue;
+    return statusMatches && serviceMatches && dateMatches && overdueMatches;
+  }), [entries, statusFilter, serviceFilter, receivedDateFilter, overdueOnly]);
 
   const overdueCount = useMemo(() => entries.filter((entry) => entry.overdue).length, [entries]);
   const newCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "new").length, [entries]);
   const followUpCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "follow_up").length, [entries]);
-  const hasFilters = statusFilter !== "all" || serviceFilter !== "all";
+  const hasFilters = statusFilter !== "all" || serviceFilter !== "all" || receivedDateFilter !== "" || overdueOnly;
+
+  const chooseStatus = useCallback((status: PartnerStatusFilter) => {
+    setOverdueOnly(false);
+    setStatusFilter(status);
+  }, []);
+
+  const toggleSummaryStatus = useCallback((status: "new" | "follow_up") => {
+    setOverdueOnly(false);
+    setStatusFilter((current) => current === status ? "all" : status);
+  }, []);
+
+  const toggleOverdue = useCallback(() => {
+    setStatusFilter("all");
+    setOverdueOnly((current) => !current);
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setStatusFilter("all");
+    setServiceFilter("all");
+    setReceivedDateFilter("");
+    setOverdueOnly(false);
+  }, []);
 
   if (loading) return <p className="partner-empty partner-loading">Cargando referencias…</p>;
   if (error) return <p className="partner-empty partner-loading">{error}</p>;
@@ -441,33 +486,53 @@ function PartnerList({ partnerId }: { partnerId: string }) {
         </details>
       </div>
 
-      <div className="partner-modern-summary" aria-label="Resumen de trabajo">
-        <div><strong>{newCount}</strong><span>Nuevos</span></div>
-        <div><strong>{followUpCount}</strong><span>Seguimientos</span></div>
-        <div className={overdueCount > 0 ? "is-overdue" : ""}><strong>{overdueCount}</strong><span>Vencidos</span></div>
+      <div className="partner-modern-summary" aria-label="Resumen y filtros rápidos">
+        <button type="button" aria-pressed={statusFilter === "new" && !overdueOnly} className={statusFilter === "new" && !overdueOnly ? "is-selected" : ""} onClick={() => toggleSummaryStatus("new")}><strong>{newCount}</strong><span>Nuevos</span></button>
+        <button type="button" aria-pressed={statusFilter === "follow_up" && !overdueOnly} className={statusFilter === "follow_up" && !overdueOnly ? "is-selected" : ""} onClick={() => toggleSummaryStatus("follow_up")}><strong>{followUpCount}</strong><span>Seguimientos</span></button>
+        <button type="button" aria-pressed={overdueOnly} className={`${overdueCount > 0 ? "is-overdue" : ""}${overdueOnly ? " is-selected" : ""}`} onClick={toggleOverdue}><strong>{overdueCount}</strong><span>Vencidos</span></button>
       </div>
 
       <div className="partner-modern-toolbar">
         <div className="partner-modern-status-scroll" role="tablist" aria-label="Filtrar por estado">
-          {([{ id: "all", label: "Todos" }, { id: "new", label: "Nuevos" }, { id: "follow_up", label: "Seguimiento" }, { id: "approved", label: "Aprobados" }, { id: "disqualified", label: "No calificó" }] as Array<{ id: PartnerStatusFilter; label: string }>).map((tab) => (
-            <button key={tab.id} type="button" role="tab" aria-selected={statusFilter === tab.id} className={`partner-filter-btn${statusFilter === tab.id ? ` is-active is-${tab.id}` : ""}`} onClick={() => setStatusFilter(tab.id)}>{tab.label}</button>
+          {STATUS_OPTIONS.map((tab) => (
+            <button key={tab.id} type="button" role="tab" aria-selected={statusFilter === tab.id && !overdueOnly} className={`partner-filter-btn${statusFilter === tab.id && !overdueOnly ? ` is-active is-${tab.id}` : ""}`} onClick={() => chooseStatus(tab.id)}>{tab.label === "Todos los estados" ? "Todos" : tab.label}</button>
           ))}
         </div>
-        <label className="partner-modern-service-filter">
-          <span>Servicio</span>
-          <select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value as ServiceFilter)}>
-            {SERVICE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-          </select>
-        </label>
+        <div className="partner-modern-filter-fields">
+          <label className="partner-modern-status-select">
+            <span>Estado</span>
+            <select value={overdueOnly ? "overdue" : statusFilter} onChange={(event) => {
+              if (event.target.value === "overdue") {
+                setStatusFilter("all");
+                setOverdueOnly(true);
+              } else {
+                chooseStatus(event.target.value as PartnerStatusFilter);
+              }
+            }}>
+              {STATUS_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              <option value="overdue">Vencidos</option>
+            </select>
+          </label>
+          <label className="partner-modern-service-filter">
+            <span>Servicio</span>
+            <select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value as ServiceFilter)}>
+              {SERVICE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="partner-modern-date-filter">
+            <span>Fecha recibida</span>
+            <input type="date" value={receivedDateFilter} onChange={(event) => setReceivedDateFilter(event.target.value)} />
+          </label>
+        </div>
       </div>
 
       <div className="partner-modern-result-bar">
-        <span><strong>{filtered.length}</strong> {filtered.length === 1 ? "caso" : "casos"}</span>
-        {hasFilters ? <button type="button" onClick={() => { setStatusFilter("all"); setServiceFilter("all"); }}>Limpiar filtros</button> : null}
+        <span><strong>{filtered.length}</strong> {filtered.length === 1 ? "caso" : "casos"}{hasFilters ? " filtrados" : ""}</span>
+        {hasFilters ? <button type="button" onClick={clearFilters}>Limpiar filtros</button> : null}
       </div>
 
       {filtered.length === 0 ? (
-        <div className="partner-empty-state"><p>No hay referencias con estos filtros.</p><p className="partner-empty-sub">Cambia el estado o servicio para ver otros casos.</p></div>
+        <div className="partner-empty-state"><p>No hay referencias con estos filtros.</p><p className="partner-empty-sub">Cambia el estado, servicio o fecha para ver otros casos.</p></div>
       ) : (
         <>
           <PartnerDesktopTable entries={filtered} />
