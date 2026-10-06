@@ -1,4 +1,4 @@
-import { Search, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Search, SearchX, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { relativeAge } from "../../../referral/status";
@@ -45,7 +45,7 @@ export default function CasesWorkspace() {
   }, [data.requests, query, service]);
 
   if (data.loading) return <div className="hub-page hub-page--wide"><SkeletonRows count={7} /></div>;
-  if (data.error) return <div className="hub-page hub-page--wide"><EmptyState tone="error" title="No se pudieron cargar los casos" description={data.error} /></div>;
+  if (data.error) return <div className="hub-page hub-page--wide"><EmptyState icon={AlertTriangle} tone="error" title="No se pudieron cargar los casos" description={data.error} /></div>;
 
   return (
     <div className="hub-page hub-page--wide cases-workspace">
@@ -56,7 +56,7 @@ export default function CasesWorkspace() {
         <label className="cases-service"><SlidersHorizontal size={17} /><select value={service} onChange={(e) => setService(e.target.value)}>{SERVICE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       </section>
 
-      {rows.length === 0 ? <EmptyState title="No hay casos con estos filtros" /> : (
+      {rows.length === 0 ? <EmptyState icon={SearchX} title="No hay casos con estos filtros" /> : (
         <div className="cases-list">
           {rows.map((item) => {
             const presentation = legalOpportunityPresentation(item.serviceId, item.intake, item.topic);
