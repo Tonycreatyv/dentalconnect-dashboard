@@ -1,0 +1,177 @@
+/* ConeXXion Admin mobile UX v2: mobile-native hierarchy and controls. */
+@media (max-width: 760px) {
+  /* Operations: no clipped chip rails. Queue actions form a 2x2 decision grid;
+     services form a compact grid that stays fully visible. */
+  .hub-operator-page .hub-operator-filterbar {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .hub-operator-page .hub-operator-filterbar > .hub-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 8px;
+    overflow: visible;
+    width: 100%;
+  }
+
+  .hub-operator-page .hub-operator-service-filter {
+    overflow: visible;
+    padding: 0;
+  }
+
+  .hub-operator-page .hub-operator-service-filter .hub-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    gap: 7px;
+    overflow: visible;
+    width: 100%;
+  }
+
+  .hub-operator-page .hub-tab {
+    min-width: 0;
+    min-height: 42px;
+    justify-content: center;
+    padding: 8px 9px;
+    border-radius: 12px;
+    font-size: 12px;
+    line-height: 1.15;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .hub-operator-page .hub-tab-count {
+    flex: 0 0 auto;
+  }
+
+  .hub-operator-summary {
+    gap: 9px;
+    margin-bottom: 16px;
+  }
+
+  .hub-operator-summary > div {
+    min-height: 92px;
+    justify-content: center;
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .hub-operator-summary strong {
+    font-size: 1.7rem;
+  }
+
+  .hub-operator-summary span {
+    font-size: .83rem;
+    line-height: 1.25;
+  }
+
+  .hub-operator-card {
+    padding: 14px;
+    border-radius: 17px;
+  }
+
+  .hub-operator-card-head {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) auto;
+    gap: 8px;
+  }
+
+  .hub-operator-card-head .hub-status-badge {
+    max-width: 132px;
+  }
+
+  .hub-operator-actions {
+    grid-template-columns: minmax(0,1fr) minmax(0,1fr) 46px;
+    gap: 8px;
+  }
+
+  .hub-operator-actions a,
+  .hub-operator-actions button {
+    min-width: 0;
+    min-height: 46px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .hub-operator-primary {
+    grid-column: 1 / -1;
+  }
+
+  .hub-operator-open {
+    width: 46px;
+  }
+
+  /* Detail/edit actions stay above the tab bar but no longer compete with
+     the global + Acción button, which is hidden on detail routes. */
+  .hub-detail-edit-fab {
+    left: max(16px, env(safe-area-inset-left,0px)) !important;
+    right: max(16px, env(safe-area-inset-right,0px)) !important;
+    bottom: calc(78px + env(safe-area-inset-bottom,0px)) !important;
+    width: auto !important;
+    max-width: 520px;
+    margin: 0 auto;
+    min-height: 52px;
+    border-radius: 16px !important;
+    box-shadow: 0 12px 30px rgba(15,23,42,.16) !important;
+  }
+
+  /* Benefits/cards: predictable image ratio and tighter information density. */
+  .hub-campaign-card .hub-campaign-image,
+  .hub-campaign-card .hub-campaign-image-placeholder {
+    width: 100%;
+    aspect-ratio: 16 / 7;
+    height: auto;
+    object-fit: cover;
+  }
+
+  .hub-campaign-body {
+    padding: 14px 16px 16px;
+  }
+
+  .hub-campaign-body strong {
+    font-size: 1.05rem;
+  }
+
+  .hub-campaign-meta {
+    line-height: 1.35;
+  }
+
+  /* List rows and client facts must never push badges outside the viewport. */
+  .hub-list-row {
+    grid-template-columns: auto minmax(0,1fr) auto;
+  }
+
+  .hub-list-row strong,
+  .hub-list-row small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Drawers behave like native bottom sheets with a stable action footer. */
+  .hub-drawer-header {
+    min-height: 62px;
+    padding-top: 14px;
+  }
+
+  .hub-drawer-body {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .hub-drawer-footer {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .hub-drawer-footer .hub-primary {
+    width: 100%;
+    min-height: 52px;
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 390px) {
+  .hub-operator-page .hub-operator-service-filter .hub-tabs {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+}
