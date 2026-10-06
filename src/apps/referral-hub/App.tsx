@@ -5,7 +5,7 @@ import CouponValidator from "../../pages/referral/CouponValidator";
 import PublicCoupon from "../../pages/referral/PublicCoupon";
 import PartnerPortal from "../referral-partner/pages/PartnerPortal";
 import { PartnerLogin, RequirePartner } from "../referral-partner/PartnerDashboard";
-import { Shell as PartnerShell } from "../referral-partner/PartnerWorkShell";
+import { Shell as PartnerShell } from "../referral-partner/PartnerWorkShellV3";
 import BoltShell from "./ui/BoltShell";
 import RedirectWithSearch from "./RedirectWithSearch";
 import ReferralLogin from "./pages/ReferralLogin";
