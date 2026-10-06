@@ -18,7 +18,7 @@ const referralNav = [
 ] as const;
 
 const benefitNav = [
-  { to: "/negocios?view=cupones", label: "Beneficios", icon: Gift, end: false },
+  { to: "/beneficios", label: "Beneficios", icon: Gift, end: true },
   { to: "/negocios/solicitudes", label: "Entregas", icon: Send, end: false },
   { to: "/network/stores", label: "Ubicaciones", icon: MapPin, end: false },
   { to: "/negocios", label: "Negocios", icon: Store, end: false },
@@ -33,7 +33,7 @@ const FLUSH_CONTENT = /^\/messages(\/|$)/;
 const WORKSPACE_STORAGE_KEY = "conexxion-admin-workspace";
 
 function initialWorkspace(pathname: string): WorkspaceId {
-  if (pathname.startsWith("/negocios/solicitudes") || pathname.startsWith("/network/stores") || pathname.startsWith("/campanas")) return "benefits";
+  if (pathname.startsWith("/beneficios") || pathname.startsWith("/negocios/solicitudes") || pathname.startsWith("/network/stores") || pathname.startsWith("/campanas")) return "benefits";
   const saved = typeof window !== "undefined" ? window.localStorage.getItem(WORKSPACE_STORAGE_KEY) : null;
   return saved === "benefits" ? "benefits" : "referrals";
 }
@@ -57,7 +57,7 @@ export default function BoltShell() {
   function changeWorkspace(next: WorkspaceId) {
     setWorkspace(next);
     setOpen(false);
-    navigate(next === "referrals" ? "/operacion" : "/negocios?view=cupones");
+    navigate(next === "referrals" ? "/operacion" : "/beneficios");
   }
 
   if (loading) return <main className="bolt-rh-loading">Cargando Conexxion…</main>;
