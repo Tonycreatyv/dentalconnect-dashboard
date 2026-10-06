@@ -3,7 +3,7 @@
 @media (max-width: 899px) {
   .bolt-rh-shell {
     min-height: 100dvh;
-    background: #f5f7f8;
+    background: #f6f6f4;
   }
 
   .bolt-rh-workspace {
@@ -15,10 +15,12 @@
     position: sticky;
     top: 0;
     z-index: 55;
-    min-height: 56px;
+    min-height: 58px;
     padding-top: env(safe-area-inset-top, 0px);
+    background: rgba(255,255,255,.94);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(16,24,40,.08);
   }
 
   .bolt-rh-content:not(.is-flush) {
@@ -30,26 +32,95 @@
     width: auto;
     max-width: none;
     margin: 0;
-    padding-left: max(16px, env(safe-area-inset-left, 0px));
-    padding-right: max(16px, env(safe-area-inset-right, 0px));
-    padding-top: 14px;
-    padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(18px, env(safe-area-inset-left, 0px));
+    padding-right: max(18px, env(safe-area-inset-right, 0px));
+    padding-top: 20px;
+    padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
   }
 
   .bolt-rh-content .hub-page--wide {
     max-width: none;
   }
 
-  .bolt-rh-content .hub-page-header,
+  /* Mobile headers are stacked intentionally. Desktop side metadata/actions
+     must never squeeze the main title into a narrow column. */
+  .bolt-rh-content .hub-page-header {
+    display: grid !important;
+    grid-template-columns: minmax(0,1fr) !important;
+    gap: 12px !important;
+    align-items: start !important;
+    margin-bottom: 18px;
+  }
+
+  .bolt-rh-content .hub-page-header-main {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .bolt-rh-content .hub-page-header h1 {
+    max-width: 100%;
+    margin-top: 3px;
+    font-size: clamp(1.9rem, 8.5vw, 2.35rem);
+    line-height: 1.02;
+    letter-spacing: -.035em;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .bolt-rh-content .hub-page-subtitle {
+    max-width: 34rem;
+    margin-top: 8px;
+    font-size: .98rem;
+    line-height: 1.45;
+  }
+
+  .bolt-rh-content .hub-page-header-side {
+    width: 100%;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    flex-wrap: wrap;
+  }
+
+  .bolt-rh-content .hub-page-header-side .hub-secondary {
+    margin-left: auto;
+  }
+
   .bolt-rh-content .hub-section-head {
     gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* Segmented navigation should read as a mobile control rather than three
+     desktop tabs squeezed together. */
+  .bolt-rh-content .hub-segmented {
+    width: 100%;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0,1fr);
+    gap: 4px;
+    padding: 4px;
+    border-radius: 15px;
+  }
+
+  .bolt-rh-content .hub-segmented button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    white-space: nowrap;
+  }
+
+  .bolt-rh-content .hub-tabs {
+    max-width: 100%;
+    min-width: 0;
   }
 
   .bolt-rh-content .hub-section,
   .bolt-rh-content .hub-campaign-card,
   .bolt-rh-content .hub-negocio-card,
   .bolt-rh-content .hub-stat-card {
-    border-radius: 16px;
+    border-radius: 18px;
   }
 
   .bolt-rh-content .hub-section {
@@ -58,17 +129,26 @@
 
   .bolt-rh-content .hub-campaign-grid {
     grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
+    gap: 14px;
+  }
+
+  .bolt-rh-content .hub-campaign-card {
+    overflow: hidden;
+  }
+
+  .bolt-rh-content .hub-campaign-image,
+  .bolt-rh-content .hub-campaign-image-placeholder {
+    max-height: 180px;
   }
 
   .bolt-rh-content .hub-list {
-    gap: 8px;
+    gap: 9px;
   }
 
   .bolt-rh-content .hub-list-row {
     min-width: 0;
-    min-height: 58px;
-    border-radius: 14px;
+    min-height: 62px;
+    border-radius: 15px;
   }
 
   .bolt-rh-content .hub-list-row > div,
@@ -82,22 +162,23 @@
   .bolt-rh-content .hub-field textarea,
   .bolt-rh-content .hub-textarea {
     width: 100%;
-    min-height: 46px;
+    min-height: 48px;
     font-size: 16px;
-    border-radius: 12px;
+    border-radius: 13px;
   }
 
   .bolt-rh-content .hub-primary,
-  .bolt-rh-content .hub-secondary {
-    min-height: 44px;
-    border-radius: 12px;
+  .bolt-rh-content .hub-secondary,
+  .bolt-rh-content .hub-chip-btn {
+    min-height: 46px;
+    border-radius: 13px;
     touch-action: manipulation;
   }
 
   .bolt-rh-content .hub-delivery-toggle {
-    min-height: 54px;
+    min-height: 58px;
     gap: 12px;
-    border-radius: 14px;
+    border-radius: 15px;
   }
 
   .bolt-rh-content .hub-delivery-toggle input[type="checkbox"] {
@@ -112,9 +193,10 @@
     bottom: 0 !important;
     width: 100% !important;
     max-width: none !important;
-    max-height: min(88dvh, 760px);
-    border-radius: 22px 22px 0 0 !important;
+    max-height: min(90dvh, 780px);
+    border-radius: 24px 24px 0 0 !important;
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -20px 70px rgba(15,23,42,.18);
   }
 
   .hub-drawer-header {
@@ -138,31 +220,62 @@
   }
 
   .bolt-rh-bottom {
+    min-height: 66px;
     padding-bottom: max(6px, env(safe-area-inset-bottom, 0px));
+    background: rgba(255,255,255,.96);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-top: 1px solid rgba(16,24,40,.08);
   }
 
   .bolt-rh-bottom a {
-    min-height: 54px;
+    min-height: 58px;
     touch-action: manipulation;
   }
 
+  .bolt-rh-bottom a span {
+    font-size: 11px;
+  }
+
   .admin-action-fab {
-    right: max(14px, env(safe-area-inset-right, 0px));
-    bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(82px + env(safe-area-inset-bottom, 0px));
     width: 52px;
     height: 52px;
     justify-content: center;
     padding: 0;
-    box-shadow: 0 14px 34px rgba(0,0,0,.30), inset 0 0 0 1px rgba(255,255,255,.12);
+    box-shadow: 0 12px 28px rgba(15,23,42,.24), inset 0 0 0 1px rgba(255,255,255,.12);
   }
 
   .admin-action-panel {
-    max-height: min(86dvh, 760px);
-    border-radius: 24px 24px 0 0;
+    max-height: min(88dvh, 780px);
+    border-radius: 26px 26px 0 0;
   }
 
   .admin-action-item {
-    min-height: 60px;
+    min-height: 58px;
+  }
+
+  .admin-action-item small {
+    line-height: 1.3;
+  }
+}
+
+@media (max-width: 520px) {
+  .bolt-rh-topbar > span {
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bolt-rh-content:not(.is-flush) .hub-page {
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+
+  .bolt-rh-content .hub-page-header h1 {
+    font-size: clamp(1.8rem, 9vw, 2.2rem);
   }
 }
 
