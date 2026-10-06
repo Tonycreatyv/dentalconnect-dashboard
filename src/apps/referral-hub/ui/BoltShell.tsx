@@ -1,4 +1,4 @@
-import { Building2, ClipboardList, FileText, Gift, Inbox, MapPin, Menu, MessageCircle, MoreHorizontal, Send, Settings, Store, Users, X } from "lucide-react";
+import { Building2, FileText, Gift, Inbox, MapPin, Menu, MessageCircle, MoreHorizontal, Send, Settings, Store, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useReferralOrganization } from "../organizations/ReferralOrganizationContext";
