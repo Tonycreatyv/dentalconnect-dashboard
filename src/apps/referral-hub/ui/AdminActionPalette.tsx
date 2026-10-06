@@ -17,6 +17,8 @@ type PaletteAction = {
   run: () => void;
 };
 
+const MOBILE_FAB_ROUTES = new Set(["/operacion", "/clientes", "/messages", "/campanas", "/negocios"]);
+
 export default function AdminActionPalette() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -45,6 +47,7 @@ export default function AdminActionPalette() {
   }
 
   const currentCouponId = /^\/negocios\/cupon\/([^/]+)$/.exec(location.pathname)?.[1] ?? null;
+  const showFab = MOBILE_FAB_ROUTES.has(location.pathname) && !open && !creatingPartner;
 
   async function duplicateCurrentBenefit() {
     if (!currentCouponId || busy) return;
@@ -73,47 +76,47 @@ export default function AdminActionPalette() {
       {
         id: "find-client",
         label: "Buscar cliente",
-        description: "Abrir Clientes para localizar una persona o caso.",
+        description: "Localizar una persona o caso.",
         keywords: "buscar cliente lead persona telefono",
         icon: Users,
         run: () => go("/clientes"),
       },
       {
+        id: "operations",
+        label: "Resolver casos",
+        description: "Asignar, corregir o dar seguimiento.",
+        keywords: "asignar caso sin responsable excepcion operacion",
+        icon: ClipboardList,
+        run: () => go("/operacion"),
+      },
+      {
         id: "create-partner",
         label: "Agregar partner",
-        description: "Crear un aliado y después configurar servicios y acceso.",
+        description: "Crear un aliado y configurar su acceso.",
         keywords: "crear agregar partner aliado clinica abogado negocio red",
         icon: Building2,
         run: () => { setOpen(false); setCreatingPartner(true); },
       },
       {
         id: "benefits",
-        label: "Administrar beneficios y cupones",
-        description: "Editar, activar o pausar beneficios existentes.",
+        label: "Beneficios y cupones",
+        description: "Editar, activar o pausar beneficios.",
         keywords: "crear beneficio cupon coupon promocion editar",
         icon: Tag,
         run: () => go("/negocios?view=cupones"),
       },
       {
-        id: "operations",
-        label: "Resolver casos",
-        description: "Abrir la cola operativa para asignar o corregir casos.",
-        keywords: "asignar caso sin responsable excepcion operacion",
-        icon: ClipboardList,
-        run: () => go("/operacion"),
-      },
-      {
         id: "messages",
-        label: "Abrir mensajes",
-        description: "Ir al workspace de conversaciones.",
+        label: "Mensajes",
+        description: "Abrir conversaciones.",
         keywords: "mensajes whatsapp conversacion",
         icon: MessageCircle,
         run: () => go("/messages"),
       },
       {
         id: "network",
-        label: "Administrar Red",
-        description: "Partners, negocios, servicios aceptados y accesos.",
+        label: "Red",
+        description: "Partners, negocios, servicios y accesos.",
         keywords: "red partner negocio aliado servicio acceso",
         icon: Building2,
         run: () => go("/negocios"),
@@ -129,10 +132,10 @@ export default function AdminActionPalette() {
     ];
 
     if (currentCouponId) {
-      base.splice(3, 0, {
+      base.splice(4, 0, {
         id: "duplicate-benefit-draft",
-        label: busy ? "Creando borrador…" : "Duplicar beneficio como borrador",
-        description: "Crea una copia pausada y aislada; no se conecta al Flow de WhatsApp.",
+        label: busy ? "Creando borrador…" : "Duplicar como borrador",
+        description: "Crea una copia pausada y aislada de WhatsApp.",
         keywords: "duplicar beneficio borrador draft copia cupon",
         icon: CopyPlus,
         run: () => { void duplicateCurrentBenefit(); },
@@ -148,10 +151,12 @@ export default function AdminActionPalette() {
 
   return (
     <>
-      <button type="button" className="admin-action-fab" onClick={() => setOpen(true)} aria-label="Abrir acciones administrativas">
-        <Plus size={20} />
-        <span>Acción</span>
-      </button>
+      {showFab ? (
+        <button type="button" className="admin-action-fab" onClick={() => setOpen(true)} aria-label="Abrir acciones administrativas">
+          <Plus size={20} />
+          <span>Acción</span>
+        </button>
+      ) : null}
 
       {open ? (
         <div className="admin-action-layer" role="dialog" aria-modal="true" aria-label="Acciones administrativas">

@@ -26,24 +26,24 @@ function NewCampaignDrawer({ onClose, onCreate }: { onClose: () => void; onCreat
     setError("");
     const result = await onCreate(name, destination);
     setSaving(false);
-    if (result.ok) onClose(); else setError(result.message || "No se pudo crear la campaña.");
+    if (result.ok) onClose(); else setError(result.message || "No se pudo crear la promoción.");
   }
 
   return (
     <>
       <button type="button" className="hub-drawer-scrim" aria-label="Cerrar" onClick={onClose} />
-      <div className="hub-drawer" role="dialog" aria-label="Nueva campaña">
+      <div className="hub-drawer" role="dialog" aria-label="Nueva promoción">
         <div className="hub-drawer-header">
-          <h2>Nueva campaña</h2>
+          <h2>Nueva promoción</h2>
           <button type="button" className="hub-drawer-close" onClick={onClose} aria-label="Cerrar"><X size={18} /></button>
         </div>
         <div className="hub-drawer-body">
           <div className="hub-field">
-            <label htmlFor="new-campaign-name">Nombre de la campaña</label>
+            <label htmlFor="new-campaign-name">Nombre de la promoción</label>
             <input id="new-campaign-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Flyer consultorio Dr. Pérez" />
           </div>
           <div className="hub-field">
-            <label htmlFor="new-campaign-destination">Destino</label>
+            <label htmlFor="new-campaign-destination">Beneficio o destino</label>
             <select id="new-campaign-destination" value={destination} onChange={(event) => onDestinationChange(event.target.value as CampaignDestination)}>
               {(Object.keys(DESTINATION_LABELS) as CampaignDestination[])
                 .filter((key) => key === "menu" || key.startsWith("luis_benefit_"))
@@ -51,14 +51,14 @@ function NewCampaignDrawer({ onClose, onCreate }: { onClose: () => void; onCreat
             </select>
           </div>
           <div className="hub-field">
-            <label>Imagen del cupón</label>
-            <div className="hub-upload-zone is-disabled"><p>Este destino usa la imagen ya configurada para el beneficio.</p></div>
+            <label>Imagen</label>
+            <div className="hub-upload-zone is-disabled"><p>Esta promoción usa la imagen ya configurada para el beneficio.</p></div>
           </div>
           {error ? <div className="hub-blocked-note"><AlertTriangle size={14} />{error}</div> : null}
         </div>
         <div className="hub-drawer-footer">
           <button type="button" className="hub-primary" disabled={saving || !name.trim()} onClick={() => void submit()}>
-            {saving ? "Creando…" : "Crear campaña"}
+            {saving ? "Creando…" : "Crear promoción"}
           </button>
         </div>
       </div>
@@ -73,15 +73,15 @@ function CampanasSegment() {
   return (
     <div>
       <div className="hub-section-head" style={{ marginBottom: ".6rem" }}>
-        <span className="hub-page-count">{campaigns.length} {campaigns.length === 1 ? "campaña" : "campañas"}</span>
-        <button type="button" className="hub-chip-btn is-primary" onClick={() => setCreating(true)}>Nueva campaña</button>
+        <span className="hub-page-count">{campaigns.length} {campaigns.length === 1 ? "promoción" : "promociones"}</span>
+        <button type="button" className="hub-chip-btn is-primary" onClick={() => setCreating(true)}>Nueva promoción</button>
       </div>
       {loading ? (
         <SkeletonRows count={3} />
       ) : error ? (
-        <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar las campañas" description={error} />
+        <EmptyState tone="error" icon={AlertTriangle} title="No se pudieron cargar las promociones" description={error} />
       ) : campaigns.length === 0 ? (
-        <EmptyState icon={QrCode} title="No hay campañas todavía" description="Creá una campaña para generar un QR y enlace de WhatsApp." />
+        <EmptyState icon={QrCode} title="No hay promociones todavía" description="Crea una promoción para generar su QR y enlace de WhatsApp." />
       ) : (
         <div className="hub-campaign-grid">
           {campaigns.map((campaign) => (
@@ -125,7 +125,7 @@ function ServiciosSegment() {
               <div className="hub-campaign-body">
                 <strong>{service.label}</strong>
                 {service.businesses.length ? <p className="hub-campaign-meta">{service.businesses.slice(0, 2).join(", ")}{service.businesses.length > 2 ? ` +${service.businesses.length - 2}` : ""}</p> : null}
-                <p className="hub-campaign-meta">{service.requestCount} {service.requestCount === 1 ? "solicitud" : "solicitudes"} · {service.campaignCount} {service.campaignCount === 1 ? "campaña" : "campañas"}</p>
+                <p className="hub-campaign-meta">{service.requestCount} {service.requestCount === 1 ? "solicitud" : "solicitudes"} · {service.campaignCount} {service.campaignCount === 1 ? "promoción" : "promociones"}</p>
               </div>
             </Link>
           ))}
@@ -173,10 +173,10 @@ export default function CampaignsHub() {
 
   return (
     <div className="hub-page">
-      <PageHeader eyebrow="Campañas" title="Campañas" />
+      <PageHeader eyebrow="Beneficios" title="Beneficios" subtitle="Promociones, servicios y negocios en un solo lugar." />
       <SegmentedControl
         segments={[
-          { id: "campanas", label: "Campañas" },
+          { id: "campanas", label: "Promociones" },
           { id: "servicios", label: "Servicios" },
           { id: "negocios", label: "Negocios" },
         ]}

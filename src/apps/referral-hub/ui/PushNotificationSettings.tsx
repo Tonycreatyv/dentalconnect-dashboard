@@ -55,7 +55,15 @@ function deviceLabel() {
   return "Este dispositivo";
 }
 
+function isStandaloneWebApp() {
+  const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia?.("(display-mode: standalone)").matches === true || navigatorWithStandalone.standalone === true;
+}
+
 export default function PushNotificationSettings() {
+  const isIos = typeof navigator !== "undefined" && /iPhone|iPad/i.test(navigator.userAgent);
+  const standalone = typeof window !== "undefined" && isStandaloneWebApp();
+  const iosNeedsInstall = isIos && !standalone;
   const supported = typeof window !== "undefined"
     && "serviceWorker" in navigator
     && "PushManager" in window
@@ -100,7 +108,8 @@ export default function PushNotificationSettings() {
 
   const permission = supported ? Notification.permission : "unsupported";
   const activeOnThisDevice = Boolean(currentSubscription);
-  const readyToEnable = supported && Boolean(status?.configured && status.vapid_public_key);
+  const readyToEnable = supported && !iosNeedsInstall && Boolean(status?.configured && status.vapid_public_key);
+  const canConfigurePreferences = activeOnThisDevice || readyToEnable;
   const dirty = useMemo(() => {
     if (!status?.preferences) return true;
     return JSON.stringify(preferences) !== JSON.stringify({ ...DEFAULT_PREFERENCES, ...status.preferences });
@@ -176,63 +185,74 @@ export default function PushNotificationSettings() {
 
   if (loading) return <p className="hub-field-hint">Comprobando este dispositivo…</p>;
 
+  const deviceMessage = activeOnThisDevice
+    ? "Notificaciones activas en este dispositivo"
+    : iosNeedsInstall
+      ? "Añade ConeXXion a tu pantalla de inicio para activar notificaciones."
+      : !supported
+        ? "Web Push no está disponible en este navegador."
+        : permission === "denied"
+          ? "Permiso bloqueado por el navegador."
+          : status?.configured
+            ? "Listo para activar en este dispositivo."
+            : "Push todavía no está habilitado en producción.";
+
   return (
     <div className="hub-push-settings">
       <div className="hub-push-device">
         <span className={activeOnThisDevice ? "hub-push-device-icon is-active" : "hub-push-device-icon"}><Smartphone size={18} /></span>
-        <div>
-          <strong>{deviceLabel()}</strong>
-          <small>
-            {!supported ? "Este navegador no ofrece Web Push." : activeOnThisDevice ? "Notificaciones activas en este dispositivo" : permission === "denied" ? "Permiso bloqueado por el navegador" : "Notificaciones desactivadas en este dispositivo"}
-          </small>
-        </div>
+        <div><strong>{deviceLabel()}</strong><small>{deviceMessage}</small></div>
         {activeOnThisDevice ? <span className="hub-account-success"><Check size={12} />Activo</span> : null}
       </div>
 
-      {!status?.configured ? (
-        <p className="hub-blocked-note">La interfaz está preparada, pero el servidor de Push todavía no tiene las claves VAPID de producción configuradas. No se enviará ninguna alerta hasta completar ese despliegue.</p>
-      ) : null}
-      {supported && /iPhone|iPad/i.test(navigator.userAgent) && !activeOnThisDevice ? (
-        <p className="hub-field-hint">En iPhone/iPad, las notificaciones web funcionan mejor con ConeXXion añadida a la pantalla de inicio.</p>
+      {iosNeedsInstall ? (
+        <div className="hub-blocked-note">En iPhone/iPad, instala ConeXXion desde Safari con Compartir → Añadir a pantalla de inicio. Abre esa app instalada para habilitar Web Push.</div>
+      ) : !status?.configured ? (
+        <div className="hub-blocked-note">Push está preparado en la app, pero el servidor todavía no tiene las claves VAPID de producción. Las alertas permanecerán desactivadas hasta completar esa configuración.</div>
       ) : null}
 
       <div className="hub-account-edit-actions">
         {activeOnThisDevice ? (
           <button type="button" className="hub-secondary" disabled={saving} onClick={() => void disableThisDevice()}><BellOff size={15} />Desactivar en este dispositivo</button>
-        ) : (
-          <button type="button" className="hub-primary" disabled={saving || !readyToEnable || permission === "denied"} onClick={() => void enableThisDevice()}><Bell size={15} />Activar notificaciones en este teléfono</button>
-        )}
+        ) : readyToEnable ? (
+          <button type="button" className="hub-primary" disabled={saving || permission === "denied"} onClick={() => void enableThisDevice()}><Bell size={15} />Activar notificaciones</button>
+        ) : null}
       </div>
 
-      <div className="hub-push-preferences">
-        <h3>Qué quieres recibir</h3>
-        {([
-          ["new_case", "Caso nuevo", "Cuando entra una nueva solicitud."],
-          ["unassigned_case", "Caso sin responsable", "Cuando un caso necesita asignación."],
-          ["exception_case", "Excepción operativa", "Errores o casos que necesitan intervención."],
-          ["partner_assignment", "Asignaciones", "Cambios importantes de asignación de partner."],
-          ["partner_access", "Acceso de partners", "Invitaciones, reactivaciones o revocaciones."],
-          ["benefit_changes", "Cambios de beneficios", "Cambios administrativos relevantes en cupones/beneficios."],
-        ] as const).map(([key, label, description]) => (
-          <label className="hub-delivery-toggle" key={key}>
-            <div><strong>{label}</strong><small>{description}</small></div>
-            <input type="checkbox" checked={Boolean(preferences[key])} onChange={(event) => setPreferences((current) => ({ ...current, [key]: event.target.checked }))} />
+      {canConfigurePreferences ? (
+        <>
+          <div className="hub-push-preferences">
+            <h3>Qué quieres recibir</h3>
+            {([
+              ["new_case", "Caso nuevo", "Cuando entra una nueva solicitud."],
+              ["unassigned_case", "Caso sin responsable", "Cuando un caso necesita asignación."],
+              ["exception_case", "Excepción operativa", "Errores o casos que necesitan intervención."],
+              ["partner_assignment", "Asignaciones", "Cambios importantes de asignación de partner."],
+              ["partner_access", "Acceso de partners", "Invitaciones, reactivaciones o revocaciones."],
+              ["benefit_changes", "Cambios de beneficios", "Cambios administrativos relevantes en cupones/beneficios."],
+            ] as const).map(([key, label, description]) => (
+              <label className="hub-delivery-toggle" key={key}>
+                <div><strong>{label}</strong><small>{description}</small></div>
+                <input type="checkbox" checked={Boolean(preferences[key])} onChange={(event) => setPreferences((current) => ({ ...current, [key]: event.target.checked }))} />
+              </label>
+            ))}
+          </div>
+
+          <label className="hub-delivery-toggle">
+            <div><strong>Silenciar por horario</strong><small>No recibir alertas push durante el intervalo elegido.</small></div>
+            <input type="checkbox" checked={preferences.quiet_hours_enabled} onChange={(event) => setPreferences((current) => ({ ...current, quiet_hours_enabled: event.target.checked }))} />
           </label>
-        ))}
-      </div>
+          {preferences.quiet_hours_enabled ? (
+            <div className="hub-push-hours">
+              <div className="hub-field"><label htmlFor="push-quiet-start">Desde</label><input id="push-quiet-start" type="time" value={preferences.quiet_hours_start ?? "22:00"} onChange={(event) => setPreferences((current) => ({ ...current, quiet_hours_start: event.target.value }))} /></div>
+              <div className="hub-field"><label htmlFor="push-quiet-end">Hasta</label><input id="push-quiet-end" type="time" value={preferences.quiet_hours_end ?? "07:00"} onChange={(event) => setPreferences((current) => ({ ...current, quiet_hours_end: event.target.value }))} /></div>
+            </div>
+          ) : null}
 
-      <label className="hub-delivery-toggle">
-        <div><strong>Silenciar por horario</strong><small>No recibir alertas push durante el intervalo elegido.</small></div>
-        <input type="checkbox" checked={preferences.quiet_hours_enabled} onChange={(event) => setPreferences((current) => ({ ...current, quiet_hours_enabled: event.target.checked }))} />
-      </label>
-      {preferences.quiet_hours_enabled ? (
-        <div className="hub-push-hours">
-          <div className="hub-field"><label htmlFor="push-quiet-start">Desde</label><input id="push-quiet-start" type="time" value={preferences.quiet_hours_start ?? "22:00"} onChange={(event) => setPreferences((current) => ({ ...current, quiet_hours_start: event.target.value }))} /></div>
-          <div className="hub-field"><label htmlFor="push-quiet-end">Hasta</label><input id="push-quiet-end" type="time" value={preferences.quiet_hours_end ?? "07:00"} onChange={(event) => setPreferences((current) => ({ ...current, quiet_hours_end: event.target.value }))} /></div>
-        </div>
+          <button type="button" className="hub-secondary" disabled={saving || !dirty} onClick={() => void savePreferences()}>{saving ? "Guardando…" : "Guardar preferencias"}</button>
+        </>
       ) : null}
 
-      <button type="button" className="hub-secondary" disabled={saving || !dirty} onClick={() => void savePreferences()}>{saving ? "Guardando…" : "Guardar preferencias"}</button>
       {notice ? <p className="hub-account-success" role="status"><Check size={12} />{notice}</p> : null}
       {error ? <p className="hub-account-error" role="alert">{error}</p> : null}
     </div>
