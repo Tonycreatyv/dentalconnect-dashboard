@@ -6,14 +6,11 @@ import AccountMenu from "./AccountMenu";
 import AdminActionPalette from "./AdminActionPalette";
 import ConexxionWordmark from "./ConexxionWordmark";
 import "./operatorMobile.css";
+import "./operatorMobileV2.css";
 
-// Points at the new business-centered /negocios tree (see
-// src/apps/referral-hub/negocios/). The old /campanas* tree stays fully
-// live and reachable by direct URL — nothing was deleted or redirected —
-// it's simply no longer linked from primary nav.
 const primaryNav = [
   { to: "/operacion", label: "Operación", icon: ClipboardList, end: false },
-  { to: "/campanas", label: "Beneficios y campañas", icon: Tag, end: false },
+  { to: "/campanas", label: "Beneficios", icon: Tag, end: false },
   { to: "/negocios", label: "Red", icon: Building2, end: false },
   { to: "/clientes", label: "Clientes", icon: Users, end: false },
   { to: "/messages", label: "Mensajes", icon: MessageCircle, end: false },
@@ -26,12 +23,6 @@ const mobileNav = [
   { to: "/campanas", label: "Beneficios", icon: Tag, end: false },
 ] as const;
 
-// Rendered in the desktop sidebar and the mobile slide-out menu (the same
-// <aside> markup, just toggled via the hamburger on mobile) — not the
-// bottom tab bar, which stays reserved for the 4 highest-frequency
-// destinations. The avatar/account menu still links here too, but this is
-// what makes Configuración discoverable WITHOUT knowing that shortcut
-// exists.
 const secondaryNav = [
   { to: "/configuracion", label: "Configuración", icon: Settings, end: false },
 ] as const;
