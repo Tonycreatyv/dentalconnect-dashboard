@@ -329,7 +329,7 @@ function PartnerList({ partnerId }: { partnerId: string }) {
   </div>;
 }
 
-function buildCallBrief(row: AssignmentRow, opportunity: ImmigrationOpportunity, presentation: ReturnType<typeof referralPresentation>, queueStatus: PartnerQueueStatus, overdue: boolean) {
+function buildCallBrief(row: AssignmentRow, _opportunity: ImmigrationOpportunity, presentation: ReturnType<typeof referralPresentation>, queueStatus: PartnerQueueStatus, overdue: boolean) {
   const facts = presentation.sharedInfoSummary ? presentation.sharedInfoSummary.split(" · ").filter(Boolean).slice(0, 3) : [];
   return {
     reason: presentation.topic || referralServiceLabel(presentation.service),
