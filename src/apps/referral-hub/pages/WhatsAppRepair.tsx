@@ -16,7 +16,7 @@ type RepairResult = {
     credential_status?: "EXPIRED" | "PERMISSION_BLOCKED" | "UNKNOWN";
   };
   operation?: "SUBSCRIBED" | "ALREADY_SUBSCRIBED" | "FAILED";
-  expected_app_present?: "PASS" | "FAIL" | "UNKNOWN";
+  expected_app_present?: "PASS" | "FAIL" | "UNKNOWN" | boolean;
   error?: string;
 };
 
@@ -29,11 +29,8 @@ export default function WhatsAppRepair() {
     setBusy(true);
     setError("");
     setResult(null);
-    const { data, error: invokeError } = await supabase.functions.invoke("whatsapp-signup", {
-      body: {
-        action: "subscribe_luis_waba_app",
-        organization_id: ORGANIZATION_ID,
-      },
+    const { data, error: invokeError } = await supabase.functions.invoke("whatsapp-webhook-repair", {
+      body: { organization_id: ORGANIZATION_ID },
     });
     if (invokeError) {
       setError(invokeError.message || "No pudimos reparar la suscripción de WhatsApp.");
@@ -50,7 +47,12 @@ export default function WhatsAppRepair() {
 
   const operation = result?.subscription?.operation ?? result?.operation;
   const expectedAppPresent = result?.subscription?.expected_app_present ?? result?.expected_app_present;
-  const success = Boolean(result) && !error && (operation === "SUBSCRIBED" || operation === "ALREADY_SUBSCRIBED" || expectedAppPresent === "PASS");
+  const success = Boolean(result) && !error && (
+    operation === "SUBSCRIBED" ||
+    operation === "ALREADY_SUBSCRIBED" ||
+    expectedAppPresent === "PASS" ||
+    expectedAppPresent === true
+  );
 
   return (
     <main className="rh-integrations-page">
@@ -83,7 +85,7 @@ export default function WhatsAppRepair() {
             <div>
               <strong>Suscripción confirmada.</strong>
               <p>Meta reportó la app de Creatyv suscrita al WABA. Probá ahora enviando “Hola” desde otro teléfono.</p>
-              <small>Resultado: {operation ?? expectedAppPresent ?? "PASS"}</small>
+              <small>Resultado: {operation ?? String(expectedAppPresent ?? "PASS")}</small>
             </div>
           </div>
         ) : null}
