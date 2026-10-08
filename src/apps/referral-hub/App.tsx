@@ -17,13 +17,14 @@ import ReferralQrEntry from "./pages/ReferralQrEntry";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
-import { ClientesScreen, CouponRequestsScreen } from "./screens/DashboardScreens";
+import { ClientesScreen } from "./screens/DashboardScreens";
 import CampaignsHub from "./screens/CampaignsAdmin";
 import { BusinessDetailScreen, CampaignDetailScreen, ServiceDetailScreen } from "./screens/CatalogDetail";
 import MessagesWorkspace from "./screens/MessagesWorkspace";
 import AdminOperationsScreen from "./screens/AdminOperationsScreen";
 import CasesWorkspace from "./screens/CasesWorkspace";
 import BenefitsWorkspace from "./screens/BenefitsWorkspace";
+import BenefitDeliveriesScreen from "./screens/BenefitDeliveriesScreen";
 import ClientEditScreen from "./screens/ClientEditScreen";
 import CaseEditScreen from "./screens/CaseEditScreen";
 import { AdminCaseDetailRoute, AdminClientDetailRoute } from "./screens/AdminDetailRoutes";
@@ -72,7 +73,7 @@ function ProductRoutes() {
       <Route path="negocios" element={<NegociosHub />} />
       <Route path="negocios/negocio/:businessId" element={<NegociosBusinessDetail />} />
       <Route path="negocios/cupon/:couponId" element={<NegociosCouponEditor />} />
-      <Route path="negocios/solicitudes" element={<CouponRequestsScreen />} />
+      <Route path="negocios/solicitudes" element={<BenefitDeliveriesScreen />} />
 
       <Route path="work" element={<WorkScreen />} />
       <Route path="work/:itemId" element={<Navigate to="/work" replace />} />
