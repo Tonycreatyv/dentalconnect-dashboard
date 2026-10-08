@@ -33,8 +33,10 @@ type DiscoveryResult = {
     verified_name?: string | null;
     registration_status?: string | null;
     platform_type?: string | null;
-    creatyv_waba_access?: boolean | "UNKNOWN";
-    creatyv_phone_access?: boolean | "UNKNOWN";
+    creatyv_waba_access?: boolean | "PASS" | "FAIL" | "UNKNOWN";
+    creatyv_phone_access?: boolean | "PASS" | "FAIL" | "UNKNOWN";
+    phone_found_in_waba?: "PASS" | "FAIL" | "UNKNOWN";
+    subscribed_apps?: Array<{ id?: string; name?: string }>;
     app_relationship?: "PASS" | "FAIL" | "UNKNOWN";
     credential_status?: "EXPIRED" | "PERMISSION_BLOCKED" | "UNKNOWN";
     recovery_capability?:
@@ -43,6 +45,9 @@ type DiscoveryResult = {
       | "ASSETS_NOT_RECOVERABLE"
       | "UNKNOWN";
     failure?: string;
+    persisted_waba_id?: string | null;
+    persisted_phone_number_id?: string | null;
+    expected_app_id?: string;
   };
   error?: string;
 };
@@ -54,6 +59,9 @@ export default function WhatsAppRepair() {
   const [discovering, setDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState("");
   const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
+  const [checkingDirect, setCheckingDirect] = useState(false);
+  const [directError, setDirectError] = useState("");
+  const [directResult, setDirectResult] = useState<DiscoveryResult | null>(null);
 
   const repair = async () => {
     setBusy(true);
@@ -95,6 +103,26 @@ export default function WhatsAppRepair() {
     setDiscovering(false);
   };
 
+  const discoverStoredAsset = async () => {
+    setCheckingDirect(true);
+    setDirectError("");
+    setDirectResult(null);
+    const { data, error: invokeError } = await supabase.functions.invoke("whatsapp-signup", {
+      body: { action: "discover_luis_whatsapp_assets_direct" },
+    });
+    if (invokeError) {
+      setDirectError(invokeError.message || "No pudimos verificar el activo guardado directamente en Meta.");
+      setCheckingDirect(false);
+      return;
+    }
+    const payload = (data ?? {}) as DiscoveryResult;
+    setDirectResult(payload);
+    if (payload.ok === false && !payload.discovery?.found) {
+      setDirectError(payload.error || "Meta no confirmó acceso directo al WABA/Phone ID guardados.");
+    }
+    setCheckingDirect(false);
+  };
+
   const operation = result?.subscription?.operation ?? result?.operation;
   const expectedAppPresent = result?.subscription?.expected_app_present ?? result?.expected_app_present;
   const success = Boolean(result) && !error && (
@@ -119,7 +147,7 @@ export default function WhatsAppRepair() {
           <h2>Suscripción WABA → Creatyv</h2>
           <p>Usá esta reparación cuando WhatsApp recibe mensajes en el teléfono pero ConeXXion deja de recibirlos en el webhook.</p>
         </div>
-        <button type="button" onClick={() => void repair()} disabled={busy || discovering}>
+        <button type="button" onClick={() => void repair()} disabled={busy || discovering || checkingDirect}>
           <RefreshCw /> {busy ? "Reparando…" : "Reparar suscripción"}
         </button>
 
@@ -146,7 +174,7 @@ export default function WhatsAppRepair() {
           <h2>Localizar WABA real</h2>
           <p>Consulta los Business Portfolios visibles para el token actual y busca específicamente el número +1 770-713-7058 entre WABAs propios y compartidos.</p>
         </div>
-        <button type="button" onClick={() => void discoverAssets()} disabled={busy || discovering}>
+        <button type="button" onClick={() => void discoverAssets()} disabled={busy || discovering || checkingDirect}>
           <Search /> {discovering ? "Buscando…" : "Descubrir activo real"}
         </button>
 
@@ -158,6 +186,26 @@ export default function WhatsAppRepair() {
 
         {discoveryResult ? (
           <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{JSON.stringify(discoveryResult, null, 2)}</pre>
+        ) : null}
+
+        <hr style={{ margin: "20px 0", border: 0, borderTop: "1px solid #e5e7eb" }} />
+
+        <div>
+          <h2>Verificar activo guardado</h2>
+          <p>Consulta directamente el WABA y Phone ID persistidos en ConeXXion. No enumera Business Portfolios y no cambia ninguna configuración.</p>
+        </div>
+        <button type="button" onClick={() => void discoverStoredAsset()} disabled={busy || discovering || checkingDirect}>
+          <Search /> {checkingDirect ? "Verificando…" : "Verificar activo guardado"}
+        </button>
+
+        {directError ? (
+          <div className="rh-service-alert mt-3" role="alert">
+            <AlertTriangle /> {directError}
+          </div>
+        ) : null}
+
+        {directResult ? (
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{JSON.stringify(directResult, null, 2)}</pre>
         ) : null}
 
         <Link to="/integrations" className="rh-back-link">Volver a Integraciones</Link>
