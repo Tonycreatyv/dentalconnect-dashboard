@@ -14,6 +14,7 @@ import ReferralServiceDetail from "./pages/ReferralServiceDetail";
 import ReferralIntegrations from "./pages/ReferralIntegrations";
 import ReferralConfiguracion from "./pages/ReferralConfiguracion";
 import ReferralQrEntry from "./pages/ReferralQrEntry";
+import WhatsAppRepair from "./pages/WhatsAppRepair";
 import { ReferralOrganizationProvider, useReferralOrganization } from "./organizations/ReferralOrganizationContext";
 import { OrderDetailScreen, OrdersScreen, StoresScreen, WorkScreen } from "./screens/CoreScreens";
 import { BasketLocationScreen, BasketOfferScreen, BasketsScreen, CatalogScreen, CouponDetailScreen, StoreWorkspaceScreen } from "./screens/CatalogScreens";
@@ -93,6 +94,7 @@ function ProductRoutes() {
       <Route path="coverage/:locationId" element={<RedirectWithSearch to="/network/stores" />} />
       <Route path="catalog" element={<CatalogScreen />} />
       <Route path="integrations" element={<ReferralIntegrations />} />
+      <Route path="integrations/whatsapp-repair" element={<WhatsAppRepair />} />
       <Route path="qr-campaigns" element={<RedirectWithSearch to="/beneficios" />} />
       <Route path="settings" element={<ReferralConfiguracion />} />
 
