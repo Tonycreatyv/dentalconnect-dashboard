@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RefreshCw, Search } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../../../lib/supabaseClient";
@@ -20,10 +20,40 @@ type RepairResult = {
   error?: string;
 };
 
+type DiscoveryResult = {
+  ok?: boolean;
+  discovery?: {
+    token_configured?: boolean;
+    found?: boolean;
+    organization_id?: string;
+    waba_id?: string;
+    waba_name?: string | null;
+    phone_number_id?: string;
+    display_phone_number?: string;
+    verified_name?: string | null;
+    registration_status?: string | null;
+    platform_type?: string | null;
+    creatyv_waba_access?: boolean | "UNKNOWN";
+    creatyv_phone_access?: boolean | "UNKNOWN";
+    app_relationship?: "PASS" | "FAIL" | "UNKNOWN";
+    credential_status?: "EXPIRED" | "PERMISSION_BLOCKED" | "UNKNOWN";
+    recovery_capability?:
+      | "ASSETS_AND_CREDENTIAL_SUFFICIENT"
+      | "ASSETS_FOUND_FRESH_AUTH_REQUIRED"
+      | "ASSETS_NOT_RECOVERABLE"
+      | "UNKNOWN";
+    failure?: string;
+  };
+  error?: string;
+};
+
 export default function WhatsAppRepair() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<RepairResult | null>(null);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState("");
+  const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
 
   const repair = async () => {
     setBusy(true);
@@ -45,6 +75,26 @@ export default function WhatsAppRepair() {
     setBusy(false);
   };
 
+  const discoverAssets = async () => {
+    setDiscovering(true);
+    setDiscoveryError("");
+    setDiscoveryResult(null);
+    const { data, error: invokeError } = await supabase.functions.invoke("whatsapp-signup", {
+      body: { action: "discover_luis_whatsapp_assets" },
+    });
+    if (invokeError) {
+      setDiscoveryError(invokeError.message || "No pudimos consultar los activos de WhatsApp en Meta.");
+      setDiscovering(false);
+      return;
+    }
+    const payload = (data ?? {}) as DiscoveryResult;
+    setDiscoveryResult(payload);
+    if (payload.ok === false && !payload.discovery?.found) {
+      setDiscoveryError(payload.discovery?.failure || payload.error || "Meta no encontró el número entre los negocios visibles para el token actual.");
+    }
+    setDiscovering(false);
+  };
+
   const operation = result?.subscription?.operation ?? result?.operation;
   const expectedAppPresent = result?.subscription?.expected_app_present ?? result?.expected_app_present;
   const success = Boolean(result) && !error && (
@@ -59,8 +109,8 @@ export default function WhatsAppRepair() {
       <header className="rh-services-header">
         <div>
           <p className="rh-eyebrow">WHATSAPP</p>
-          <h1>Reparar webhook</h1>
-          <p>Vuelve a suscribir la app de Creatyv al WhatsApp Business Account de Luis sin cambiar Flows, cupones ni routing.</p>
+          <h1>Diagnóstico WhatsApp</h1>
+          <p>Verifica la suscripción del webhook y localiza el activo real de WhatsApp de Luis sin cambiar Flows, cupones ni routing.</p>
         </div>
       </header>
 
@@ -69,7 +119,7 @@ export default function WhatsAppRepair() {
           <h2>Suscripción WABA → Creatyv</h2>
           <p>Usá esta reparación cuando WhatsApp recibe mensajes en el teléfono pero ConeXXion deja de recibirlos en el webhook.</p>
         </div>
-        <button type="button" onClick={() => void repair()} disabled={busy}>
+        <button type="button" onClick={() => void repair()} disabled={busy || discovering}>
           <RefreshCw /> {busy ? "Reparando…" : "Reparar suscripción"}
         </button>
 
@@ -84,14 +134,30 @@ export default function WhatsAppRepair() {
             <CheckCircle2 />
             <div>
               <strong>Suscripción confirmada.</strong>
-              <p>Meta reportó la app de Creatyv suscrita al WABA. Probá ahora enviando “Hola” desde otro teléfono.</p>
+              <p>Meta reportó la app de Creatyv suscrita al WABA.</p>
               <small>Resultado: {operation ?? String(expectedAppPresent ?? "PASS")}</small>
             </div>
           </div>
         ) : null}
 
-        {result && !success && !error ? (
-          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{JSON.stringify(result, null, 2)}</pre>
+        <hr style={{ margin: "20px 0", border: 0, borderTop: "1px solid #e5e7eb" }} />
+
+        <div>
+          <h2>Localizar WABA real</h2>
+          <p>Consulta los Business Portfolios visibles para el token actual y busca específicamente el número +1 770-713-7058 entre WABAs propios y compartidos.</p>
+        </div>
+        <button type="button" onClick={() => void discoverAssets()} disabled={busy || discovering}>
+          <Search /> {discovering ? "Buscando…" : "Descubrir activo real"}
+        </button>
+
+        {discoveryError ? (
+          <div className="rh-service-alert mt-3" role="alert">
+            <AlertTriangle /> {discoveryError}
+          </div>
+        ) : null}
+
+        {discoveryResult ? (
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{JSON.stringify(discoveryResult, null, 2)}</pre>
         ) : null}
 
         <Link to="/integrations" className="rh-back-link">Volver a Integraciones</Link>
