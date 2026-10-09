@@ -1,0 +1,113 @@
+-- REFERRAL HUB REVIEWED PARTNER SEED TEMPLATE
+--
+-- This file is intentionally non-executable. Every proposed INSERT remains
+-- commented out until an authorized operator replaces every placeholder with
+-- reviewed real information and performs a separate production-data review.
+-- Do not invent names, firms, clinics, phones, emails, destinations, service
+-- rules, coverage, languages, specialties, notification channels, or SLAs.
+-- Canonical tenant: luis-gabriel-referral-hub
+
+-- Required reviewed values
+--
+-- <PARTNER_UUID>                  Existing or approved UUID for the partner.
+-- <PARTNER_NAME>                  Reviewed legal/public partner name.
+-- <PARTNER_SLUG>                  Reviewed lowercase unique slug.
+-- <PARTNERSHIP_STATUS>            One production-supported status.
+-- <CONTACT_UUID>                  Approved UUID for this contact record.
+-- <CONTACT_NAME>                  Reviewed real contact name.
+-- <CONTACT_ROLE_TITLE>            Reviewed role/title or NULL.
+-- <CONTACT_PHONE>                 Reviewed phone or NULL.
+-- <CONTACT_WHATSAPP>              Reviewed WhatsApp destination or NULL.
+-- <CONTACT_EMAIL>                 Reviewed email destination or NULL.
+-- <SERVICE_ID>                    Existing canonical Referral Hub service ID.
+-- <PARTNER_LOCATION_UUID_OR_NULL> Existing matching location UUID or NULL.
+-- <LANGUAGE_VALUES>               Reviewed text[]; use '{}' only if unrestricted.
+-- <SPECIALTY_VALUES>              Reviewed text[]; use '{}' only if unrestricted.
+-- <CITY_VALUES>                   Reviewed text[]; use '{}' only if unrestricted.
+-- <STATE_VALUES>                  Reviewed text[]; use '{}' only if unrestricted.
+-- <POSTAL_CODE_VALUES>            General service-routing ZIPs, not grocery delivery ZIPs.
+-- <ASSIGNMENT_PRIORITY>           Reviewed positive routing priority.
+-- <ASSIGNMENT_WEIGHT>             Reviewed integer greater than zero.
+-- <ACCEPTANCE_SLA_MINUTES>        Reviewed positive acceptance SLA.
+-- <NOTIFICATION_CHANNEL>          whatsapp, email, or pending_configuration.
+-- <NOTIFICATION_PRIORITY>         Reviewed contact delivery order.
+-- <OPERATING_HOURS_JSON>          Reviewed JSON object; never inferred.
+
+-- Partner
+-- insert into public.referral_partners (
+--   id, organization_id, name, slug, partnership_status, active, metadata
+-- ) values (
+--   '<PARTNER_UUID>'::uuid,
+--   'luis-gabriel-referral-hub',
+--   '<PARTNER_NAME>',
+--   '<PARTNER_SLUG>',
+--   '<PARTNERSHIP_STATUS>',
+--   true,
+--   '{}'::jsonb
+-- );
+
+-- Partner contact and notification destination
+-- At least one of phone, whatsapp, or email must be non-null. The destination
+-- selected later is controlled by preferred_notification_channel on the rule.
+-- insert into public.referral_partner_contacts (
+--   id, organization_id, partner_id, name, role_title,
+--   phone, whatsapp, email, is_primary, active, service_ids,
+--   availability, notification_priority
+-- ) values (
+--   '<CONTACT_UUID>'::uuid,
+--   'luis-gabriel-referral-hub',
+--   '<PARTNER_UUID>'::uuid,
+--   '<CONTACT_NAME>',
+--   nullif('<CONTACT_ROLE_TITLE>', ''),
+--   nullif('<CONTACT_PHONE>', ''),
+--   nullif('<CONTACT_WHATSAPP>', ''),
+--   nullif('<CONTACT_EMAIL>', ''),
+--   true,
+--   true,
+--   array['<SERVICE_ID>']::text[],
+--   '{}'::jsonb,
+--   <NOTIFICATION_PRIORITY>
+-- );
+
+-- Service rule: acceptance SLA, general routing coverage, language, specialty,
+-- and notification selection. For grocery delivery ZIP eligibility use only
+-- public.referral_grocery_delivery_coverage; do not overload postal_codes here.
+-- insert into public.referral_partner_service_rules (
+--   organization_id, partner_id, partner_location_id, service_id, active,
+--   languages, specialties, cities, states, postal_codes, operating_hours,
+--   capacity_limit, assignment_priority, assignment_weight,
+--   acceptance_sla_minutes, preferred_notification_channel
+-- ) values (
+--   'luis-gabriel-referral-hub',
+--   '<PARTNER_UUID>'::uuid,
+--   nullif('<PARTNER_LOCATION_UUID_OR_NULL>', '')::uuid,
+--   '<SERVICE_ID>',
+--   true,
+--   <LANGUAGE_VALUES>::text[],
+--   <SPECIALTY_VALUES>::text[],
+--   <CITY_VALUES>::text[],
+--   <STATE_VALUES>::text[],
+--   <POSTAL_CODE_VALUES>::text[],
+--   '<OPERATING_HOURS_JSON>'::jsonb,
+--   null,
+--   <ASSIGNMENT_PRIORITY>,
+--   <ASSIGNMENT_WEIGHT>,
+--   <ACCEPTANCE_SLA_MINUTES>,
+--   '<NOTIFICATION_CHANNEL>'
+-- );
+
+-- Review queries to run before any separately approved INSERT:
+-- select id, organization_id, name, active
+-- from public.referral_partners
+-- where organization_id = 'luis-gabriel-referral-hub'
+-- order by name;
+--
+-- select id, organization_id, partner_id, name, active
+-- from public.referral_partner_locations
+-- where organization_id = 'luis-gabriel-referral-hub'
+-- order by partner_id, name;
+--
+-- select id, nombre, activo
+-- from public.service_configs
+-- where organization_id = 'luis-gabriel-referral-hub'
+-- order by menu_orden, id;

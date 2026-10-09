@@ -1,0 +1,220 @@
+{
+  "type": "webhook",
+  "name": "save_basket_intake",
+  "description": "Incrementally save grocery basket intake for the current conversation. Send only fields already selected from tool responses or explicitly provided by the customer. Do not invent IDs, prices, names, phone numbers, addresses, instructions, payment preferences, or confirmation.",
+  "disable_interruptions": false,
+  "interruption_mode": "allow",
+  "force_pre_tool_speech": false,
+  "pre_tool_speech": "auto",
+  "tool_call_sound": null,
+  "tool_call_sound_behavior": "auto",
+  "tool_error_handling_mode": "auto",
+  "execution_mode": "immediate",
+  "api_schema": {
+    "url": "https://oeeyzqqnxvcpibdwuugu.supabase.co/functions/v1/referral-voice-tools",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "id": "body",
+      "type": "object",
+      "description": "Persist one or more known grocery intake fields. This tool supports incremental calls: include only values currently known and never require or fabricate every customer field in one call.",
+      "properties": [
+        {
+          "id": "action",
+          "type": "string",
+          "constant_value": "save_basket_intake",
+          "enum": null,
+          "required": true,
+          "value_type": "constant",
+          "description": "",
+          "dynamic_variable": "",
+          "is_system_provided": false
+        },
+        {
+          "id": "organization_id",
+          "type": "string",
+          "dynamic_variable": "organization_id",
+          "enum": null,
+          "required": true,
+          "value_type": "dynamic_variable",
+          "description": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "source_channel",
+          "type": "string",
+          "constant_value": "whatsapp",
+          "enum": null,
+          "required": true,
+          "value_type": "constant",
+          "description": "",
+          "dynamic_variable": "",
+          "is_system_provided": false
+        },
+        {
+          "id": "conversation_id",
+          "type": "string",
+          "description": "Use the exact current ElevenLabs conversation identifier available in conversation context. Never invent, summarize, or reuse an ID from another conversation.",
+          "enum": null,
+          "required": true,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": ""
+        },
+        {
+          "id": "fields",
+          "type": "object",
+          "description": "Incremental intake values. Include only known values. Every child is optional per call; subsequent calls merge with persisted intake.",
+          "properties": [
+            {
+              "id": "offer_id",
+              "type": "string",
+              "description": "Exact real offer_id UUID returned by list_basket_offers for the selected basket; never use basket_key or invent an ID.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "postal_code",
+              "type": "string",
+              "description": "Delivery ZIP or ZIP+4 explicitly provided by the customer and checked with check_delivery_zip.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "partner_location_id",
+              "type": "string",
+              "description": "Exact partner_location_id UUID selected from check_delivery_zip. It must match offer_id; never invent it.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "customer_name",
+              "type": "string",
+              "description": "Recipient's full name exactly as provided by the customer. Never invent a name.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "phone",
+              "type": "string",
+              "description": "Contact phone number explicitly provided or confirmed by the customer. Never invent it.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "address_line_1",
+              "type": "string",
+              "description": "Primary delivery street address exactly provided by the customer. Never infer or invent it.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "address_line_2",
+              "type": "string",
+              "description": "Optional apartment, suite, or unit explicitly provided by the customer.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "city",
+              "type": "string",
+              "description": "Delivery city explicitly provided or confirmed by the customer. Never infer it from an unverified address.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "state",
+              "type": "string",
+              "description": "Delivery state explicitly provided or confirmed by the customer.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "delivery_instructions",
+              "type": "string",
+              "description": "Optional delivery instructions exactly provided by the customer. Do not add instructions yourself.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            },
+            {
+              "id": "payment_preference",
+              "type": "string",
+              "description": "Payment coordination preference explicitly provided by the customer. Do not claim payment was processed.",
+              "dynamic_variable": "",
+              "constant_value": "",
+              "enum": null,
+              "required": false,
+              "value_type": "llm_prompt"
+            }
+          ],
+          "required": true,
+          "value_type": "llm_prompt",
+          "dynamic_variable": "",
+          "is_system_provided": false,
+          "constant_value": "",
+          "enum": null
+        }
+      ],
+      "required": false,
+      "value_type": "llm_prompt"
+    },
+    "request_headers": [
+      {
+        "type": "value",
+        "name": "Content-Type",
+        "value": "application/json"
+      },
+      {
+        "type": "secret",
+        "name": "x-creatyv-voice-secret",
+        "secret_id": "Kot9RC7dHX1kUxqfHB30"
+      }
+    ],
+    "content_type": "application/json",
+    "auth_connection": null
+  },
+  "assignments": [],
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {
+      "organization_id": {
+        "type": "string_literal",
+        "value": ""
+      }
+    }
+  },
+  "response_mocks": []
+}

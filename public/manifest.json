@@ -1,7 +1,7 @@
 {
-  "name": "Creatyv Dental Assistant",
-  "short_name": "Creatyv Dental",
-  "description": "Sistema completo de gestión dental",
+  "name": "LG Community Network",
+  "short_name": "LG Community",
+  "description": "Conecta con servicios, beneficios, cupones y recursos de confianza para nuestra comunidad.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0b0d",

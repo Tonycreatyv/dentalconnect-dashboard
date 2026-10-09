@@ -4,7 +4,7 @@ const TESTDENTAL_TAG = /#testdental/gi;
 
 type Json = Record<string, unknown>;
 
-export type ConversationMode = "creatyv_product" | "dental_clinic";
+export type ConversationMode = "creatyv_product" | "dental_clinic" | "referral_hub";
 export type ConversationPhase = "new" | "awaiting_need" | "qualifying" | "closing" | "handoff";
 export type ConversationIntent =
   | "pricing"
@@ -157,10 +157,11 @@ export function resolveMode(args: {
   hasTestDentalTag?: boolean;
 }): ConversationMode {
   const normalizedBusiness = safeStr(args.orgBusinessType, "").toLowerCase();
+  if (normalizedBusiness === "referral_hub") return "referral_hub";
   if (normalizedBusiness === "dental" || normalizedBusiness === "clinic") return "dental_clinic";
   if (args.organizationId === "clinic-demo") return "dental_clinic";
   const existing = args.leadState.mode;
-  if (existing === "creatyv_product" || existing === "dental_clinic") return existing;
+  if (existing === "creatyv_product" || existing === "dental_clinic" || existing === "referral_hub") return existing;
   if (!args.leadState.mode_locked && args.organizationId === "creatyv-product" && args.hasTestDentalTag) {
     return "dental_clinic";
   }

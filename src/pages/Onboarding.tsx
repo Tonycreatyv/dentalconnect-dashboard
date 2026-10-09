@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, Plus, Trash2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -65,16 +65,6 @@ const COUNTRY_TIMEZONES: { label: string; country: string; timezone: string }[] 
   { label: "🇪🇸 España",                                country: "ES", timezone: "Europe/Madrid"                },
 ];
 
-function slugifyClinicName(input: string) {
-  return input
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 export default function Onboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -97,6 +87,7 @@ export default function Onboarding() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdOrgId, setCreatedOrgId] = useState<string>("");
+  const onboardingRequestId = useRef(crypto.randomUUID());
   const [messengerConnected, setMessengerConnected] = useState(false);
 
   const [clinicName, setClinicName] = useState("");
@@ -151,14 +142,16 @@ export default function Onboarding() {
 
     const now = new Date().toISOString();
     const trialEnds = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-    const baseSlug = slugifyClinicName(clinicName) || vertical.orgSlugFallback;
-    const orgId = `${baseSlug}-${Date.now().toString(36)}`;
-
-    const orgInsert = await supabase.from("organizations").insert({
-      id: orgId,
-      name: clinicName.trim(),
+    const organizationCreate = await supabase.rpc("create_organization_with_owner", {
+      p_organization_name: clinicName.trim(),
+      p_onboarding_request_id: onboardingRequestId.current,
     });
-    if (orgInsert.error) throw new Error(orgInsert.error.message);
+    if (organizationCreate.error) throw new Error(organizationCreate.error.message);
+    const createdOrganization = Array.isArray(organizationCreate.data)
+      ? organizationCreate.data[0]
+      : organizationCreate.data;
+    const orgId = String(createdOrganization?.organization_id ?? "");
+    if (!orgId) throw new Error("No se pudo crear la organización. Intenta nuevamente.");
 
     const orgSettingsInsert = await supabase.from("org_settings").insert({
       organization_id: orgId,
@@ -203,12 +196,6 @@ export default function Onboarding() {
       { onConflict: "user_id" }
     );
     if (profileUpsert.error) throw new Error(profileUpsert.error.message);
-
-    const orgMemberUpsert = await supabase.from("org_members").upsert(
-      { organization_id: orgId, user_id: user.id, role: "owner" },
-      { onConflict: "organization_id,user_id" }
-    );
-    if (orgMemberUpsert.error) throw new Error(orgMemberUpsert.error.message);
 
     const subscriptionUpsert = await supabase.from("subscriptions").upsert(
       {

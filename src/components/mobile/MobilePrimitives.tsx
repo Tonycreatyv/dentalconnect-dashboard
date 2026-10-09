@@ -192,24 +192,25 @@ export function MobileBottomSheet({ open, children, className }: HTMLAttributes<
   return <div className={cn("mobile-bottom-sheet", className)}>{children}</div>;
 }
 
-export function MobileBottomTabs({ items }: { items: Array<{ to: string; label: string; icon: LucideIcon }> }) {
+export function MobileBottomTabs({ items, columns = 5 }: { items: Array<{ to: string; label: string; icon: LucideIcon }>; columns?: 4 | 5 }) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#25384A] bg-[#0B1620]/96 shadow-[0_-10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl lg:hidden">
-      <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1 px-2 py-1.5 pb-[calc(env(safe-area-inset-bottom,0px)+8px)]">
+    <nav className="mobile-primary-nav fixed bottom-0 left-0 right-0 z-50 border-t border-[#25384A] bg-[#0B1620]/96 shadow-[0_-8px_24px_rgba(0,0,0,0.24)] backdrop-blur-xl lg:hidden">
+      <div className={cn("mx-auto grid max-w-3xl gap-1 px-2 py-1 pb-[calc(env(safe-area-inset-bottom,0px)+5px)]", columns === 4 ? "grid-cols-4" : "grid-cols-5")}>
         {items.map((item) => {
           const Icon = item.icon;
           return (
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.to === "/"}
               className={({ isActive }) =>
                 cn(
-                  "flex min-h-[48px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1.5 py-1.5 text-[10px] font-bold transition",
+                  "flex min-h-[46px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1.5 py-1 text-[10px] font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#25D366]",
                   isActive ? "bg-[#25D366]/12 text-[#25D366]" : "text-[#9CAAB8] hover:bg-[#162838] hover:text-[#F8FAFC]",
                 )
               }
             >
-              <Icon className="h-4 w-4 shrink-0" />
+              <Icon className="h-[17px] w-[17px] shrink-0" />
               <span className="max-w-full truncate">{item.label}</span>
             </NavLink>
           );

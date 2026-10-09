@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.app.json",
+  "include": [
+    "src/apps/referral-hub/**/*.ts",
+    "src/apps/referral-hub/**/*.tsx",
+    "src/apps/referral-partner/**/*.ts",
+    "src/apps/referral-partner/**/*.tsx"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ],
+  "compilerOptions": {
+    "types": [
+      "vite/client"
+    ]
+  }
+}
