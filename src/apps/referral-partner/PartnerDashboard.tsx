@@ -386,14 +386,15 @@ function ReferralCard({ row, opportunity, queueStatus, overdue }: { row: Assignm
   );
 }
 
-type CaseDateFilter = "all" | "today" | "week" | "month" | "custom";
+type CaseDateFilter = "all" | "today" | "yesterday" | "week" | "month" | "custom";
 type CaseSort = "customer" | "service" | "received" | "status" | "followUp";
 
 function dateFilterMatches(value: string, filter: CaseDateFilter, start: string, end: string, now = new Date()) {
   const received = new Date(value); if (Number.isNaN(received.getTime()) || filter === "all") return filter === "all";
   const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   if (filter === "today") return day(received) === day(now);
-  if (filter === "week") { const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7)); return day(received) >= day(monday) && day(received) <= day(now); }
+  if (filter === "yesterday") { const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1); return day(received) === day(yesterday); }
+  if (filter === "week") { const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 6); return day(received) >= day(sevenDaysAgo) && day(received) <= day(now); }
   if (filter === "month") return received.getFullYear() === now.getFullYear() && received.getMonth() === now.getMonth();
   const from = start ? new Date(`${start}T00:00:00`) : null; const to = end ? new Date(`${end}T23:59:59`) : null;
   return (!from || received >= from) && (!to || received <= to);
@@ -426,6 +427,7 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
   const [dateFilter, setDateFilter] = useState<CaseDateFilter>("all");
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [sort, setSort] = useState<{ key: CaseSort; direction: "asc" | "desc" }>({ key: "received", direction: "desc" });
   const [drawerEntry, setDrawerEntry] = useState<{ row: AssignmentRow; opportunity: ImmigrationOpportunity; queueStatus: PartnerQueueStatus; overdue: boolean } | null>(null);
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
@@ -471,7 +473,10 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
   if (loading) return <p className="partner-empty partner-loading">Cargando referencias…</p>;
   if (error) return <p className="partner-empty partner-loading">{error}</p>;
 
-  const resetFilters = () => { setStatusFilter("all"); setServiceFilter("all"); setDateFilter("all"); setDateStart(""); setDateEnd(""); setSearch(""); setQuickView("all"); };
+  const chooseDatePreset = (filter: Exclude<CaseDateFilter, "all" | "custom">) => { setDateFilter(filter); setDateStart(""); setDateEnd(""); setDatePickerOpen(false); };
+  const chooseExactDate = (value: string) => { setDateStart(value); setDateEnd(value); setDateFilter(value ? "custom" : "all"); if (value) setDatePickerOpen(false); };
+  const dateLabel = dateFilter === "today" ? "Hoy" : dateFilter === "yesterday" ? "Ayer" : dateFilter === "week" ? "Últimos 7 días" : dateFilter === "month" ? "Este mes" : dateFilter === "custom" && dateStart ? new Intl.DateTimeFormat("es-US", { dateStyle: "medium" }).format(new Date(`${dateStart}T12:00:00`)) : "Todas las fechas";
+  const resetFilters = () => { setStatusFilter("all"); setServiceFilter("all"); setDateFilter("all"); setDateStart(""); setDateEnd(""); setDatePickerOpen(false); setSearch(""); setQuickView("all"); };
   const exportRows: PartnerExportRow[] = filtered.map((entry) => ({
     customer: entry.opportunity.leadName,
     phone: formatPhoneForDisplay(resolvePartnerPhone(entry.row.referral_service_requests?.leads?.phone, entry.row.referral_service_requests?.leads?.channel_user_id)) ?? "",
@@ -502,9 +507,17 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
         <label className="partner-search-field">Buscar<input value={search} placeholder="Cliente, teléfono o ZIP" onChange={(event) => setSearch(event.target.value)} /></label>
         <label>Estado<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as PartnerStatusFilter)}><option value="all">Todos</option><option value="new">Nuevos</option><option value="follow_up">Seguimiento</option><option value="approved">Aprobados</option><option value="disqualified">No calificó</option></select></label>
         <label>Servicio<select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}><option value="all">Todos</option>{services.map((service) => <option key={service} value={service}>{service}</option>)}</select></label>
-        <label>Fecha<select value={dateFilter} onChange={(event) => setDateFilter(event.target.value as CaseDateFilter)}><option value="all">Todas</option><option value="today">Hoy</option><option value="week">Esta semana</option><option value="month">Este mes</option><option value="custom">Personalizado</option></select></label>
-        {dateFilter === "custom" ? <><label>Desde<input type="date" value={dateStart} onChange={(event) => setDateStart(event.target.value)} /></label><label>Hasta<input type="date" value={dateEnd} onChange={(event) => setDateEnd(event.target.value)} /></label></> : null}
-        <button type="button" className="partner-filter-reset" onClick={resetFilters}>Restablecer</button>
+        <div className="partner-date-filter">
+          <span className="partner-filter-label">Fecha recibida</span>
+          <button type="button" className="partner-date-trigger" aria-expanded={datePickerOpen} aria-controls="partner-date-picker" onClick={() => setDatePickerOpen((open) => !open)}><span aria-hidden="true">▣</span>{dateLabel}</button>
+          {datePickerOpen ? <div className="partner-date-popover" id="partner-date-picker">
+            <input aria-label="Elegir fecha exacta" type="date" value={dateFilter === "custom" ? dateStart : ""} onChange={(event) => chooseExactDate(event.target.value)} />
+            <div className="partner-date-presets" aria-label="Fechas rápidas">
+              <button type="button" onClick={() => chooseDatePreset("today")}>Hoy</button><button type="button" onClick={() => chooseDatePreset("yesterday")}>Ayer</button><button type="button" onClick={() => chooseDatePreset("week")}>Últimos 7 días</button><button type="button" onClick={() => chooseDatePreset("month")}>Este mes</button>
+            </div>
+          </div> : null}
+        </div>
+        <button type="button" className="partner-filter-reset" onClick={resetFilters}>Limpiar filtros</button>
         {workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").export_enabled ? <div className="partner-export-menu"><button type="button" onClick={() => downloadPartnerCases(new Blob([partnerCasesCsv(exportRows)], { type: "text/csv;charset=utf-8" }), "casos-filtrados.csv")}>CSV</button><button type="button" onClick={() => downloadPartnerCases(partnerCasesXlsx(exportRows), "casos-filtrados.xlsx")}>XLSX</button></div> : null}
       </div>
       <div className="partner-quick-views" role="tablist" aria-label="Vistas rápidas">{([ ["all", "Todos"], ["new", "Nuevos"], ["today", "Hoy"], ["overdue", "Vencidos"], ["follow_up", "Seguimiento"], ["closed", "Cerrados"] ] as const).map(([id, label]) => <button key={id} type="button" className={quickView === id ? "is-active" : ""} onClick={() => setQuickView(id)}>{label}</button>)}</div>
