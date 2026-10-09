@@ -49,6 +49,10 @@ export type PartnerAction =
   | "converted"
   | "closed_not_converted";
 
+export type PartnerContactOutcome = "contacted" | "no_answer" | "wrong_number";
+export type PartnerManagementNextStep = "follow_up" | "close";
+export type PartnerCloseResult = "converted" | "closed_not_converted";
+
 const ACTIONS_REQUIRING_ACCEPTANCE: readonly PartnerAction[] = [
   "contacted",
   "no_answer",
@@ -57,7 +61,8 @@ const ACTIONS_REQUIRING_ACCEPTANCE: readonly PartnerAction[] = [
   "closed_not_converted",
 ];
 
-// partner_update_immigration_assignment (20260904000100_immigration_partner_dashboard.sql)
+// partner_update_referral_assignment is deferred until the reviewed generic
+// Partner RPC consolidation described in docs/product/referral-hub-migration-rollout-plan.md.
 // has no dedicated "pending" work_status — contact-outcome actions are
 // 'contacted' | 'no_answer' | 'appointment_scheduled' | 'converted' |
 // 'closed_not_converted'. 'note' is the one existing action that records an
@@ -105,4 +110,28 @@ export function resolveActionNote(action: PartnerAction, partnerNote: string | n
 // status='accepted'.
 export function planFollowUpSteps(assignmentStatus: string): string[] {
   return assignmentStatus === "assigned" ? ["accept", "follow_up"] : ["follow_up"];
+}
+
+// The compact management form is deliberately just an orchestrator over the
+// existing transition contract. There is no durable "wrong number" status in
+// referral_assignments, so that outcome starts with a note event and never
+// implies a terminal result on its own.
+export function planPartnerManagementSteps(
+  outcome: PartnerContactOutcome,
+  nextStep: PartnerManagementNextStep,
+  closeResult: PartnerCloseResult,
+  assignmentStatus: string,
+): string[] {
+  const outcomeSteps = outcome === "wrong_number"
+    ? ["note"]
+    : planPartnerActionSteps(outcome, assignmentStatus);
+  const requiresAcceptance = outcome === "wrong_number" && assignmentStatus === "assigned";
+  const nextAction = nextStep === "follow_up" ? "follow_up" : closeResult;
+  return [...outcomeSteps, ...(requiresAcceptance ? ["accept"] : []), nextAction];
+}
+
+export function resolveManagementNote(outcome: PartnerContactOutcome, partnerNote: string | null | undefined): string | null {
+  const trimmed = (partnerNote ?? "").trim();
+  if (outcome !== "wrong_number") return trimmed || null;
+  return trimmed ? `Número incorrecto: ${trimmed}` : "Número incorrecto";
 }

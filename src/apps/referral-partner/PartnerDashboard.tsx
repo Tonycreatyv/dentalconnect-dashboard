@@ -4,32 +4,25 @@ import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";
 import { normalizeImmigrationConsent, type ImmigrationInboxRow } from "../referral-hub/operations/immigrationInbox";
 import { resolveImmigrationOpportunity, type ImmigrationOpportunity } from "../referral-hub/operations/immigrationOpportunities";
-import { buildTelLink, formatPhoneForDisplay, planFollowUpSteps, planPartnerActionSteps, resolveActionNote, resolvePartnerPhone, type PartnerAction } from "./partnerActions";
+import { buildTelLink, buildWhatsAppLink, formatPhoneForDisplay, planPartnerManagementSteps, resolveManagementNote, resolvePartnerPhone, type PartnerCloseResult, type PartnerContactOutcome, type PartnerManagementNextStep } from "./partnerActions";
 import { buildHumanSummary, buildIntakeSummary, intakeDescription, referralServiceLabel, resolveIncidentDateFact, resolveSummaryTopicKey, resolveTopicDisplay } from "./referralPresentation";
 import { resolveActivePartnerContext, type ActivePartnerContext } from "./partnerMembership";
 import { resolvePartnerReferralService } from "./partnerReferralVisibility";
+import { downloadPartnerCases, partnerCasesCsv, partnerCasesXlsx, type PartnerExportRow } from "./partnerExport";
+import { partnerConfiguredServiceIds, resolvePartnerServiceWorkspace, type PartnerWorkspaceRule, type PartnerWorkspaceService } from "./partnerWorkspaceConfig";
+import { type PartnerWorkspaceConfig } from "./workspaceConfig";
 import { useSilentPolling } from "../../hooks/useSilentPolling";
 import {
-  combineCustomDateTime,
-  computeNextFollowupAt,
   countOverdueFollowUps,
-  defaultReminderOptionForReason,
-  followUpReasonsForService,
-  formatCustomFollowUpPreview,
   formatFollowUpMoment,
-  isCustomFollowUpReady,
   isFollowUpOverdue,
   QUEUE_STATUS_LABEL,
   FOLLOW_UP_REASON_LABEL,
-  nowTimeInputValue,
-  reminderOptionsForReason,
   resolvePartnerQueueStatus,
   sortPartnerQueue,
-  todayDateInputValue,
   type FollowUpReason,
   type PartnerQueueStatus,
   type PartnerStatusFilter,
-  type ReminderOptionId,
 } from "./partnerQueue";
 import { CORRECTION_REASON_LABEL, canCorrectFinalResult, correctionNoteIsValid, type CorrectionReason } from "./finalStateCorrection";
 
@@ -63,15 +56,6 @@ type AssignmentRow = {
   next_followup_at: string | null;
   follow_up_attempt_count: number;
   referral_service_requests: AssignmentRequestRow | null;
-};
-
-const ACTION_FEEDBACK: Record<PartnerAction, string> = {
-  contacted: "Registrado: contactaste a este cliente.",
-  no_answer: "Registrado: intento de contacto sin respuesta.",
-  pending: "Marcado como pendiente de seguimiento.",
-  appointment_scheduled: "Cita registrada.",
-  converted: "Caso marcado como convertido.",
-  closed_not_converted: "Caso cerrado sin conversión.",
 };
 
 // Canonical status color semantics live entirely in CSS
@@ -203,6 +187,27 @@ function usePartnerReferrals(partnerId: string) {
   return { rows, loading, error, load };
 }
 
+function usePartnerWorkspaceConfiguration(partnerId: string) {
+  const [partnerConfig, setPartnerConfig] = useState<PartnerWorkspaceConfig | null>(null);
+  const [rules, setRules] = useState<PartnerWorkspaceRule[]>([]);
+  const [services, setServices] = useState<PartnerWorkspaceService[]>([]);
+  const [ready, setReady] = useState(false);
+  useEffect(() => { let mounted = true; (async () => {
+    const [partner, ruleResult, serviceResult] = await Promise.all([
+      supabase.from("referral_partners").select("workspace_config").eq("id", partnerId).maybeSingle(),
+      supabase.from("referral_partner_service_rules").select("service_id,active,workspace_config").eq("partner_id", partnerId),
+      supabase.from("service_configs").select("id,workspace_config"),
+    ]);
+    if (!mounted) return;
+    setPartnerConfig((partner.data as { workspace_config?: PartnerWorkspaceConfig } | null)?.workspace_config ?? null);
+    setRules(ruleResult.error ? [] : (ruleResult.data ?? []) as PartnerWorkspaceRule[]);
+    setServices(serviceResult.error ? [] : (serviceResult.data ?? []) as PartnerWorkspaceService[]);
+    setReady(!ruleResult.error && !serviceResult.error);
+  })(); return () => { mounted = false; }; }, [partnerId]);
+  const resolve = useCallback((serviceId: string) => resolvePartnerServiceWorkspace(serviceId, partnerConfig, rules, services), [partnerConfig, rules, services]);
+  return { ready, allowedServiceIds: partnerConfiguredServiceIds(rules), resolve, displayName: partnerConfig?.display_name || "Referencias" };
+}
+
 // Resolves the Partner Portal's explicit partner context up front, from the
 // caller's own active referral_partner_memberships rows (RLS already scopes
 // that table to user_id = auth.uid() AND active — see
@@ -301,14 +306,18 @@ export function Shell() {
             </p>
           ) : (
             <Routes>
-              <Route index element={<PartnerList partnerId={membership.context.partnerId} />} />
-              <Route path="referrals/:assignmentId" element={<PartnerDetail partnerId={membership.context.partnerId} />} />
+              <Route path="*" element={<PartnerWorkspaceRoutes partnerId={membership.context.partnerId} />} />
             </Routes>
           )}
         </div>
       </div>
     </main>
   );
+}
+
+function PartnerWorkspaceRoutes({ partnerId }: { partnerId: string }) {
+  const workspace = usePartnerWorkspaceConfiguration(partnerId);
+  return <Routes><Route index element={<PartnerList partnerId={partnerId} workspace={workspace} />} /><Route path="referrals/:assignmentId" element={<PartnerDetail partnerId={partnerId} workspace={workspace} />} /></Routes>;
 }
 
 function referralPresentation(row: AssignmentRow, opportunity: ImmigrationOpportunity) {
@@ -377,9 +386,52 @@ function ReferralCard({ row, opportunity, queueStatus, overdue }: { row: Assignm
   );
 }
 
-function PartnerList({ partnerId }: { partnerId: string }) {
-  const { rows, loading, error } = usePartnerReferrals(partnerId);
+type CaseDateFilter = "all" | "today" | "week" | "month" | "custom";
+type CaseSort = "customer" | "service" | "received" | "status" | "followUp";
+
+function dateFilterMatches(value: string, filter: CaseDateFilter, start: string, end: string, now = new Date()) {
+  const received = new Date(value); if (Number.isNaN(received.getTime()) || filter === "all") return filter === "all";
+  const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  if (filter === "today") return day(received) === day(now);
+  if (filter === "week") { const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7)); return day(received) >= day(monday) && day(received) <= day(now); }
+  if (filter === "month") return received.getFullYear() === now.getFullYear() && received.getMonth() === now.getMonth();
+  const from = start ? new Date(`${start}T00:00:00`) : null; const to = end ? new Date(`${end}T23:59:59`) : null;
+  return (!from || received >= from) && (!to || received <= to);
+}
+
+function CaseActionDrawer({ entry, onClose }: { entry: { row: AssignmentRow; opportunity: ImmigrationOpportunity; queueStatus: PartnerQueueStatus; overdue: boolean } | null; onClose: () => void }) {
+  if (!entry) return null;
+  const phone = resolvePartnerPhone(entry.row.referral_service_requests?.leads?.phone, entry.row.referral_service_requests?.leads?.channel_user_id);
+  const presentation = referralPresentation(entry.row, entry.opportunity);
+  return <div className="partner-drawer-backdrop" role="presentation" onMouseDown={onClose}>
+    <aside className="partner-case-drawer" role="dialog" aria-modal="true" aria-label="Acciones del caso" onMouseDown={(event) => event.stopPropagation()}>
+      <button type="button" className="partner-drawer-close" onClick={onClose}>Cerrar</button>
+      <p className="partner-drawer-eyebrow">ACCIONES AVANZADAS</p><h2>{entry.opportunity.leadName}</h2>
+      <p>{referralServiceLabel(presentation.service)} · {entry.overdue ? "Seguimiento vencido" : QUEUE_STATUS_LABEL[entry.queueStatus]}</p>
+      <div className="partner-drawer-actions">
+        <a href={buildTelLink(phone) ?? "#"} onClick={(event) => { if (!phone) event.preventDefault(); }}>Llamar</a>
+        <a href={buildWhatsAppLink(phone) ?? "#"} onClick={(event) => { if (!phone) event.preventDefault(); }}>WhatsApp</a>
+        <Link to={`referrals/${entry.row.id}`}>Abrir gestión del caso</Link>
+      </div>
+      <p className="partner-drawer-hint">Las acciones avanzadas se realizan en el detalle del caso para conservar el flujo de ciclo de vida existente.</p>
+    </aside>
+  </div>;
+}
+
+function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: ReturnType<typeof usePartnerWorkspaceConfiguration> }) {
+  const navigate = useNavigate();
+  const { rows, loading, error, load } = usePartnerReferrals(partnerId);
   const [statusFilter, setStatusFilter] = useState<PartnerStatusFilter>("all");
+  const [serviceFilter, setServiceFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState<CaseDateFilter>("all");
+  const [dateStart, setDateStart] = useState("");
+  const [dateEnd, setDateEnd] = useState("");
+  const [sort, setSort] = useState<{ key: CaseSort; direction: "asc" | "desc" }>({ key: "received", direction: "desc" });
+  const [drawerEntry, setDrawerEntry] = useState<{ row: AssignmentRow; opportunity: ImmigrationOpportunity; queueStatus: PartnerQueueStatus; overdue: boolean } | null>(null);
+  const [quickActionId, setQuickActionId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [quickView, setQuickView] = useState<"all" | "new" | "today" | "overdue" | "follow_up" | "closed">("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const entries = useMemo(() => {
     const byId = new Map(rows.map((row) => [row.id, row]));
     const opportunities = rows.map(toOpportunity).filter((opportunity): opportunity is ImmigrationOpportunity => opportunity !== null);
@@ -391,10 +443,27 @@ function PartnerList({ partnerId }: { partnerId: string }) {
       };
     })).map((entry) => ({ ...entry, queueStatus: resolvePartnerQueueStatus(entry), overdue: isFollowUpOverdue(entry) }));
   }, [rows]);
-  const filtered = useMemo(
-    () => statusFilter === "all" ? entries : entries.filter((entry) => entry.queueStatus === statusFilter),
-    [entries, statusFilter],
-  );
+  const configuredEntries = useMemo(() => workspace.ready ? entries.filter((entry) => workspace.allowedServiceIds.has(entry.row.referral_service_requests?.service_id ?? "")) : entries, [entries, workspace]);
+  const services = useMemo(() => Array.from(new Set(entries.map(({ row, opportunity }) => referralServiceLabel(referralPresentation(row, opportunity).service)))).sort(), [entries]);
+  const filtered = useMemo(() => configuredEntries.filter((entry) => {
+    const service = referralServiceLabel(referralPresentation(entry.row, entry.opportunity).service);
+    const phone = resolvePartnerPhone(entry.row.referral_service_requests?.leads?.phone, entry.row.referral_service_requests?.leads?.channel_user_id) ?? "";
+    const zip = entry.row.referral_service_requests?.postal_code ?? "";
+    const matchesSearch = !search.trim() || `${entry.opportunity.leadName} ${phone} ${zip}`.toLowerCase().includes(search.trim().toLowerCase());
+    const closed = entry.row.work_status === "converted" || entry.row.work_status === "not_converted";
+    const matchesQuick = quickView === "all" || (quickView === "new" && entry.queueStatus === "new") || (quickView === "today" && dateFilterMatches(entry.row.assigned_at, "today", "", "")) || (quickView === "overdue" && entry.overdue) || (quickView === "follow_up" && entry.queueStatus === "follow_up") || (quickView === "closed" && closed);
+    return matchesSearch && matchesQuick && (statusFilter === "all" || entry.queueStatus === statusFilter) && (serviceFilter === "all" || service === serviceFilter) && dateFilterMatches(entry.row.assigned_at, dateFilter, dateStart, dateEnd);
+  }).sort((left, right) => {
+    const cell = (entry: typeof left) => {
+      const presentation = referralPresentation(entry.row, entry.opportunity);
+      if (sort.key === "customer") return entry.opportunity.leadName;
+      if (sort.key === "service") return referralServiceLabel(presentation.service);
+      if (sort.key === "status") return entry.queueStatus;
+      if (sort.key === "followUp") return entry.row.next_followup_at ?? "";
+      return entry.row.assigned_at;
+    };
+    return cell(left).localeCompare(cell(right)) * (sort.direction === "asc" ? 1 : -1);
+  }), [configuredEntries, statusFilter, serviceFilter, dateFilter, dateStart, dateEnd, sort, search, quickView]);
   // The secretary must be able to see there's overdue work without opening
   // the Seguimiento filter chip — a header-level count, always visible.
   const overdueCount = useMemo(() => countOverdueFollowUps(entries), [entries]);
@@ -402,10 +471,25 @@ function PartnerList({ partnerId }: { partnerId: string }) {
   if (loading) return <p className="partner-empty partner-loading">Cargando referencias…</p>;
   if (error) return <p className="partner-empty partner-loading">{error}</p>;
 
+  const resetFilters = () => { setStatusFilter("all"); setServiceFilter("all"); setDateFilter("all"); setDateStart(""); setDateEnd(""); setSearch(""); setQuickView("all"); };
+  const exportRows: PartnerExportRow[] = filtered.map((entry) => ({
+    customer: entry.opportunity.leadName,
+    phone: formatPhoneForDisplay(resolvePartnerPhone(entry.row.referral_service_requests?.leads?.phone, entry.row.referral_service_requests?.leads?.channel_user_id)) ?? "",
+    service: referralServiceLabel(referralPresentation(entry.row, entry.opportunity).service),
+    received: formatDateTime(entry.row.assigned_at), status: entry.overdue ? "Seguimiento vencido" : QUEUE_STATUS_LABEL[entry.queueStatus], nextFollowUp: formatFollowUpMoment(entry.row.next_followup_at),
+  }));
+  const sortBy = (key: CaseSort) => setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
+  const acceptFromTable = async (assignmentId: string) => {
+    setQuickActionId(assignmentId);
+    const result = await supabase.rpc("partner_update_referral_assignment", { p_assignment_id: assignmentId, p_action: "accept", p_note: null, p_appointment_at: null });
+    setQuickActionId(null);
+    if (!result.error) await load({ silent: true });
+  };
+
   return (
     <div className="partner-view">
       <div className="partner-page-head">
-        <h1>Referencias</h1>
+        <h1>{workspace.displayName}</h1>
         <p>Personas que te hemos enviado para contactar.</p>
         {overdueCount > 0 ? (
           <p className="partner-overdue-counter" role="status">
@@ -414,30 +498,17 @@ function PartnerList({ partnerId }: { partnerId: string }) {
         ) : null}
       </div>
 
-      <label className="partner-mobile-filter">
-        <span>Estado</span>
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as PartnerStatusFilter)}>
-          <option value="all">Todos</option>
-          <option value="new">Nuevos</option>
-          <option value="follow_up">Seguimiento</option>
-          <option value="approved">Aprobados</option>
-          <option value="disqualified">No calificó</option>
-        </select>
-      </label>
-      <div className="partner-service-filter" role="tablist" aria-label="Filtrar por estado">
-        {([{ id: "all", label: "Todos" }, { id: "new", label: "Nuevos" }, { id: "follow_up", label: "Seguimiento" }, { id: "approved", label: "Aprobados" }, { id: "disqualified", label: "No calificó" }] as Array<{ id: PartnerStatusFilter; label: string }>).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={statusFilter === tab.id}
-            className={`partner-filter-btn${statusFilter === tab.id ? ` is-active is-${tab.id}` : ""}`}
-            onClick={() => setStatusFilter(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="partner-case-filterbar" aria-label="Filtros de casos">
+        <label className="partner-search-field">Buscar<input value={search} placeholder="Cliente, teléfono o ZIP" onChange={(event) => setSearch(event.target.value)} /></label>
+        <label>Estado<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as PartnerStatusFilter)}><option value="all">Todos</option><option value="new">Nuevos</option><option value="follow_up">Seguimiento</option><option value="approved">Aprobados</option><option value="disqualified">No calificó</option></select></label>
+        <label>Servicio<select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}><option value="all">Todos</option>{services.map((service) => <option key={service} value={service}>{service}</option>)}</select></label>
+        <label>Fecha<select value={dateFilter} onChange={(event) => setDateFilter(event.target.value as CaseDateFilter)}><option value="all">Todas</option><option value="today">Hoy</option><option value="week">Esta semana</option><option value="month">Este mes</option><option value="custom">Personalizado</option></select></label>
+        {dateFilter === "custom" ? <><label>Desde<input type="date" value={dateStart} onChange={(event) => setDateStart(event.target.value)} /></label><label>Hasta<input type="date" value={dateEnd} onChange={(event) => setDateEnd(event.target.value)} /></label></> : null}
+        <button type="button" className="partner-filter-reset" onClick={resetFilters}>Restablecer</button>
+        {workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").export_enabled ? <div className="partner-export-menu"><button type="button" onClick={() => downloadPartnerCases(new Blob([partnerCasesCsv(exportRows)], { type: "text/csv;charset=utf-8" }), "casos-filtrados.csv")}>CSV</button><button type="button" onClick={() => downloadPartnerCases(partnerCasesXlsx(exportRows), "casos-filtrados.xlsx")}>XLSX</button></div> : null}
       </div>
+      <div className="partner-quick-views" role="tablist" aria-label="Vistas rápidas">{([ ["all", "Todos"], ["new", "Nuevos"], ["today", "Hoy"], ["overdue", "Vencidos"], ["follow_up", "Seguimiento"], ["closed", "Cerrados"] ] as const).map(([id, label]) => <button key={id} type="button" className={quickView === id ? "is-active" : ""} onClick={() => setQuickView(id)}>{label}</button>)}</div>
+      {selectedIds.size ? <div className="partner-selection-bar"><span>{selectedIds.size} seleccionados</span>{workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").export_enabled ? <button type="button" onClick={() => downloadPartnerCases(new Blob([partnerCasesCsv(exportRows.filter((_, index) => selectedIds.has(filtered[index]?.row.id ?? "")))], { type: "text/csv;charset=utf-8" }), "casos-seleccionados.csv")}>Exportar seleccionados</button> : null}</div> : null}
 
       {filtered.length === 0 ? (
         <div className="partner-empty-state">
@@ -445,78 +516,71 @@ function PartnerList({ partnerId }: { partnerId: string }) {
           <p className="partner-empty-sub">Las nuevas referencias aparecerán aquí automáticamente.</p>
         </div>
       ) : (
-        <div className="partner-list">
+        <><div className="partner-cases-table-wrap"><table className="partner-cases-table"><thead><tr><th><input aria-label="Seleccionar todos" type="checkbox" checked={filtered.length > 0 && filtered.every((entry) => selectedIds.has(entry.row.id))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(filtered.map((entry) => entry.row.id)) : new Set())} /></th>{([ ["customer", "Cliente"], ["service", "Servicio"], ["received", "Recibido"], ["status", "Estado"], ["followUp", "Próximo seguimiento"] ] as Array<[CaseSort, string]>).filter(([key]) => workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").visible_columns.includes(key === "followUp" ? "next_follow_up" : key)).map(([key, label]) => <th key={key}><button type="button" onClick={() => sortBy(key)}>{label}</button></th>)}{workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").visible_columns.includes("phone") ? <th>Teléfono</th> : null}<th>Acciones</th></tr></thead><tbody>{filtered.map((entry) => { const phone = resolvePartnerPhone(entry.row.referral_service_requests?.leads?.phone, entry.row.referral_service_requests?.leads?.channel_user_id); const presentation = referralPresentation(entry.row, entry.opportunity); const config = workspace.resolve(entry.row.referral_service_requests?.service_id ?? ""); return <tr className="partner-case-row" key={entry.row.id} onClick={() => navigate(`referrals/${entry.row.id}`)}>{<td onClick={(event) => event.stopPropagation()}><input aria-label={`Seleccionar ${entry.opportunity.leadName}`} type="checkbox" checked={selectedIds.has(entry.row.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(entry.row.id) : next.delete(entry.row.id); return next; })} /></td>}{config.visible_columns.includes("customer") ? <td><Link onClick={(event) => event.stopPropagation()} to={`referrals/${entry.row.id}`}>{entry.opportunity.leadName}</Link></td> : null}{config.visible_columns.includes("service") ? <td>{referralServiceLabel(presentation.service)}</td> : null}{config.visible_columns.includes("received") ? <td>{formatDateTime(entry.row.assigned_at)}</td> : null}{config.visible_columns.includes("status") ? <td><span className={`partner-status is-${queueStatusTone(entry.queueStatus, entry.overdue)}`}>{entry.overdue ? "Vencido" : QUEUE_STATUS_LABEL[entry.queueStatus]}</span></td> : null}{config.visible_columns.includes("next_follow_up") ? <td>{formatFollowUpMoment(entry.row.next_followup_at)}</td> : null}{config.visible_columns.includes("phone") ? <td>{formatPhoneForDisplay(phone) || "—"}</td> : null}<td onClick={(event) => event.stopPropagation()}><div className="partner-row-actions">{config.allowed_actions.includes("call") ? <a href={buildTelLink(phone) ?? "#"} onClick={(event) => { event.stopPropagation(); if (!phone) event.preventDefault(); }}>Llamar</a> : null}{config.allowed_actions.includes("whatsapp") ? <a href={buildWhatsAppLink(phone) ?? "#"} onClick={(event) => { event.stopPropagation(); if (!phone) event.preventDefault(); }}>WhatsApp</a> : null}{entry.row.status === "assigned" && config.allowed_actions.includes("accept") ? <button type="button" className="is-primary" disabled={quickActionId === entry.row.id} onClick={(event) => { event.stopPropagation(); void acceptFromTable(entry.row.id); }}>Aceptar</button> : <Link onClick={(event) => event.stopPropagation()} className="is-primary" to={`referrals/${entry.row.id}`}>Abrir</Link>}<button type="button" onClick={(event) => { event.stopPropagation(); setDrawerEntry(entry); }}>Más</button></div></td></tr>; })}</tbody></table></div>
+        <div className="partner-list partner-mobile-cards">
           {filtered.map(({ row, opportunity, queueStatus, overdue }) => <ReferralCard key={row.id} row={row} opportunity={opportunity} queueStatus={queueStatus} overdue={overdue} />)}
-        </div>
+        </div></>
       )}
+      <CaseActionDrawer entry={drawerEntry} onClose={() => setDrawerEntry(null)} />
     </div>
   );
 }
 
-function PartnerDetail({ partnerId }: { partnerId: string }) {
+function PartnerDetail({ partnerId, workspace }: { partnerId: string; workspace: ReturnType<typeof usePartnerWorkspaceConfiguration> }) {
   const { assignmentId = "" } = useParams();
   const { rows, loading, error, load } = usePartnerReferrals(partnerId);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const [showFollowUp, setShowFollowUp] = useState(false);
-  const [followUpReason, setFollowUpReason] = useState<FollowUpReason>("no_answer");
-  const [reminderOption, setReminderOption] = useState<ReminderOptionId>(defaultReminderOptionForReason("no_answer"));
-  const [customDate, setCustomDate] = useState("");
-  const [customTime, setCustomTime] = useState("");
+  const [contactOutcome, setContactOutcome] = useState<PartnerContactOutcome>("contacted");
+  const [nextStep, setNextStep] = useState<PartnerManagementNextStep>("follow_up");
+  const [closeResult, setCloseResult] = useState<PartnerCloseResult>("converted");
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [followUpTime, setFollowUpTime] = useState("");
   const [showCorrection, setShowCorrection] = useState(false);
   const [correctionReason, setCorrectionReason] = useState<CorrectionReason>("marked_by_mistake");
   const [correctionNote, setCorrectionNote] = useState("");
 
   const row = rows.find((candidate) => candidate.id === assignmentId) ?? null;
   const opportunity = row ? toOpportunity(row) : null;
+  const workspaceConfig = workspace.resolve(row?.referral_service_requests?.service_id ?? "");
 
-  const selectFollowUpReason = useCallback((reason: FollowUpReason) => {
-    setFollowUpReason(reason);
-    setReminderOption(defaultReminderOptionForReason(reason));
-    setCustomDate("");
-    setCustomTime("");
-  }, []);
-
-  const cancelFollowUp = useCallback(() => {
-    setShowFollowUp(false);
-    selectFollowUpReason("no_answer");
-  }, [selectFollowUpReason]);
-
-  const runAction = useCallback(async (action: PartnerAction) => {
+  const runManagement = useCallback(async () => {
     if (!row || busy) return;
+    const nextFollowupAt = nextStep === "follow_up" ? new Date(`${followUpDate}T${followUpTime}`) : null;
+    if (nextStep === "follow_up" && (!followUpDate || !followUpTime || !nextFollowupAt || Number.isNaN(nextFollowupAt.getTime()) || nextFollowupAt.getTime() <= Date.now())) {
+      setFeedback({ tone: "error", text: "Selecciona una fecha y hora futuras para el seguimiento." });
+      return;
+    }
     setBusy(true);
     setFeedback(null);
-    const steps = planPartnerActionSteps(action, row.status);
-    const finalNote = resolveActionNote(action, note);
-    const { data: authData } = await supabase.auth.getUser();
-    console.info("Partner auth diagnostic", {
-      user_id: authData.user?.id ?? null,
-      assignment_id: row.id,
-      request_id: row.request_id,
-      partner_id: row.partner_id,
-      action,
-    });
-    for (let index = 0; index < steps.length; index += 1) {
-      const isFinalStep = index === steps.length - 1;
-      const result = await supabase.rpc("partner_update_immigration_assignment", {
+    const followUpReason: FollowUpReason = contactOutcome === "no_answer" ? "no_answer" : "other";
+    const steps = planPartnerManagementSteps(contactOutcome, nextStep, closeResult, row.status);
+    const outcomeAction = contactOutcome === "wrong_number" ? "note" : contactOutcome;
+    const outcomeNote = resolveManagementNote(contactOutcome, note);
+    for (const step of steps) {
+      const result = await supabase.rpc("partner_update_referral_assignment", {
         p_assignment_id: assignmentId,
-        p_action: steps[index],
-        p_note: isFinalStep ? finalNote : null,
+        p_action: step,
+        p_note: step === outcomeAction ? outcomeNote : null,
         p_appointment_at: null,
+        p_follow_up_reason: step === "follow_up" ? followUpReason : null,
+        p_next_followup_at: step === "follow_up" ? nextFollowupAt?.toISOString() ?? null : null,
       });
       if (result.error) {
         reportPartnerOutcomeFailure(result.error);
         setBusy(false);
-        setFeedback({ tone: "error", text: "No se pudo registrar la acción. Intenta de nuevo." });
+        setFeedback({ tone: "error", text: "No se pudo guardar la gestión. Intenta de nuevo." });
         return;
       }
     }
     setBusy(false);
     setNote("");
-    setFeedback({ tone: "success", text: ACTION_FEEDBACK[action] });
+    setFollowUpDate("");
+    setFollowUpTime("");
+    setFeedback({ tone: "success", text: nextStep === "follow_up" ? "Gestión y seguimiento guardados." : "Gestión y resultado guardados." });
     await load({ silent: true });
-  }, [row, busy, assignmentId, note, load]);
+  }, [row, busy, assignmentId, contactOutcome, nextStep, closeResult, note, followUpDate, followUpTime, load]);
 
   const runCorrection = useCallback(async () => {
     if (!row || busy || !canCorrectFinalResult(row.work_status)) return;
@@ -526,7 +590,7 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     }
     setBusy(true);
     setFeedback(null);
-    const result = await supabase.rpc("partner_update_immigration_assignment", {
+    const result = await supabase.rpc("partner_update_referral_assignment", {
       p_assignment_id: row.id,
       p_action: "correct_result",
       p_note: correctionNote.trim() || null,
@@ -547,55 +611,6 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
     setFeedback({ tone: "success", text: "Resultado corregido. El caso requiere nueva revisión." });
     await load({ silent: true });
   }, [row, busy, correctionReason, correctionNote, load]);
-
-  // Personalizado has its own combine/validity/preview path — it never goes
-  // through "Sin recordatorio" (that phrase is reserved for the intentional
-  // no-reminder preset) and is never treated as ready until both Fecha and
-  // Hora are set to a moment that hasn't already passed.
-  const customCombined = combineCustomDateTime(customDate, customTime);
-  const customReady = isCustomFollowUpReady(customCombined);
-  const nextFollowupAtPreview = reminderOption === "custom"
-    ? null
-    : computeNextFollowupAt(reminderOption, new Date());
-
-  const runFollowUp = useCallback(async () => {
-    if (!row || busy) return;
-    if (reminderOption === "custom" && !isCustomFollowUpReady(combineCustomDateTime(customDate, customTime))) return;
-    // Recomputed here (not read from the render-scoped preview above) so a
-    // save triggered right as a minute rolls over still persists a value
-    // consistent with what was just shown, not a stale closure.
-    const nextFollowupAt = computeNextFollowupAt(
-      reminderOption,
-      new Date(),
-      reminderOption === "custom" ? combineCustomDateTime(customDate, customTime) : null,
-    );
-    setBusy(true);
-    setFeedback(null);
-    const steps = planFollowUpSteps(row.status);
-    const finalNote = note.trim() || null;
-    for (let index = 0; index < steps.length; index += 1) {
-      const isFinalStep = index === steps.length - 1;
-      const result = await supabase.rpc("partner_update_immigration_assignment", {
-        p_assignment_id: assignmentId,
-        p_action: steps[index],
-        p_note: isFinalStep ? finalNote : null,
-        p_appointment_at: null,
-        p_follow_up_reason: isFinalStep ? followUpReason : null,
-        p_next_followup_at: isFinalStep ? nextFollowupAt : null,
-      });
-      if (result.error) {
-        reportPartnerOutcomeFailure(result.error);
-        setBusy(false);
-        setFeedback({ tone: "error", text: "No se pudo registrar el seguimiento. Intenta de nuevo." });
-        return;
-      }
-    }
-    setBusy(false);
-    setNote("");
-    setShowFollowUp(false);
-    setFeedback({ tone: "success", text: "Seguimiento guardado." });
-    await load({ silent: true });
-  }, [row, busy, assignmentId, note, followUpReason, reminderOption, customDate, customTime, load]);
 
   if (loading) return <p className="partner-empty partner-loading">Cargando…</p>;
   if (error || !opportunity || !row) return <p className="partner-empty partner-loading">La referencia no está disponible.</p>;
@@ -659,6 +674,7 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
             <dl className="partner-facts">
               <div><dt>Teléfono</dt><dd>{formatPhoneForDisplay(phone) || "No disponible"}</dd></div>
               <div><dt>ZIP</dt><dd>{opportunity.postalCode || "No disponible"}</dd></div>
+              {workspaceConfig.service_fields.map((field) => { const value = row.referral_service_requests?.intake?.[field]; return value === undefined || value === null || value === "" ? null : <div key={field}><dt>{field.replace(/_/g, " ")}</dt><dd>{String(value)}</dd></div>; })}
               {hasConsent ? <div><dt>Autorizado para contacto</dt><dd>{opportunity.consentStatus === "authorized" ? "Sí" : opportunity.consentStatus === "declined" ? "No" : "Pendiente de confirmar"}</dd></div> : null}
               {presentation.incidentDateFact ? <div><dt>{presentation.incidentDateFact.label}</dt><dd>{presentation.incidentDateFact.value}</dd></div> : null}
               <div><dt>Recibido</dt><dd>{formatDateTime(opportunity.assignment!.assignedAt)}</dd></div>
@@ -694,112 +710,49 @@ function PartnerDetail({ partnerId }: { partnerId: string }) {
             </section>
           ) : (
             <section className="partner-block">
-              <h2>Resultado de la llamada</h2>
-              <p className="partner-action-title">Registrá qué pasó después de contactar al cliente.</p>
-              <div className="partner-action-row">
-                <button type="button" disabled={busy} className="partner-action-btn is-approve" onClick={() => void runAction("converted")}>Aprobado</button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="partner-action-btn is-followup"
-                  onClick={() => setShowFollowUp((visible) => {
-                    if (!visible) selectFollowUpReason(followUpReason);
-                    return !visible;
-                  })}
-                >
-                  Seguimiento
-                </button>
-                <button type="button" disabled={busy} className="partner-action-btn is-disqualify" onClick={() => void runAction("closed_not_converted")}>No calificó</button>
-              </div>
-
-              {showFollowUp ? (
-                <div className="partner-followup-panel">
-                  <div className="partner-note-field">
-                    <label htmlFor="partner-follow-up-reason">Motivo</label>
-                    <select
-                      id="partner-follow-up-reason"
-                      className="partner-input"
-                      value={followUpReason}
-                      onChange={(event) => selectFollowUpReason(event.target.value as FollowUpReason)}
-                    >
-                      {followUpReasonsForService(presentation.service).map((reason) => <option key={reason.id} value={reason.id}>{reason.label}</option>)}
-                    </select>
+              <h2>GUARDAR GESTIÓN</h2>
+              <div className="partner-management-form">
+                <fieldset className="partner-management-fieldset">
+                  <legend>Resultado del contacto</legend>
+                  <div className="partner-management-options">
+                    <label><input type="radio" name="contact-outcome" checked={contactOutcome === "contacted"} onChange={() => setContactOutcome("contacted")} /> Contactado</label>
+                    <label><input type="radio" name="contact-outcome" checked={contactOutcome === "no_answer"} onChange={() => setContactOutcome("no_answer")} /> No contestó</label>
+                    <label><input type="radio" name="contact-outcome" checked={contactOutcome === "wrong_number"} onChange={() => setContactOutcome("wrong_number")} /> Número incorrecto</label>
                   </div>
+                </fieldset>
 
-                  <div className="partner-note-field">
-                    <label>Recordatorio</label>
-                    <div className="partner-reminder-row">
-                      {reminderOptionsForReason(followUpReason).map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          disabled={busy}
-                          className={`partner-filter-btn${reminderOption === option.id ? " is-active" : ""}`}
-                          onClick={() => setReminderOption(option.id)}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
+                <div className="partner-note-field">
+                  <label htmlFor="partner-note">Nota (opcional)</label>
+                  <textarea id="partner-note" className="partner-textarea" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Agrega contexto útil para el equipo…" />
+                  {contactOutcome === "wrong_number" ? <p className="partner-note-hint">Se registrará como nota. No cierra el caso por sí solo porque el contrato actual no tiene un estado durable para número incorrecto.</p> : null}
+                </div>
+
+                <fieldset className="partner-management-fieldset">
+                  <legend>Próximo paso</legend>
+                  <div className="partner-management-options">
+                    <label><input type="radio" name="next-step" checked={nextStep === "follow_up"} onChange={() => setNextStep("follow_up")} /> Seguimiento</label>
+                    <label><input type="radio" name="next-step" checked={nextStep === "close"} onChange={() => setNextStep("close")} /> Cerrar caso</label>
+                  </div>
+                </fieldset>
+
+                {nextStep === "follow_up" ? (
+                  <div className="partner-custom-datetime">
+                    <div className="partner-custom-field"><label htmlFor="partner-followup-date">Fecha</label><input required type="date" id="partner-followup-date" className="partner-input" value={followUpDate} onChange={(event) => setFollowUpDate(event.target.value)} /></div>
+                    <div className="partner-custom-field"><label htmlFor="partner-followup-time">Hora</label><input required type="time" id="partner-followup-time" className="partner-input" value={followUpTime} onChange={(event) => setFollowUpTime(event.target.value)} /></div>
+                    <p className="partner-note-hint">{contactOutcome === "no_answer" ? "Motivo de seguimiento: No contestó." : "Motivo de seguimiento: Otro."}</p>
+                  </div>
+                ) : (
+                  <fieldset className="partner-management-fieldset">
+                    <legend>Resultado de cierre</legend>
+                    <div className="partner-management-options">
+                      <label><input type="radio" name="close-result" checked={closeResult === "converted"} onChange={() => setCloseResult("converted")} /> Convertido / Aprobado</label>
+                      <label><input type="radio" name="close-result" checked={closeResult === "closed_not_converted"} onChange={() => setCloseResult("closed_not_converted")} /> No convertido / No calificó</label>
                     </div>
-                    {reminderOption === "custom" ? (
-                      <div className="partner-custom-datetime">
-                        <div className="partner-custom-field">
-                          <label htmlFor="partner-followup-date">Fecha</label>
-                          <input
-                            type="date"
-                            id="partner-followup-date"
-                            className="partner-input"
-                            min={todayDateInputValue()}
-                            value={customDate}
-                            onChange={(event) => setCustomDate(event.target.value)}
-                          />
-                        </div>
-                        <div className="partner-custom-field">
-                          <label htmlFor="partner-followup-time">Hora</label>
-                          <input
-                            type="time"
-                            id="partner-followup-time"
-                            className="partner-input"
-                            min={customDate === todayDateInputValue() ? nowTimeInputValue() : undefined}
-                            value={customTime}
-                            onChange={(event) => setCustomTime(event.target.value)}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                    <p className="partner-followup-preview">
-                      Próximo seguimiento: {reminderOption === "custom"
-                        ? (customReady && customCombined ? formatCustomFollowUpPreview(customCombined) : "Selecciona fecha y hora")
-                        : formatFollowUpMoment(nextFollowupAtPreview)}
-                    </p>
-                  </div>
-                </div>
-              ) : null}
+                  </fieldset>
+                )}
 
-              <div className="partner-note-field">
-                <label htmlFor="partner-note">Nota opcional</label>
-                <textarea
-                  id="partner-note"
-                  className="partner-textarea"
-                  value={note}
-                  onChange={(event) => setNote(event.target.value)}
-                  placeholder="Ej: devolví la llamada, agendamos para el jueves…"
-                />
+                <button type="button" disabled={busy} className="partner-action-btn is-primary partner-management-save" onClick={() => void runManagement()}>{busy ? "Guardando…" : "Guardar gestión"}</button>
               </div>
-
-              {showFollowUp ? (
-                <div className="partner-action-row">
-                  <button type="button" disabled={busy} className="partner-action-btn is-tertiary" onClick={cancelFollowUp}>Cancelar</button>
-                  <button
-                    type="button"
-                    disabled={busy || (reminderOption === "custom" && !customReady)}
-                    className="partner-action-btn is-primary"
-                    onClick={() => void runFollowUp()}
-                  >
-                    Guardar seguimiento
-                  </button>
-                </div>
-              ) : null}
             </section>
           )}
         </div>
