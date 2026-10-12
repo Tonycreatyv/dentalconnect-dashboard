@@ -48,6 +48,11 @@ Deno.test("buildIntakeSummary renders structured facts for AUTO_ACCIDENT/DUI/CRI
   assert(buildIntakeSummary({ currently_detained: "YES" }, criminalKey));
 });
 
+Deno.test("buildIntakeSummary renders the new accident responsibility and immigration detention signals", () => {
+  assertEquals(buildIntakeSummary({ at_fault: "UNSURE" }, "AUTO_ACCIDENT"), "Responsabilidad: No estoy seguro/a");
+  assertEquals(buildIntakeSummary({ currently_detained: "YES" }, "ASYLUM"), "Actualmente detenido/a");
+});
+
 Deno.test("buildIntakeSummary renders structured facts for the new immigration topics when keyed by intake.topic", () => {
   assert(
     buildIntakeSummary(

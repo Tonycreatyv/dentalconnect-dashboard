@@ -603,11 +603,13 @@ export function ContactDetailScreen() {
             <div className="hub-list-row-meta">
               <SourceTag source="WhatsApp Flow" />
               {pipelineLead ? <StatusBadge tone={STAGE_TONE[pipelineLead.stage]} label={LEAD_STAGE_LABELS[pipelineLead.stage]} /> : null}
+              {detail.legalIntake!.currentlyDetained === "YES" ? <StatusBadge tone="danger" label="Urgente" /> : null}
             </div>
             <strong>{LEGAL_INTAKE_TITLE[detail.legalIntake!.intakeType] || "Información capturada"}</strong>
             <dl className="hub-facts">
               {legalTopicLabel(detail.legalIntake!) ? <div><dt>Tipo de ayuda</dt><dd>{legalTopicLabel(detail.legalIntake!)}</dd></div> : null}
               {detail.legalIntake!.postalCode ? <div><dt>ZIP</dt><dd>{detail.legalIntake!.postalCode}</dd></div> : null}
+              {detail.legalIntake!.atFault ? <div><dt>Responsabilidad</dt><dd>{detail.legalIntake!.atFault === "YES" ? "Sí" : detail.legalIntake!.atFault === "NO" ? "No" : "No estoy seguro/a"}</dd></div> : null}
               <div><dt>Enviado</dt><dd>{formatDateTime(detail.legalIntake!.completedAt)}</dd></div>
               <div><dt>Negocio / aliado</dt><dd>{legalIntakePartnerLabel}</dd></div>
             </dl>
