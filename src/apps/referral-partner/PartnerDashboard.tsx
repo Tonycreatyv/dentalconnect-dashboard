@@ -98,21 +98,6 @@ function formatDateTime(value: string | null | undefined): string {
   return `${formatDate(value)} · ${time}`;
 }
 
-type ReceivedDateFilter = "all" | "today" | "week" | "month";
-
-function matchesReceivedDate(value: string | null | undefined, filter: ReceivedDateFilter): boolean {
-  if (filter === "all") return true;
-  if (!value) return false;
-  const receivedAt = new Date(value);
-  if (Number.isNaN(receivedAt.getTime())) return false;
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (filter === "today") return receivedAt >= today;
-  const start = new Date(today);
-  start.setDate(today.getDate() - (filter === "week" ? 6 : 29));
-  return receivedAt >= start;
-}
-
 function formatRelative(value: string | null | undefined): string {
   if (!value) return "Sin fecha";
   const date = new Date(value);
@@ -453,8 +438,6 @@ function PartnerDesktopTable({ entries }: { entries: PartnerListEntry[] }) {
 function PartnerList({ partnerId }: { partnerId: string }) {
   const { rows, loading, error } = usePartnerReferrals(partnerId);
   const [statusFilter, setStatusFilter] = useState<PartnerStatusFilter>("all");
-  const [serviceFilter, setServiceFilter] = useState("all");
-  const [receivedDateFilter, setReceivedDateFilter] = useState<ReceivedDateFilter>("all");
   const entries = useMemo(() => {
     const byId = new Map(rows.map((row) => [row.id, row]));
     const opportunities = rows.map(toOpportunity).filter((opportunity): opportunity is ImmigrationOpportunity => opportunity !== null);
@@ -466,16 +449,10 @@ function PartnerList({ partnerId }: { partnerId: string }) {
       };
     })).map((entry) => ({ ...entry, queueStatus: resolvePartnerQueueStatus(entry), overdue: isFollowUpOverdue(entry) }));
   }, [rows]);
-  const services = useMemo(
-    () => Array.from(new Set(entries.map(({ row, opportunity }) => referralServiceLabel(referralPresentation(row, opportunity).service)))).sort(),
-    [entries],
+  const filtered = useMemo(
+    () => statusFilter === "all" ? entries : entries.filter((entry) => entry.queueStatus === statusFilter),
+    [entries, statusFilter],
   );
-  const filtered = useMemo(() => entries.filter((entry) => {
-    const service = referralServiceLabel(referralPresentation(entry.row, entry.opportunity).service);
-    return (statusFilter === "all" || entry.queueStatus === statusFilter)
-      && (serviceFilter === "all" || service === serviceFilter)
-      && matchesReceivedDate(entry.assignedAt, receivedDateFilter);
-  }), [entries, receivedDateFilter, serviceFilter, statusFilter]);
   const overdueCount = useMemo(() => countOverdueFollowUps(entries), [entries]);
   const newCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "new").length, [entries]);
   const followUpCount = useMemo(() => entries.filter((entry) => entry.queueStatus === "follow_up").length, [entries]);
@@ -491,64 +468,29 @@ function PartnerList({ partnerId }: { partnerId: string }) {
       </div>
 
       <div className="partner-work-summary" aria-label="Resumen de trabajo">
-        <div className="partner-work-metric is-new">
-          <span>Nuevos</span>
-          <strong>{newCount}</strong>
-        </div>
-        <div className="partner-work-metric is-follow-up">
-          <span>Seguimiento</span>
-          <strong>{followUpCount}</strong>
-        </div>
-        <div className={`partner-work-metric is-overdue${overdueCount > 0 ? " has-items" : ""}`}>
-          <span>Vencidos</span>
-          <strong>{overdueCount}</strong>
-        </div>
+        <span className="partner-work-metric"><strong>{newCount}</strong> Nuevos</span>
+        <span className="partner-work-metric"><strong>{followUpCount}</strong> Seguimientos</span>
+        <span className={`partner-work-metric${overdueCount > 0 ? " is-overdue" : ""}`}><strong>{overdueCount}</strong> Vencidos</span>
       </div>
 
-      <div className="partner-filter-controls">
-        <div className="partner-primary-filters">
-          <div className="partner-status-tabs" role="tablist" aria-label="Filtrar por estado">
-            {([{ id: "all", label: "Todos" }, { id: "new", label: "Nuevos" }, { id: "follow_up", label: "Seguimiento" }, { id: "approved", label: "Aprobados" }, { id: "disqualified", label: "No calificó" }] as Array<{ id: PartnerStatusFilter; label: string }>).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={statusFilter === tab.id}
-                className={`partner-filter-btn${statusFilter === tab.id ? " is-active" : ""}`}
-                onClick={() => setStatusFilter(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          <label className="partner-service-select">
-            <span>Servicio</span>
-            <select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
-              <option value="all">Todos los servicios</option>
-              {services.map((service) => <option key={service} value={service}>{service}</option>)}
-            </select>
-          </label>
-        </div>
+      <div className="partner-service-filter" role="tablist" aria-label="Filtrar por estado">
+        {([{ id: "all", label: "Todos" }, { id: "new", label: "Nuevos" }, { id: "follow_up", label: "Seguimiento" }, { id: "approved", label: "Aprobados" }, { id: "disqualified", label: "No calificó" }] as Array<{ id: PartnerStatusFilter; label: string }>).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={statusFilter === tab.id}
+            className={`partner-filter-btn${statusFilter === tab.id ? ` is-active is-${tab.id}` : ""}`}
+            onClick={() => setStatusFilter(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        <details className="partner-more-filters">
-          <summary>Más filtros</summary>
-          <div className="partner-more-filters-panel">
-            <label className="partner-service-select partner-received-date-filter">
-              <span>Fecha recibida</span>
-              <select value={receivedDateFilter} onChange={(event) => setReceivedDateFilter(event.target.value as ReceivedDateFilter)}>
-                <option value="all">Cualquier fecha</option>
-                <option value="today">Hoy</option>
-                <option value="week">Últimos 7 días</option>
-                <option value="month">Últimos 30 días</option>
-              </select>
-            </label>
-            <button type="button" className="partner-filter-btn" onClick={() => { setStatusFilter("all"); setServiceFilter("all"); setReceivedDateFilter("all"); }}>Limpiar filtros</button>
-            <div className="partner-export-actions" aria-label="Exportar referencias filtradas">
-              <button type="button" className="partner-filter-btn" disabled={filtered.length === 0} onClick={() => downloadPartnerExport(filtered, "xlsx")}>Excel (.xlsx)</button>
-              <button type="button" className="partner-filter-btn" disabled={filtered.length === 0} onClick={() => downloadPartnerExport(filtered, "csv")}>CSV</button>
-            </div>
-          </div>
-        </details>
+      <div className="partner-service-filter" aria-label="Exportar referencias filtradas">
+        <button type="button" className="partner-filter-btn" disabled={filtered.length === 0} onClick={() => downloadPartnerExport(filtered, "xlsx")}>Excel (.xlsx)</button>
+        <button type="button" className="partner-filter-btn" disabled={filtered.length === 0} onClick={() => downloadPartnerExport(filtered, "csv")}>CSV</button>
       </div>
 
       {filtered.length === 0 ? (
