@@ -875,6 +875,19 @@ svg {
 .partner-filter-btn.is-active.is-follow_up{border-color:color-mix(in srgb, var(--pp-orange) 45%, var(--pp-border));background:color-mix(in srgb, var(--pp-orange) 10%, var(--pp-surface));color:var(--pp-orange)}
 .partner-filter-btn.is-active.is-approved{border-color:color-mix(in srgb, var(--pp-success) 45%, var(--pp-border));background:color-mix(in srgb, var(--pp-success) 10%, var(--pp-surface));color:var(--pp-success)}
 .partner-filter-btn.is-active.is-disqualified{border-color:color-mix(in srgb, var(--pp-danger) 45%, var(--pp-border));background:color-mix(in srgb, var(--pp-danger) 10%, var(--pp-surface));color:var(--pp-danger)}
+.partner-filter-controls{display:grid;gap:.65rem}
+.partner-primary-filters{display:flex;align-items:end;justify-content:space-between;gap:1rem}
+.partner-status-tabs{display:flex;min-width:0;flex:1;flex-wrap:nowrap;overflow-x:auto;gap:.4rem;scrollbar-width:none}
+.partner-status-tabs::-webkit-scrollbar{display:none}
+.partner-status-tabs .partner-filter-btn{flex:none}
+.partner-status-tabs .partner-filter-btn.is-active{border-color:#27634f;background:var(--pp-accent-soft);color:var(--pp-accent-text)}
+.partner-service-select{display:grid;min-width:190px;gap:.3rem;color:var(--pp-muted);font-size:.7rem;font-weight:650}
+.partner-service-select select{min-height:36px;border:1px solid var(--pp-border);border-radius:9px;background:var(--pp-surface);padding:0 .65rem;color:var(--pp-text);font:inherit;color-scheme:dark}
+.partner-more-filters{border:1px solid var(--pp-border);border-radius:11px;background:var(--pp-surface)}
+.partner-more-filters summary{min-height:40px;display:flex;align-items:center;cursor:pointer;padding:0 .8rem;color:var(--pp-muted);font-size:.75rem;font-weight:650}
+.partner-more-filters-panel{display:flex;align-items:end;flex-wrap:wrap;gap:.6rem;border-top:1px solid var(--pp-border);padding:.75rem .8rem}
+.partner-received-date-filter{min-width:170px}
+.partner-export-actions{display:flex;flex-wrap:wrap;gap:.4rem;margin-left:auto}
 .partner-app .partner-back{display:inline-flex;min-height:36px;align-items:center;gap:.35rem;margin-bottom:.25rem;color:var(--pp-muted);font-size:.78rem}
 .partner-app .partner-back:hover{color:var(--pp-text)}
 .partner-detail-head{display:grid;gap:.3rem}
@@ -975,6 +988,7 @@ svg {
   .partner-detail-call{width:min(100%,220px);align-self:start}
 }
 @media(max-width:1023px){.partner-detail-call{width:min(100%,420px)}}
+@media(max-width:639px){.partner-primary-filters{display:grid;gap:.65rem}.partner-status-tabs{width:100%;padding-bottom:.1rem}.partner-service-select{width:100%;min-width:0}.partner-more-filters-panel{display:grid}.partner-received-date-filter{min-width:0}.partner-export-actions{width:100%;margin-left:0}.partner-export-actions .partner-filter-btn{flex:1;justify-content:center}}
 /* Only the genuinely narrow tier (roughly 360px-class phones) drops to the
    tightest gutter and hides the brand tag/email outright; a standard
    ~390px phone stays in the base mobile padding above and simply lets the
