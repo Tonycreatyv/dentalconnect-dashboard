@@ -432,7 +432,6 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
   const [drawerEntry, setDrawerEntry] = useState<{ row: AssignmentRow; opportunity: ImmigrationOpportunity; queueStatus: PartnerQueueStatus; overdue: boolean } | null>(null);
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [quickView, setQuickView] = useState<"all" | "new" | "today" | "overdue" | "follow_up" | "closed">("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const entries = useMemo(() => {
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -452,9 +451,7 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
     const phone = resolvePartnerPhone(entry.row.referral_service_requests?.leads?.phone, entry.row.referral_service_requests?.leads?.channel_user_id) ?? "";
     const zip = entry.row.referral_service_requests?.postal_code ?? "";
     const matchesSearch = !search.trim() || `${entry.opportunity.leadName} ${phone} ${zip}`.toLowerCase().includes(search.trim().toLowerCase());
-    const closed = entry.row.work_status === "converted" || entry.row.work_status === "not_converted";
-    const matchesQuick = quickView === "all" || (quickView === "new" && entry.queueStatus === "new") || (quickView === "today" && dateFilterMatches(entry.row.assigned_at, "today", "", "")) || (quickView === "overdue" && entry.overdue) || (quickView === "follow_up" && entry.queueStatus === "follow_up") || (quickView === "closed" && closed);
-    return matchesSearch && matchesQuick && (statusFilter === "all" || entry.queueStatus === statusFilter) && (serviceFilter === "all" || service === serviceFilter) && dateFilterMatches(entry.row.assigned_at, dateFilter, dateStart, dateEnd);
+    return matchesSearch && (statusFilter === "all" || entry.queueStatus === statusFilter) && (serviceFilter === "all" || service === serviceFilter) && dateFilterMatches(entry.row.assigned_at, dateFilter, dateStart, dateEnd);
   }).sort((left, right) => {
     const cell = (entry: typeof left) => {
       const presentation = referralPresentation(entry.row, entry.opportunity);
@@ -465,7 +462,7 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
       return entry.row.assigned_at;
     };
     return cell(left).localeCompare(cell(right)) * (sort.direction === "asc" ? 1 : -1);
-  }), [configuredEntries, statusFilter, serviceFilter, dateFilter, dateStart, dateEnd, sort, search, quickView]);
+  }), [configuredEntries, statusFilter, serviceFilter, dateFilter, dateStart, dateEnd, sort, search]);
   // The secretary must be able to see there's overdue work without opening
   // the Seguimiento filter chip — a header-level count, always visible.
   const overdueCount = useMemo(() => countOverdueFollowUps(entries), [entries]);
@@ -476,7 +473,7 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
   const chooseDatePreset = (filter: Exclude<CaseDateFilter, "all" | "custom">) => { setDateFilter(filter); setDateStart(""); setDateEnd(""); setDatePickerOpen(false); };
   const chooseExactDate = (value: string) => { setDateStart(value); setDateEnd(value); setDateFilter(value ? "custom" : "all"); if (value) setDatePickerOpen(false); };
   const dateLabel = dateFilter === "today" ? "Hoy" : dateFilter === "yesterday" ? "Ayer" : dateFilter === "week" ? "Últimos 7 días" : dateFilter === "month" ? "Este mes" : dateFilter === "custom" && dateStart ? new Intl.DateTimeFormat("es-US", { dateStyle: "medium" }).format(new Date(`${dateStart}T12:00:00`)) : "Todas las fechas";
-  const resetFilters = () => { setStatusFilter("all"); setServiceFilter("all"); setDateFilter("all"); setDateStart(""); setDateEnd(""); setDatePickerOpen(false); setSearch(""); setQuickView("all"); };
+  const resetFilters = () => { setStatusFilter("all"); setServiceFilter("all"); setDateFilter("all"); setDateStart(""); setDateEnd(""); setDatePickerOpen(false); setSearch(""); };
   const exportRows: PartnerExportRow[] = filtered.map((entry) => ({
     customer: entry.opportunity.leadName,
     phone: formatPhoneForDisplay(resolvePartnerPhone(entry.row.referral_service_requests?.leads?.phone, entry.row.referral_service_requests?.leads?.channel_user_id)) ?? "",
@@ -504,23 +501,31 @@ function PartnerList({ partnerId, workspace }: { partnerId: string; workspace: R
       </div>
 
       <div className="partner-case-filterbar" aria-label="Filtros de casos">
-        <label className="partner-search-field">Buscar<input value={search} placeholder="Cliente, teléfono o ZIP" onChange={(event) => setSearch(event.target.value)} /></label>
-        <label>Estado<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as PartnerStatusFilter)}><option value="all">Todos</option><option value="new">Nuevos</option><option value="follow_up">Seguimiento</option><option value="approved">Aprobados</option><option value="disqualified">No calificó</option></select></label>
-        <label>Servicio<select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}><option value="all">Todos</option>{services.map((service) => <option key={service} value={service}>{service}</option>)}</select></label>
-        <div className="partner-date-filter">
-          <span className="partner-filter-label">Fecha recibida</span>
-          <button type="button" className="partner-date-trigger" aria-expanded={datePickerOpen} aria-controls="partner-date-picker" onClick={() => setDatePickerOpen((open) => !open)}><span aria-hidden="true">▣</span>{dateLabel}</button>
-          {datePickerOpen ? <div className="partner-date-popover" id="partner-date-picker">
-            <input aria-label="Elegir fecha exacta" type="date" value={dateFilter === "custom" ? dateStart : ""} onChange={(event) => chooseExactDate(event.target.value)} />
-            <div className="partner-date-presets" aria-label="Fechas rápidas">
-              <button type="button" onClick={() => chooseDatePreset("today")}>Hoy</button><button type="button" onClick={() => chooseDatePreset("yesterday")}>Ayer</button><button type="button" onClick={() => chooseDatePreset("week")}>Últimos 7 días</button><button type="button" onClick={() => chooseDatePreset("month")}>Este mes</button>
-            </div>
-          </div> : null}
+        <div className="partner-primary-filters">
+          <div className="partner-status-tabs" role="tablist" aria-label="Estado de los casos">
+            {([ ["all", "Todos"], ["new", "Nuevos"], ["follow_up", "Seguimiento"], ["approved", "Aprobados"], ["disqualified", "No calificó"] ] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={statusFilter === id} className={`partner-filter-btn${statusFilter === id ? " is-active" : ""}${id === "all" ? "" : ` is-${id}`}`} onClick={() => setStatusFilter(id)}>{label}</button>)}
+          </div>
+          <label className="partner-service-select">Servicio<select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}><option value="all">Todos</option>{services.map((service) => <option key={service} value={service}>{service}</option>)}</select></label>
         </div>
-        <button type="button" className="partner-filter-reset" onClick={resetFilters}>Limpiar filtros</button>
-        {workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").export_enabled ? <div className="partner-export-menu"><button type="button" onClick={() => downloadPartnerCases(new Blob([partnerCasesCsv(exportRows)], { type: "text/csv;charset=utf-8" }), "casos-filtrados.csv")}>CSV</button><button type="button" onClick={() => downloadPartnerCases(partnerCasesXlsx(exportRows), "casos-filtrados.xlsx")}>XLSX</button></div> : null}
+        <details className="partner-more-filters">
+          <summary>Más filtros</summary>
+          <div className="partner-more-filters-panel">
+            <label className="partner-search-field">Buscar<input value={search} placeholder="Cliente, teléfono o ZIP" onChange={(event) => setSearch(event.target.value)} /></label>
+            <div className="partner-date-filter">
+              <span className="partner-filter-label">Fecha recibida</span>
+              <button type="button" className="partner-date-trigger" aria-expanded={datePickerOpen} aria-controls="partner-date-picker" onClick={() => setDatePickerOpen((open) => !open)}><span aria-hidden="true">▣</span>{dateLabel}</button>
+              {datePickerOpen ? <div className="partner-date-popover" id="partner-date-picker">
+                <input aria-label="Elegir fecha exacta" type="date" value={dateFilter === "custom" ? dateStart : ""} onChange={(event) => chooseExactDate(event.target.value)} />
+                <div className="partner-date-presets" aria-label="Fechas rápidas">
+                  <button type="button" onClick={() => chooseDatePreset("today")}>Hoy</button><button type="button" onClick={() => chooseDatePreset("yesterday")}>Ayer</button><button type="button" onClick={() => chooseDatePreset("week")}>Últimos 7 días</button><button type="button" onClick={() => chooseDatePreset("month")}>Este mes</button>
+                </div>
+              </div> : null}
+            </div>
+            <button type="button" className="partner-filter-reset" onClick={resetFilters}>Limpiar filtros</button>
+            {workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").export_enabled ? <div className="partner-export-menu"><button type="button" onClick={() => downloadPartnerCases(new Blob([partnerCasesCsv(exportRows)], { type: "text/csv;charset=utf-8" }), "casos-filtrados.csv")}>CSV</button><button type="button" onClick={() => downloadPartnerCases(partnerCasesXlsx(exportRows), "casos-filtrados.xlsx")}>XLSX</button></div> : null}
+          </div>
+        </details>
       </div>
-      <div className="partner-quick-views" role="tablist" aria-label="Vistas rápidas">{([ ["all", "Todos"], ["new", "Nuevos"], ["today", "Hoy"], ["overdue", "Vencidos"], ["follow_up", "Seguimiento"], ["closed", "Cerrados"] ] as const).map(([id, label]) => <button key={id} type="button" className={quickView === id ? "is-active" : ""} onClick={() => setQuickView(id)}>{label}</button>)}</div>
       {selectedIds.size ? <div className="partner-selection-bar"><span>{selectedIds.size} seleccionados</span>{workspace.resolve(filtered[0]?.row.referral_service_requests?.service_id ?? "").export_enabled ? <button type="button" onClick={() => downloadPartnerCases(new Blob([partnerCasesCsv(exportRows.filter((_, index) => selectedIds.has(filtered[index]?.row.id ?? "")))], { type: "text/csv;charset=utf-8" }), "casos-seleccionados.csv")}>Exportar seleccionados</button> : null}</div> : null}
 
       {filtered.length === 0 ? (
