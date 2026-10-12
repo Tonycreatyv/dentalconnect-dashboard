@@ -491,9 +491,18 @@ function PartnerList({ partnerId }: { partnerId: string }) {
       </div>
 
       <div className="partner-work-summary" aria-label="Resumen de trabajo">
-        <span className="partner-work-metric"><strong>{newCount}</strong> Nuevos</span>
-        <span className="partner-work-metric"><strong>{followUpCount}</strong> Seguimientos</span>
-        <span className={`partner-work-metric${overdueCount > 0 ? " is-overdue" : ""}`}><strong>{overdueCount}</strong> Vencidos</span>
+        <div className="partner-work-metric is-new">
+          <span>Nuevos</span>
+          <strong>{newCount}</strong>
+        </div>
+        <div className="partner-work-metric is-follow-up">
+          <span>Seguimiento</span>
+          <strong>{followUpCount}</strong>
+        </div>
+        <div className={`partner-work-metric is-overdue${overdueCount > 0 ? " has-items" : ""}`}>
+          <span>Vencidos</span>
+          <strong>{overdueCount}</strong>
+        </div>
       </div>
 
       <div className="partner-filter-controls">

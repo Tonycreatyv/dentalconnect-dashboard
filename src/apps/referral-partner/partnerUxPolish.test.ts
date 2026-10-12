@@ -11,6 +11,8 @@ const styles = await Deno.readTextFile(new URL("../../index.css", import.meta.ur
 
 Deno.test("partner work filters keep the status tabs, service selector, and received date behind more filters", () => {
   assert(dashboard.indexOf("partner-work-summary") < dashboard.indexOf("partner-filter-controls"));
+  for (const metric of ["Nuevos", "Seguimiento", "Vencidos"]) assert(dashboard.includes(`<span>${metric}</span>`));
+  assert(dashboard.includes("partner-work-metric is-follow-up"));
   for (const label of ["Todos", "Nuevos", "Seguimiento", "Aprobados", "No calificó"]) assert(dashboard.includes(`label: \"${label}\"`));
   assert(dashboard.includes('className="partner-service-select"'));
   assert(dashboard.includes('<details className="partner-more-filters">'));
@@ -21,7 +23,8 @@ Deno.test("partner work filters keep the status tabs, service selector, and rece
 });
 
 Deno.test("partner filter controls are responsive without wrapping mobile status chips", () => {
+  assert(styles.includes(".partner-work-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))"));
   assert(styles.includes(".partner-status-tabs{display:flex;min-width:0;flex:1;flex-wrap:nowrap;overflow-x:auto"));
-  assert(styles.includes("@media(max-width:639px){.partner-primary-filters{display:grid"));
+  assert(styles.includes("@media(max-width:639px){.partner-work-summary{gap:.45rem}"));
   assert(styles.includes(".partner-service-select{width:100%;min-width:0}"));
 });
