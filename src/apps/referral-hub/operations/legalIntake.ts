@@ -18,6 +18,8 @@ export type LegalIntake = {
   postalCode: string | null;
   description: string;
   completedAt: string | null;
+  atFault: "YES" | "NO" | "UNSURE" | null;
+  currentlyDetained: "YES" | "NO" | null;
 };
 
 // DUI_CRIMINAL remains a legacy compatibility payload. New completions use
@@ -68,5 +70,7 @@ export function parseLegalIntake(state: unknown): LegalIntake | null {
     postalCode: typeof completed.postal_code === "string" ? completed.postal_code : null,
     description,
     completedAt: typeof completed.completed_at === "string" ? completed.completed_at : null,
+    atFault: completed.at_fault === "YES" || completed.at_fault === "NO" || completed.at_fault === "UNSURE" ? completed.at_fault : null,
+    currentlyDetained: completed.currently_detained === "YES" || completed.currently_detained === "NO" ? completed.currently_detained : null,
   };
 }

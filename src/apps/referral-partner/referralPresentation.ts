@@ -185,6 +185,11 @@ function fieldLabel(field: string, value: unknown): string | null {
   if (!raw) return null;
   if (INCIDENT_DATE_FIELDS.has(field)) return formatCompactIncidentDate(raw);
   const upper = raw.toUpperCase();
+  if (field === "at_fault") {
+    if (upper === "YES") return "Responsabilidad: Sí";
+    if (upper === "NO") return "Responsabilidad: No";
+    if (upper === "UNSURE") return "Responsabilidad: No estoy seguro/a";
+  }
   if (upper === "YES") return YES_LABELS[field] ?? "Sí";
   if (upper === "NO") return NO_LABELS[field] ?? "No";
   return label(raw);
@@ -197,7 +202,7 @@ const FIELDS_BY_TOPIC: Record<string, readonly string[]> = {
   ASYLUM: ["arrival_window", "fear_reason", "immigration_court_status"],
   U_VISA: ["crime_victim", "police_report", "law_enforcement_cooperation"],
   WORK_PERMIT: ["work_permit_request_type", "work_permit_basis", "work_permit_status"],
-  AUTO_ACCIDENT: ["accident_date", "received_medical_attention", "police_report"],
+  AUTO_ACCIDENT: ["accident_date", "at_fault", "received_medical_attention", "police_report"],
   DUI: ["dui_date", "chemical_test", "court_date_status"],
   CRIMINAL: ["criminal_charge", "court_date_status", "currently_detained"],
 };
@@ -236,7 +241,7 @@ export function buildIntakeSummary(
 ): string | null {
   const topicKey = text(topic)?.toUpperCase() ?? "";
   const omitIncidentDate = options?.omitIncidentDate ?? false;
-  const fields = (FIELDS_BY_TOPIC[topicKey] ?? []).filter(
+  const fields = [...new Set([...(FIELDS_BY_TOPIC[topicKey] ?? []), ...(text(intake.currently_detained) && topicKey !== "CRIMINAL" ? ["currently_detained"] : [])])].filter(
     (field) => !(omitIncidentDate && INCIDENT_DATE_FIELDS.has(field)),
   );
   const values = fields.map((field) => fieldLabel(field, intake[field])).filter((value): value is string => Boolean(value));

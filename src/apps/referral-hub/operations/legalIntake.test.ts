@@ -52,6 +52,17 @@ Deno.test("optional postal_code is honestly null when the customer skipped it (t
   assertEquals(intake?.postalCode, null);
 });
 
+Deno.test("parseLegalIntake preserves the optional Flow intake signals without breaking historical completions", () => {
+  const accident = parseLegalIntake({ collected: { luis_legal_last_completed: { intake_type: "AUTO_ACCIDENT", description: "Choque", at_fault: "UNSURE" } } });
+  const detained = parseLegalIntake({ collected: { luis_legal_last_completed: { intake_type: "IMMIGRATION", description: "Necesito ayuda", currently_detained: "YES" } } });
+  const historical = parseLegalIntake(realImmigrationState());
+  assertEquals(accident?.atFault, "UNSURE");
+  assertEquals(accident?.currentlyDetained, null);
+  assertEquals(detained?.currentlyDetained, "YES");
+  assertEquals(historical?.atFault, null);
+  assertEquals(historical?.currentlyDetained, null);
+});
+
 Deno.test("LEGAL_INTAKE_SERVICE_ID maps new legal intake types to distinct canonical service IDs", () => {
   assertEquals(LEGAL_INTAKE_SERVICE_ID.IMMIGRATION, "luis_inmigracion");
   assertEquals(LEGAL_INTAKE_SERVICE_ID.AUTO_ACCIDENT, "luis_accidente");
